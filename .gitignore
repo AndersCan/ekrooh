@@ -1,0 +1,52 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+**/build/
+.cxx/
+*.bundle
+*.zip
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Bare
+prebuilds/
+
+# External native build artifacts
+.externalNativeBuild
+.cxx
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+
+# Android Studio captures
+captures/
+
+# Hprof files
+*.hprof
+
+# Built variants
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Signing files
+*.jks
+*.keystore
+*.pk8
+*.pem
+google-services.json
