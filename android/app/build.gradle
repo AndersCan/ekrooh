@@ -1,0 +1,127 @@
+plugins {
+  id "com.android.application"
+  id "org.jetbrains.kotlin.android"
+  id "com.google.gms.google-services" apply false
+}
+
+android {
+  namespace = "to.holepunch.bare.android"
+  compileSdk = 35
+  ndkVersion = "27.2.12479018"
+
+  defaultConfig {
+    applicationId = "to.holepunch.bare.android"
+    minSdk = 29
+    targetSdk = 35
+    versionCode = 1
+    versionName = "1.0"
+  }
+
+  compileOptions {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = "17"
+  }
+
+  sourceSets {
+    main {
+      jniLibs.srcDirs "src/main/addons", "../../prebuilds/android/bare-kit/jni"
+    }
+  }
+}
+
+if (file("google-services.json").exists()) {
+  apply plugin: "com.google.gms.google-services"
+}
+
+// Helper to get a robust PATH including common locations for node, npm, and bun
+def getExtendedPath() {
+  def paths = [
+    "/usr/local/bin",
+    "/opt/homebrew/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+    "${System.getProperty('user.home')}/.bun/bin"
+  ]
+  
+  // Add NVM (Node Version Manager) paths if they exist
+  def nvmDir = new File(System.getProperty('user.home'), ".nvm/versions/node")
+  if (nvmDir.exists()) {
+    nvmDir.listFiles().each { dir ->
+      if (dir.isDirectory()) {
+        def binDir = new File(dir, "bin")
+        if (binDir.exists()) paths.add(binDir.absolutePath)
+      }
+    }
+  }
+
+  def systemPath = System.getenv("PATH")
+  if (systemPath) {
+    paths.addAll(systemPath.split(File.pathSeparator))
+  }
+  
+  return paths.unique().join(File.pathSeparator)
+}
+
+// Helper to configure an Exec task to run through a shell with the extended PATH
+def configureExec(Exec task, String command) {
+  def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+  task.environment "PATH", getExtendedPath()
+  task.workingDir "../../"
+  
+  if (isWindows) {
+    task.commandLine "cmd", "/c", command
+  } else {
+    // Using bash -c ensures the command is executed in a shell environment
+    // where the PATH we set is correctly used to resolve executables.
+    task.commandLine "bash", "-c", command
+  }
+}
+
+tasks.register("link", Exec) {
+  def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+  def bin = isWindows ? "node_modules\\.bin\\bare-link.cmd" : "node_modules/.bin/bare-link"
+  configureExec(it, "${bin} --preset android --needs libbare-kit.so --out android/app/src/main/addons")
+}
+
+tasks.register("buildBareJs", Exec) {
+  def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+  def npm = isWindows ? "npm.cmd" : "npm"
+  configureExec(it, "${npm} run build:bare")
+}
+
+tasks.register("packApp", Exec) {
+  dependsOn "buildBareJs"
+  def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+  def bin = isWindows ? "node_modules\\.bin\\bare-pack.cmd" : "node_modules/.bin/bare-pack"
+  configureExec(it, "${bin} --preset android --out android/app/src/main/assets/app.bundle core/app.gen.js")
+}
+
+tasks.register("packPush", Exec) {
+  dependsOn "buildBareJs"
+  def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+  def bin = isWindows ? "node_modules\\.bin\\bare-pack.cmd" : "node_modules/.bin/bare-pack"
+  configureExec(it, "${bin} --preset android --out android/app/src/main/assets/push.bundle.mjs core/push.gen.js")
+}
+
+tasks.register("pack") {
+  dependsOn packApp, packPush
+}
+
+preBuild.dependsOn link, pack
+
+dependencies {
+  implementation "androidx.appcompat:appcompat:1.7.0"
+  implementation "androidx.core:core-ktx:1.13.1"
+  implementation "com.google.android.material:material:1.12.0"
+  implementation "androidx.constraintlayout:constraintlayout:2.1.4"
+
+  api fileTree(dir: "../../prebuilds/android", include: ["bare-kit/classes.jar"])
+  implementation platform("com.google.firebase:firebase-bom:33.10.0")
+  implementation "com.google.firebase:firebase-messaging"
+}

@@ -1,31 +1,33 @@
 {
   "private": true,
   "name": "bare-android",
-  "xtype": "module",
   "version": "1.0.0",
+  "type": "module",
   "description": "Example of embedding Bare in an Android application",
   "scripts": {
-    "test": "prettier . --check"
+    "lint": "prettier . --check",
+    "dev": "vite",
+    "bare:dev": "npm run build:bare && bare core/app.gen.js",
+    "build": "vite build",
+    "build:bare": "bun build --packages=external core/app.ts --outfile=core/app.gen.js && bun build --packages=external core/push.ts --outfile=core/push.gen.js"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/holepunchto/bare-android.git"
-  },
-  "author": "Holepunch",
-  "license": "Apache-2.0",
-  "bugs": {
-    "url": "https://github.com/holepunchto/bare-android/issues"
-  },
-  "homepage": "https://github.com/holepunchto/bare-android#readme",
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^25.5.0",
+    "bare": "^1.28.0",
     "bare-link": "^1.2.0",
     "bare-pack": "^1.3.0",
+    "bare-ws": "^2.1.0",
     "prettier": "^3.4.2",
-    "prettier-config-holepunch": "^2.0.0"
+    "prettier-config-holepunch": "^2.0.0",
+    "vite": "^6.0.0"
   },
   "dependencies": {
     "bare-buffer": "^3.6.0",
+    "bare-env": "^3.0.0",
     "bare-fs": "^4.5.5",
-    "hyperswarm": "^4.17.0"
+    "bare-sidecar": "^0.3.0",
+    "hyperswarm": "^4.17.0",
+    "ws": "^8.19.0"
   }
 }

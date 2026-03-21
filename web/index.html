@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bare Android</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    button { padding: 10px; font-size: 16px; }
+    pre { background: #eee; padding: 10px; white-space: pre-wrap; word-wrap: break-word; }
+  </style>
+</head>
+<body>
+  <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px;">
+    <label>
+      Topic:
+      <input id="topic" value="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" style="width: 320px;" />
+    </label>
+    <button id="joinBtn">Join Swarm</button>
+  </div>
+
+  <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
+    <input id="message" placeholder="Type a message…" style="flex: 1; padding: 10px; font-size: 16px;" />
+    <button id="sendBtn">Send</button>
+  </div>
+
+  <pre id="log"></pre>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -15,6 +15,7 @@ yarn-error.log*
 
 # Bare
 prebuilds/
+android/prebuilds/
 
 # External native build artifacts
 .externalNativeBuild
@@ -50,3 +51,11 @@ captures/
 *.pk8
 *.pem
 google-services.json
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+android/app/src/main/addons/
