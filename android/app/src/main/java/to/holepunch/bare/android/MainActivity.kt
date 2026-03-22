@@ -30,9 +30,9 @@ class MainActivity : AppCompatActivity() {
         
         // 2. Start Worklet
         try {
-            val bundleStream = assets.open("app.bundle")
+            val bundleStream = assets.open("main.core.bundle")
             Log.i("BARE_KOTLIN", "Starting worklet...")
-            worklet.start("/app.bundle", bundleStream, null)
+            worklet.start("/main.core.bundle", bundleStream, null)
             
             // 3. Initialize IPC *AFTER* worklet.start() to avoid "Bad file descriptor"
             ipc = IPC(worklet)

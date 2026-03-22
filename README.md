@@ -4,19 +4,19 @@ A clean, organized project structure for developing Bare-based Android applicati
 
 ## 📂 File Structure
 
-*   **`core/`**: Contains shared business logic written in TypeScript.
-*   **`web/`**: Contains the web-based user interface (HTML/JS/Vite).
-*   **`android/`**: A self-contained Android project.
-    *   **`app/`**: The main Android module (Kotlin).
-    *   **`gradle/`**: Android-specific build configuration and wrapper.
-*   **`prebuilds/`**: Contains the Bare Kit prebuilds for different platforms.
+- **`core/`**: Contains shared business logic written in TypeScript.
+- **`web/`**: Contains the web-based user interface (HTML/JS/Vite).
+- **`android/`**: A self-contained Android project.
+  - **`app/`**: The main Android module (Kotlin).
+  - **`gradle/`**: Android-specific build configuration and wrapper.
+- **`prebuilds/`**: Contains the Bare Kit prebuilds for different platforms.
 
 ## 🛠 Build Process
 
 The project uses a multi-step build process to integrate JS/TS into the Android app:
 
 1.  **Transpile Core**: `core/` TypeScript files are bundled into `.gen.js` files using `bun`.
-2.  **Pack JS**: `bare-pack` bundles the transpiled Core logic into `app.bundle` and `push.bundle.mjs` for Android assets.
+2.  **Pack JS**: `bare-pack` bundles the transpiled Core logic into `main.core.bundle` and `push.bundle.mjs` for Android assets.
 3.  **Link Addons**: `bare-link` sets up native dependencies in `app/src/main/addons`.
 4.  **Build Web**: `vite build` bundles the `web/` UI into Android's `assets/` folder.
 5.  **Compile Android**: The standard Gradle process builds the APK/AAB.
@@ -38,6 +38,7 @@ Native addons will be linked into `android/app/src/main/addons/` as part of the 
 ### How to Run
 
 To build the project from the root:
+
 ```bash
 # Build the JS/TS and Web components
 npm run build

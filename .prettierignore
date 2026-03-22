@@ -1,0 +1,6 @@
+prebuilds/*
+build/*
+.gradle/
+.idea/
+**/*.bundle
+android/app/src/main/assets/**/*

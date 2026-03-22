@@ -3,22 +3,22 @@
  */
 
 interface BareIPC extends NodeJS.EventEmitter {
-  read(n?: number): Buffer | null
-  write(data: Buffer | string): boolean
-  resume?(): void
-  pause?(): void
+  read(n?: number): Buffer | null;
+  write(data: Buffer | string): boolean;
+  resume?(): void;
+  pause?(): void;
 }
 
 interface BareKitGlobal {
-  IPC: BareIPC
+  IPC: BareIPC;
 }
 
 interface BareGlobal {
-  IPC: BareIPC
+  IPC: BareIPC;
 }
 
-declare const BareKit: BareKitGlobal | undefined
-declare const Bare: BareGlobal
+declare const BareKit: BareKitGlobal | undefined;
+declare const Bare: BareGlobal;
 
 /**
  * Returns the active IPC channel.
@@ -26,9 +26,9 @@ declare const Bare: BareGlobal
  * In Bare (Sidecar), it uses Bare.IPC.
  */
 export function getIPC(): BareIPC {
-  const IPC = typeof BareKit !== 'undefined' ? BareKit.IPC : Bare.IPC
+  const IPC = typeof BareKit !== 'undefined' ? BareKit.IPC : Bare.IPC;
   if (IPC && typeof IPC.resume === 'function') {
-    IPC.resume()
+    IPC.resume();
   }
-  return IPC
+  return IPC;
 }

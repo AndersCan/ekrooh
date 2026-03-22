@@ -4,10 +4,14 @@ test('app can join swarm and send messages', async () => {
   // Connect to the first available Android device (e.g., the virtual device)
   const [device] = await android.devices();
   if (!device) {
-    throw new Error('No Android device found. Make sure your emulator is running.');
+    throw new Error(
+      'No Android device found. Make sure your emulator is running.',
+    );
   }
 
-  console.log(`Testing on device: ${await device.model()} (${await device.serial()})`);
+  console.log(
+    `Testing on device: ${await device.model()} (${await device.serial()})`,
+  );
 
   // Force-stop and launch the application
   const appId = 'to.holepunch.bare.android';

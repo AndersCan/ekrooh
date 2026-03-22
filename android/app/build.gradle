@@ -99,7 +99,7 @@ tasks.register("packApp", Exec) {
   dependsOn "buildBareJs"
   def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
   def bin = isWindows ? "node_modules\\.bin\\bare-pack.cmd" : "node_modules/.bin/bare-pack"
-  configureExec(it, "${bin} --preset android --out android/app/src/main/assets/app.bundle core/app.gen.js")
+  configureExec(it, "${bin} --preset android --out android/app/src/main/assets/main.core.bundle core/main.core.gen.js")
 }
 
 tasks.register("packPush", Exec) {

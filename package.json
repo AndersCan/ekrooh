@@ -5,11 +5,13 @@
   "type": "module",
   "description": "Example of embedding Bare in an Android application",
   "scripts": {
-    "lint": "prettier . --check",
+    "lint": "prettier . --fix",
     "dev": "vite",
-    "bare:dev": "npm run build:bare && bare core/app.gen.js",
+    "bare:dev": "npm run build:bare:app -- --watch",
     "build": "vite build",
-    "build:bare": "bun build --packages=external core/app.ts --outfile=core/app.gen.js && bun build --packages=external core/push.ts --outfile=core/push.gen.js"
+    "build:bare": "concurrently \"npm run build:bare:*\"",
+    "build:bare:app": "bun build --packages=external core/main.core.ts --outfile=core/main.core.gen.js",
+    "build:bare:push": "bun build --packages=external core/push.ts --outfile=core/push.gen.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
@@ -18,6 +20,7 @@
     "bare-link": "^1.2.0",
     "bare-pack": "^1.3.0",
     "bare-ws": "^2.1.0",
+    "concurrently": "^9.2.1",
     "prettier": "^3.4.2",
     "prettier-config-holepunch": "^2.0.0",
     "vite": "^6.0.0"
