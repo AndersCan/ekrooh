@@ -1,23 +1,30 @@
 import ws from 'bare-ws';
+import { MessageType } from '../messages';
+import { BareRuntimeContext } from '../messages/create-bare-runtime-context';
 
-export function startWebSocketServer() {
-  console.log('Starting WebSocket server...');
+export function startWebSocketServer(context: BareRuntimeContext) {
+  const { protocol, pluginRouter } = context;
   const server = new ws.Server({ port: 8080 });
 
-  server.on('connection', (ws) => {
-    console.log('WebSocket connection established');
-    ws.emit('connected', { message: 'Welcome to the WebSocket server!' });
-    ws.on('data', (data) => {
-      console.log('Received message:', data.toString());
-      // Echo the message back to the client
-      ws.write(`Server-Echo: ${data.toString()}`);
-      // ws.end("SORRY, THIS IS A TEST MESSAGE FROM THE SERVER");
-    });
+  server.on('connection', (socket) => {
+    socket.on('data', async (data) => {
+      try {
+        const len = data.length ?? data.byteLength ?? 0;
+        if (len === 0) return;
 
-    ws.on('close', () => {
-      console.log('WebSocket connection closed');
+        const parsed = protocol.decode(data);
+        const header = parsed.header;
+
+        const pluginResponse = await pluginRouter.route(header, parsed.payload);
+        if (pluginResponse) {
+          socket.write(protocol.encode(MessageType.ENVELOPE, pluginResponse, null));
+          return;
+        }
+
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('Error handling WebSocket message:', message);
+      }
     });
   });
-
-  console.log('WebSocket server is running on ws://localhost:8080');
 }
