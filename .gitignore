@@ -53,9 +53,14 @@ captures/
 google-services.json
 
 # Playwright
+.playwright-browsers/
 /test-results/
 /playwright-report/
+playwright-report/
+test-results/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
 android/app/src/main/addons/
+android/app/src/main/assets/assets/main-*.js
+android/app/src/main/assets/assets/main-*.css

@@ -1,7 +1,6 @@
 plugins {
   id "com.android.application"
   id "org.jetbrains.kotlin.android"
-  id "com.google.gms.google-services" apply false
 }
 
 android {
@@ -31,13 +30,15 @@ android {
       jniLibs.srcDirs "src/main/addons", "../../prebuilds/android/bare-kit/jni"
     }
   }
+
+  packaging {
+    jniLibs {
+      useLegacyPackaging = true
+    }
+  }
 }
 
-if (file("google-services.json").exists()) {
-  apply plugin: "com.google.gms.google-services"
-}
-
-// Helper to get a robust PATH including common locations for node, npm, and bun
+// Helper to get a robust PATH including common locations for node and npm
 def getExtendedPath() {
   def paths = [
     "/usr/local/bin",
@@ -45,8 +46,7 @@ def getExtendedPath() {
     "/usr/bin",
     "/bin",
     "/usr/sbin",
-    "/sbin",
-    "${System.getProperty('user.home')}/.bun/bin"
+    "/sbin"
   ]
   
   // Add NVM (Node Version Manager) paths if they exist
@@ -95,6 +95,18 @@ tasks.register("buildBareJs", Exec) {
   configureExec(it, "${npm} run build:bare")
 }
 
+tasks.register("cleanWebAssets", Delete) {
+  delete fileTree("src/main/assets/assets") {
+    include "main-*.js", "main-*.css"
+  }
+}
+
+tasks.register("buildWebAssets", Exec) {
+  def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+  def npm = isWindows ? "npm.cmd" : "npm"
+  configureExec(it, "${npm} run build:web")
+}
+
 tasks.register("packApp", Exec) {
   dependsOn "buildBareJs"
   def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
@@ -102,26 +114,18 @@ tasks.register("packApp", Exec) {
   configureExec(it, "${bin} --preset android --out android/app/src/main/assets/main.core.bundle core/main.core.gen.js")
 }
 
-tasks.register("packPush", Exec) {
-  dependsOn "buildBareJs"
-  def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
-  def bin = isWindows ? "node_modules\\.bin\\bare-pack.cmd" : "node_modules/.bin/bare-pack"
-  configureExec(it, "${bin} --preset android --out android/app/src/main/assets/push.bundle.mjs core/push.gen.js")
-}
-
 tasks.register("pack") {
-  dependsOn packApp, packPush
+  dependsOn packApp
 }
 
-preBuild.dependsOn link, pack
+preBuild.dependsOn link, buildWebAssets, pack
 
 dependencies {
   implementation "androidx.appcompat:appcompat:1.7.0"
   implementation "androidx.core:core-ktx:1.13.1"
   implementation "com.google.android.material:material:1.12.0"
   implementation "androidx.constraintlayout:constraintlayout:2.1.4"
+  implementation "androidx.webkit:webkit:1.15.0"
 
   api fileTree(dir: "../../prebuilds/android", include: ["bare-kit/classes.jar"])
-  implementation platform("com.google.firebase:firebase-bom:33.10.0")
-  implementation "com.google.firebase:firebase-messaging"
 }

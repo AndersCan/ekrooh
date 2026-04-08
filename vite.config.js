@@ -1,29 +1,31 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
-import barePlugin from './vite-plugin-bare.js';
+import { readdirSync, rmSync } from 'fs';
+import tailwindcss from '@tailwindcss/vite';
+
+const androidAssetChunkDir = resolve(__dirname, 'android/app/src/main/assets/assets');
+
+function cleanAndroidHashedAssets() {
+  return {
+    name: 'clean-android-hashed-assets',
+    buildStart() {
+      try {
+        for (const entry of readdirSync(androidAssetChunkDir, { withFileTypes: true })) {
+          if (!entry.isFile()) continue;
+          if (!/^main-.*\.(js|css)$/.test(entry.name)) continue;
+          rmSync(resolve(androidAssetChunkDir, entry.name), { force: true });
+        }
+      } catch {
+        // Ignore missing assets directory on first build.
+      }
+    },
+  };
+}
 
 export default defineConfig({
   root: 'web',
   base: './',
-  plugins: [
-    // barePlugin(),
-    // {
-    //   name: 'direct-bare-bridge',
-    //   apply: 'serve',
-    //   transformIndexHtml(html) {
-    //     return html.replace(
-    //       '</head>',
-    //       `<script>
-    //         (function() {
-    //           // Connect DIRECTLY to the Bare process (which will act as a server)
-    //           // This is kept for compatibility or fallback, but the new HMR bridge is preferred for dev
-    //           window.onBareEvent && console.log('✅ Legacy bridge ready');
-    //         })();
-    //       </script></head>`
-    //     )
-    //   }
-    // }
-  ],
+  plugins: [tailwindcss(), cleanAndroidHashedAssets()],
   build: {
     outDir: '../android/app/src/main/assets',
     emptyOutDir: false,
