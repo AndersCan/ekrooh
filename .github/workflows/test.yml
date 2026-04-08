@@ -3,9 +3,15 @@ on:
   push:
     branches:
       - main
+      - master
   pull_request:
     branches:
       - main
+      - master
+
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -21,18 +27,33 @@ jobs:
     name: ${{ matrix.host }}-${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
+          cache: npm
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
-      - run: npm install
-      - run: |
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: tools platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Fetch Bare Kit prebuilds
+        run: |
           gh release download --repo holepunchto/bare-kit v1.9.0
-          unzip prebuilds.zip "android/*" -d prebuilds/
-          mv prebuilds/android/bare-kit app/libs/
+          unzip -o prebuilds.zip "android/*" -d prebuilds/
         env:
           GH_TOKEN: ${{ github.token }}
-      - run: ./gradlew build
+
+      - name: Build JS and web assets for Android
+        run: npm run build
+
+      - name: Gradle build
+        run: ./gradlew build

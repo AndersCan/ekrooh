@@ -1,12 +1,20 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { defineConfig, devices } from '@playwright/test';
 
+const configDir = path.dirname(fileURLToPath(import.meta.url));
+
 /**
- * Read environment variables from file.
- * https://github.com/motdotla/dotenv
+ * Hermetic browser directory under the repo (gitignored). Always set this path
+ * here so it matches `scripts/playwright-local-browsers.mjs` even if the parent
+ * environment preset PLAYWRIGHT_BROWSERS_PATH (e.g. Cursor sandbox) to another
+ * location — note that playwright-core reads this env when it first loads, so
+ * npm scripts must run via that wrapper before the CLI starts.
+ *
+ * @see https://playwright.dev/docs/browsers#hermetic-install
  */
-// import dotenv from 'dotenv';
-// import path from 'path';
-// dotenv.config({ path: path.resolve(__dirname, '.env') });
+process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(configDir, '.playwright-browsers');
 
 /**
  * See https://playwright.dev/docs/test-configuration.
@@ -25,8 +33,7 @@ export default defineConfig({
   reporter: 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
-    /* Base URL to use in actions like `await page.goto('')`. */
-    // baseURL: 'http://localhost:3000',
+    baseURL: 'http://127.0.0.1:4173',
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
@@ -70,10 +77,12 @@ export default defineConfig({
     // },
   ],
 
-  /* Run your local dev server before starting the tests */
-  // webServer: {
-  //   command: 'npm run start',
-  //   url: 'http://localhost:3000',
-  //   reuseExistingServer: !process.env.CI,
-  // },
+  webServer: {
+    command: 'npm run dev:e2e',
+    url: 'http://127.0.0.1:4173',
+    reuseExistingServer: !process.env.CI,
+    env: {
+      VITE_TRANSPORT_MODE: 'mock',
+    },
+  },
 });
