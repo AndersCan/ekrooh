@@ -61,6 +61,10 @@ test-results/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
-android/app/src/main/addons/
-android/app/src/main/assets/assets/main-*.js
-android/app/src/main/assets/assets/main-*.css
+
+# Vite+ tooling
+.vite-hooks/
+examples/android-app/src/main/addons/
+examples/android-app/src/main/assets/index.html
+examples/android-app/src/main/assets/assets/main-*.js
+examples/android-app/src/main/assets/assets/main-*.css

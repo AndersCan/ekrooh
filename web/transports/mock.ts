@@ -2,7 +2,7 @@ import { MessageType, WireMessage } from '../../core/messages';
 import {
   createHealthInvokeHandlers,
   type MockInvokeHandler,
-} from '../mocks/health-mock';
+} from './mock-handlers';
 import { MessageTransport } from '../websocket-client';
 
 const mockInvokeHandlers: Record<string, MockInvokeHandler> = {

@@ -1,38 +1,33 @@
-import { defineConfig } from 'vite';
-import { resolve } from 'path';
-import { readdirSync, rmSync } from 'fs';
-import tailwindcss from '@tailwindcss/vite';
-
-const androidAssetChunkDir = resolve(__dirname, 'android/app/src/main/assets/assets');
-
-function cleanAndroidHashedAssets() {
-  return {
-    name: 'clean-android-hashed-assets',
-    buildStart() {
-      try {
-        for (const entry of readdirSync(androidAssetChunkDir, { withFileTypes: true })) {
-          if (!entry.isFile()) continue;
-          if (!/^main-.*\.(js|css)$/.test(entry.name)) continue;
-          rmSync(resolve(androidAssetChunkDir, entry.name), { force: true });
-        }
-      } catch {
-        // Ignore missing assets directory on first build.
-      }
-    },
-  };
-}
+import { defineConfig } from 'vite-plus';
 
 export default defineConfig({
-  root: 'web',
-  base: './',
-  plugins: [tailwindcss(), cleanAndroidHashedAssets()],
-  build: {
-    outDir: '../android/app/src/main/assets',
-    emptyOutDir: false,
-    rollupOptions: {
-      input: {
-        main: resolve(__dirname, 'web/index.html'),
-      },
-    },
+  staged: {
+    '*': 'vp check --fix',
+  },
+  lint: {
+    jsPlugins: [{ name: 'vite-plus', specifier: 'vite-plus/oxlint-plugin' }],
+    rules: { 'vite-plus/prefer-vite-plus-imports': 'error' },
+    options: { typeAware: true, typeCheck: true },
+  },
+  fmt: {
+    trailingComma: 'all',
+    tabWidth: 2,
+    semi: true,
+    singleQuote: true,
+    printWidth: 80,
+    sortPackageJson: false,
+    sortTailwindcss: {},
+    ignorePatterns: [
+      'prebuilds/*',
+      'build/*',
+      '.gradle/',
+      '.idea/',
+      '**/*.bundle',
+      'examples/android-app/src/main/assets/**/*',
+    ],
+  },
+  test: {
+    root: '.',
+    include: ['**/*.test.ts'],
   },
 });

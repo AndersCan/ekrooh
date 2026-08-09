@@ -193,7 +193,9 @@ function parseAndValidateHeader(headerJson: string): MessageHeader {
   throw new Error(`Unsupported header type: ${String(header.type)}`);
 }
 
-function isValidPluginHeaderFields(header: Record<string, unknown>): boolean {
+function isValidPluginHeaderFields(
+  header: Record<string, unknown>,
+): header is Record<string, unknown> & { pluginId: string; event: string } {
   return (
     typeof header.pluginId === 'string' && typeof header.event === 'string'
   );

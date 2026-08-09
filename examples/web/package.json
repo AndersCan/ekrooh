@@ -1,0 +1,17 @@
+{
+  "name": "@less/bare-example-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Reference web UI for @less/bare (Vite + lit-html + nanostores + Tailwind).",
+  "dependencies": {
+    "@less/bare": "file:../..",
+    "@nanostores/router": "^1.0.0",
+    "lit-html": "^3.3.2",
+    "nanostores": "^1.2.0",
+    "tailwindcss": "^4.2.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3"
+  }
+}

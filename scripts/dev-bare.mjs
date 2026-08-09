@@ -51,7 +51,9 @@ async function startBare() {
 
   bareProcess.on('exit', (code, signal) => {
     if (bareProcess && code !== 0 && !shuttingDown) {
-      log(`Bare exited unexpectedly (code=${code}, signal=${signal ?? 'none'})`);
+      log(
+        `Bare exited unexpectedly (code=${code}, signal=${signal ?? 'none'})`,
+      );
     }
   });
 }
@@ -92,7 +94,9 @@ async function main() {
   });
 
   await buildContext.watch();
-  log('Watching core/main.core.ts and restarting Bare after successful rebuilds.');
+  log(
+    'Watching core/main.core.ts and restarting Bare after successful rebuilds.',
+  );
 
   const shutdown = async () => {
     if (shuttingDown) return;

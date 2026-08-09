@@ -11,7 +11,8 @@ import type {
 
 function toUint8Array(data: Uint8Array | ArrayBuffer | Buffer): Uint8Array {
   if (data instanceof Uint8Array) return data;
-  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(data)) return new Uint8Array(data);
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(data))
+    return new Uint8Array(data);
   return new Uint8Array(data);
 }
 
@@ -36,7 +37,10 @@ function writeEncoded(ipc: BareIpcLike, bytes: Uint8Array) {
   }
 }
 
-export function createHostIpcBridge(config: { ipc: BareIpcLike; protocol: MessageProtocol }) {
+export function createHostIpcBridge(config: {
+  ipc: BareIpcLike;
+  protocol: MessageProtocol;
+}) {
   const { ipc, protocol } = config;
   const pending = new Map<string, Pending>();
 
@@ -48,7 +52,11 @@ export function createHostIpcBridge(config: { ipc: BareIpcLike; protocol: Messag
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(requestId);
-        reject(new Error(`Host IPC timeout waiting for ${String(expectedType)} (${requestId})`));
+        reject(
+          new Error(
+            `Host IPC timeout waiting for ${String(expectedType)} (${requestId})`,
+          ),
+        );
       }, timeoutMs);
       pending.set(requestId, {
         timer,
@@ -59,14 +67,20 @@ export function createHostIpcBridge(config: { ipc: BareIpcLike; protocol: Messag
             resolve(h as T);
             return;
           }
-          reject(new Error(`Unexpected host response type ${h.type}, expected ${String(expectedType)}`));
+          reject(
+            new Error(
+              `Unexpected host response type ${h.type}, expected ${String(expectedType)}`,
+            ),
+          );
         },
       });
     });
   }
 
   return {
-    tryConsumeDownstreamFromHost(raw: Uint8Array | ArrayBuffer | Buffer): boolean {
+    tryConsumeDownstreamFromHost(
+      raw: Uint8Array | ArrayBuffer | Buffer,
+    ): boolean {
       let msg;
       try {
         msg = protocol.decode(toUint8Array(raw));
@@ -74,7 +88,10 @@ export function createHostIpcBridge(config: { ipc: BareIpcLike; protocol: Messag
         return false;
       }
       const h = msg.header;
-      if (h.type !== 'HOST_CAPABILITIES_RESPONSE' && h.type !== 'HOST_INVOKE_RESPONSE') {
+      if (
+        h.type !== 'HOST_CAPABILITIES_RESPONSE' &&
+        h.type !== 'HOST_INVOKE_RESPONSE'
+      ) {
         return false;
       }
       const id = h.requestId;
@@ -108,7 +125,11 @@ export function createHostIpcBridge(config: { ipc: BareIpcLike; protocol: Messag
       const requestId = header.requestId;
       if (!requestId) return null;
 
-      const promise = waitFor<HostInvokeResponseHeader>(requestId, 'HOST_INVOKE_RESPONSE', timeoutMs);
+      const promise = waitFor<HostInvokeResponseHeader>(
+        requestId,
+        'HOST_INVOKE_RESPONSE',
+        timeoutMs,
+      );
       const hostHeader = {
         type: 'HOST_INVOKE_REQUEST' as const,
         requestId,
@@ -116,7 +137,10 @@ export function createHostIpcBridge(config: { ipc: BareIpcLike; protocol: Messag
         event: header.event,
         args: header.args,
       };
-      writeEncoded(ipc, protocol.encode(MessageType.ENVELOPE, hostHeader, payload));
+      writeEncoded(
+        ipc,
+        protocol.encode(MessageType.ENVELOPE, hostHeader, payload),
+      );
       const hostResp = await promise;
       const out: PluginInvokeResponseHeader = {
         type: 'INVOKE_RESPONSE',

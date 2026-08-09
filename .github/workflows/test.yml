@@ -13,7 +13,27 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  js:
+    name: JS (check + unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format, lint and type-check
+        run: npm run check
+
+      - name: Unit tests
+        run: npm run test:unit
+
+  android:
     strategy:
       matrix:
         include:
@@ -46,14 +66,12 @@ jobs:
         run: npm ci
 
       - name: Fetch Bare Kit prebuilds
-        run: |
-          gh release download --repo holepunchto/bare-kit v1.9.0
-          unzip -o prebuilds.zip "android/*" -d prebuilds/
+        run: npm run prebuilds
         env:
           GH_TOKEN: ${{ github.token }}
 
       - name: Build JS and web assets for Android
         run: npm run build
 
-      - name: Gradle build
+      - name: Gradle build (includes host JUnit tests)
         run: ./gradlew build

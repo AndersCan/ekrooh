@@ -1,0 +1,163 @@
+# Vision
+
+> This document is the source of truth for what this project **is** and what it
+> **is not**. It is written primarily for AI agents that develop and maintain
+> this repository, and secondarily for human contributors. If a decision in the
+> codebase conflicts with this document, this document wins; change the code,
+> not the vision.
+
+## What this is
+
+**`@less/bare`** is a framework that provides the **boring bootstrap** for
+cross-platform apps built on the Bare runtime (the holepunch platform). It is
+the plumbing — and only the plumbing:
+
+- a binary **wire protocol** (`core/messages`): codec, plugin router, RPC
+  messenger
+- **plugin contracts** (`plugins`): namespaced events, manifests, deterministic
+  errors
+- **transports** (`web/transports`): WebSocket, mock, bootstrap bridge
+- **native hosts**: Android (Kotlin) today, iOS by contract — host IPC, plugin
+  registry, WebView bridge
+- a **reference implementation** (`examples`): a runnable app demonstrating
+  every plugin and doubling as the integration test harness
+
+Product features (camera, BLE, auth, storage — beyond the permission
+bootstrap) do **not** belong here. Consumers build them as their own plugins on
+top of this framework.
+
+## What it is not
+
+| Not this                                               | Because                                                                          |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| A product app                                          | Consumers add product features as their own plugins                              |
+| A general-purpose Android framework or WebView wrapper | This framework is specific to the Bare runtime + its protocol                    |
+| An iOS/desktop implementation                          | iOS is a contract for future shells; desktop is out of scope                     |
+| A Node.js application                                  | On device the runtime is Bare (worklet); Node only runs the dev WebSocket server |
+| A peer-to-peer framework                               | Bare is the runtime; this project is not Pears or a P2P layer                    |
+| Owned by one app team                                  | It is a distributable framework with multiple consumers                          |
+
+## Distribution and versioning
+
+- **One semver** across the whole framework. A release is a tag `vX.Y.Z`;
+  CI builds and publishes every artifact for that tag together. One changelog,
+  one release note.
+- **Artifacts**:
+  - JS framework → **npm** (`@less/bare`) — single package, subpath exports
+    (`@less/bare/core`, `@less/bare/plugins`, `@less/bare/transports`). The
+    package ships TypeScript source; consumers bundle it (Vite, esbuild,
+    bare-pack) — plain-Node execution is out of scope.
+  - Android host → **AAR, target GitHub Packages** (Maven format). **Not yet
+    publishable**: `:bare-host` compiles against a locally fetched Bare Kit
+    prebuilt, and AAR publishing is blocked on packaging that runtime into the
+    artifact (see `RELEASING.md`). Until then the host ships as source in this
+    repo.
+  - bare-kit prebuilds → **GitHub Release artifacts** (the pattern upstream
+    `bare-kit` already uses), fetched by a documented script run by CI and on
+    consumer setup. Prebuilds are never committed to this repository.
+- The npm name `@less/bare` is approved but **not yet registered**. The first
+  publish claims it; until then treat it as reserved in all docs and scripts.
+- Release process is documented in `RELEASING.md` and executable by an AI agent
+  with no human intervention beyond the tag decision.
+
+## Public API stability contract
+
+Breaking changes to the following are **major-version events**; everything else
+in the repository is implementation and may change freely (layout, tooling,
+internal module APIs, build scripts).
+
+1. **Binary wire protocol** — frame layout and `version` byte (`core/messages`).
+2. **Plugin manifest & event contracts** — `vendor.plugin` IDs,
+   `DISPATCH`/`INVOKE_REQUEST`/`INVOKE_RESPONSE` semantics, event names and
+   shapes, `Either` result tuples, deterministic error codes.
+3. **JS exported surface** — the subpath exports of `@less/bare`.
+4. **Kotlin host public API** — what Android consumers instantiate/subclass
+   (bridge, coordinator, plugin registry).
+
+Consequence: internal refactors (reorganizing files, switching tooling,
+rewriting implementation) are **not** breaking changes and must not bump the
+major version or be blocked by stability fears.
+
+## Platforms and parity
+
+| Runtime        | Status        | Transport                                                                                                                    |
+| -------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Browser (dev)  | first-class   | WebSocket                                                                                                                    |
+| Browser (test) | first-class   | Mock (deterministic Playwright runs)                                                                                         |
+| Android        | first-class   | WebSocket and/or bootstrap bridge                                                                                            |
+| iOS            | contract-only | Must satisfy the same wire protocol and plugin contracts when built; distribution path decided then, on the same release tag |
+
+Parity policy:
+
+- Core protocol and plugin contracts are runtime-agnostic.
+- Capabilities are opt-in plugins and may be runtime-specific.
+- Plugins report unsupported behavior with deterministic errors.
+- Feature code calls plugin events, never raw platform APIs, from shared UI
+  code.
+
+## Toolchain
+
+The project runs on **Vite+** (`vp`). It manages the Node runtime, package
+manager, and toolchain in one place. The canonical commands are:
+
+| Command      | Meaning                                                 |
+| ------------ | ------------------------------------------------------- |
+| `vp install` | Install dependencies                                    |
+| `vp dev`     | Development server                                      |
+| `vp check`   | Format (`oxfmt`) + lint (`oxlint`) + type-check (`tsc`) |
+| `vp test`    | Tests (`vitest`)                                        |
+| `vp build`   | Production build                                        |
+
+These built-ins are the documented command surface — agent instructions and
+`RELEASING.md` reference them, never ad-hoc `npm run <script>` chains unless a
+`vp run` wrapper is defined. Migration onto Vite+ is in progress; prerequisite
+was upgrading Vite to 8+ and Vitest to 4.1+ before `vp migrate`.
+
+## Repository structure
+
+- `core/`, `plugins/`, `web/transports` — sources of the single publishable
+  package `@less/bare`.
+- `examples/` — the reference app (web UI + Android app), private workspace
+  package, consumes the framework and is the integration harness.
+- `e2e/` — Playwright specs against the reference app on the mock transport.
+- `android/` — the Android host as a **library module** (`com.android.library`)
+  so it can be built and published as an AAR; the example app consumes it.
+- `prebuilds/` — build output, gitignored, fetched from GitHub Release
+  artifacts.
+
+## Testing contract
+
+Nothing ships without a green test gate:
+
+- **Unit** — `vitest` for the protocol codec, plugin router, RPC messenger,
+  and transports; **JUnit** for the Kotlin host (codec, IPC, registry).
+- **Type check** — `tsc --noEmit` (part of `vp check`).
+- **Integration** — Playwright e2e against the mock transport exercising the
+  real binary protocol.
+- **CI** — all of the above plus a Gradle build, green on every PR to `main`.
+
+## AI autonomy operating principles
+
+The repository is designed so that AI agents can carry out day-to-day
+maintenance without a human in the loop:
+
+1. **Read this document first.** It settles what belongs here and what does
+   not.
+2. **Follow `AGENTS.md`.** It is the operating manual: commands, conventions,
+   ownership map, do/don't.
+3. **Never commit build output.** Prebuilds, `*.gen.js`, web assets, and AARs
+   are generated; artifacts are produced by CI on release tags.
+4. **Respect the stability contract.** Refactor internals freely; gate breaking
+   changes on the four public boundaries.
+5. **Cut releases by the book.** `RELEASING.md` is the only release procedure;
+   a release is a tag and CI does the rest.
+
+## Document set
+
+| Document           | Purpose                                                |
+| ------------------ | ------------------------------------------------------ |
+| `vision.md`        | This file — what this project is and is not            |
+| `AGENTS.md`        | AI operating manual (commands, conventions, ownership) |
+| `CONTRIBUTING.md`  | How to contribute (human + agent)                      |
+| `RELEASING.md`     | The tag-driven release checklist                       |
+| per-module readmes | `core/`, `plugins/`, transports, Android host          |

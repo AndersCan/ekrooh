@@ -29,7 +29,11 @@ export function createBareRuntimeContext(
   for (const plugin of plugins) {
     pluginRegistry.register(plugin);
   }
-  const pluginRouter = createPluginRouter(pluginRegistry, runtime, routerOptions);
+  const pluginRouter = createPluginRouter(
+    pluginRegistry,
+    runtime,
+    routerOptions,
+  );
 
   return { protocol, pluginRegistry, pluginRouter };
 }

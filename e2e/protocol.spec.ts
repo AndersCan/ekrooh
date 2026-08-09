@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { MessageProtocol, MessageType } from '../core/messages';
+import { MessageProtocol, MessageType } from '@less/bare/core';
+import type { RuntimeTarget } from '@less/bare/core';
 
 test('protocol round-trip preserves type/header/payload', () => {
   const protocol = new MessageProtocol();
@@ -8,7 +9,12 @@ test('protocol round-trip preserves type/header/payload', () => {
 
   const encoded = protocol.encode(
     MessageType.ENVELOPE,
-    { type: 'INVOKE_RESPONSE', pluginId: 'core.health', event: 'health.ping', requestId },
+    {
+      type: 'INVOKE_RESPONSE',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      requestId,
+    },
     payload,
   );
   const decoded = protocol.decode(encoded);
@@ -27,7 +33,12 @@ test('protocol rejects unsupported version', () => {
   const protocol = new MessageProtocol();
   const encoded = protocol.encode(
     MessageType.ENVELOPE,
-    { type: 'DISPATCH', pluginId: 'core.health', event: 'health.ping', requestId: 'req-2' },
+    {
+      type: 'DISPATCH',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      requestId: 'req-2',
+    },
     null,
   );
 
@@ -49,7 +60,11 @@ test('protocol rejects unknown message type by default', () => {
 
 test('protocol rejects non-plugin header types', () => {
   const protocol = new MessageProtocol();
-  const encoded = protocol.encode(MessageType.ENVELOPE, { type: 'SET_HOME' } as never, null);
+  const encoded = protocol.encode(
+    MessageType.ENVELOPE,
+    { type: 'SET_HOME' } as never,
+    null,
+  );
   expect(() => protocol.decode(encoded)).toThrow(/Unsupported header type/);
 });
 
@@ -63,7 +78,7 @@ test('protocol round-trip host capabilities response header', () => {
         pluginId: 'core.permissions',
         capabilities: [] as string[],
         events: ['permissions.requestStorage'],
-        runtimes: ['android'] as const,
+        runtimes: ['android'] as RuntimeTarget[],
       },
     ],
   };

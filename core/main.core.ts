@@ -12,11 +12,15 @@ import { startWebSocketServer } from './server/websocket-server';
 
 function toUint8Array(data: Uint8Array | ArrayBuffer | Buffer): Uint8Array {
   if (data instanceof Uint8Array) return data;
-  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(data)) return new Uint8Array(data);
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(data))
+    return new Uint8Array(data);
   return new Uint8Array(data as ArrayBuffer);
 }
 
-function writeIpc(ipc: { write(data: Buffer | string): boolean }, bytes: Uint8Array) {
+function writeIpc(
+  ipc: { write(data: Buffer | string): boolean },
+  bytes: Uint8Array,
+) {
   if (typeof Buffer !== 'undefined' && typeof Buffer.from === 'function') {
     ipc.write(Buffer.from(bytes));
   } else {
@@ -40,7 +44,8 @@ const hostBridge = ipc ? createHostIpcBridge({ ipc, protocol }) : null;
 const pluginRegistry = createPluginRegistry();
 for (const p of createDefaultPlugins({
   listBareCapabilities: () => pluginRegistry.listCapabilities(),
-  queryHostCapabilities: () => hostBridge?.queryCapabilities() ?? Promise.resolve([]),
+  queryHostCapabilities: () =>
+    hostBridge?.queryCapabilities() ?? Promise.resolve([]),
 })) {
   pluginRegistry.register(p);
 }
@@ -64,7 +69,10 @@ if (ipc) {
       const header = parsed.header;
       const pluginResponse = await pluginRouter.route(header, parsed.payload);
       if (pluginResponse) {
-        writeIpc(ipcChannel, protocol.encode(MessageType.ENVELOPE, pluginResponse, null));
+        writeIpc(
+          ipcChannel,
+          protocol.encode(MessageType.ENVELOPE, pluginResponse, null),
+        );
       }
     } catch {
       /* ignore malformed frames */

@@ -3,4 +3,4 @@ build/*
 .gradle/
 .idea/
 **/*.bundle
-android/app/src/main/assets/**/*
+examples/android-app/src/main/assets/**/*

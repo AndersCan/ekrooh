@@ -14,7 +14,10 @@ import { InvokeRequest, ProtocolMessenger } from './rpc-messenger';
 
 export interface PluginRegistry {
   register(plugin: PluginManifest): void;
-  resolve(pluginId: string, runtime: RuntimeTarget): PluginManifest['runtimes'][RuntimeTarget] | undefined;
+  resolve(
+    pluginId: string,
+    runtime: RuntimeTarget,
+  ): PluginManifest['runtimes'][RuntimeTarget] | undefined;
   listCapabilities(runtime?: RuntimeTarget): Array<{
     pluginId: string;
     capabilities: string[];
@@ -28,7 +31,9 @@ export function createPluginRegistry(): PluginRegistry {
   return {
     register(plugin) {
       if (!plugin.id.includes('.')) {
-        throw new Error(`plugin id must be namespaced (example: "vendor.plugin"), got "${plugin.id}"`);
+        throw new Error(
+          `plugin id must be namespaced (example: "vendor.plugin"), got "${plugin.id}"`,
+        );
       }
       if (plugins.has(plugin.id)) {
         throw new Error(`plugin id "${plugin.id}" is already registered`);
@@ -93,17 +98,24 @@ export function createPluginRouter(
             ),
           );
         }
-        await runtimeAdapter.dispatch(header.event, header.args, { runtime, payload });
+        await runtimeAdapter.dispatch(header.event, header.args, {
+          runtime,
+          payload,
+        });
         return null;
       }
 
       if (isPluginInvokeRequestHeader(header)) {
         const runtimeAdapter = registry.resolve(header.pluginId, runtime);
         if (runtimeAdapter?.invoke) {
-          const result = await runtimeAdapter.invoke(header.event, header.args, {
-            runtime,
-            payload,
-          });
+          const result = await runtimeAdapter.invoke(
+            header.event,
+            header.args,
+            {
+              runtime,
+              payload,
+            },
+          );
           const [error, okResult] = result;
           return {
             type: 'INVOKE_RESPONSE',
@@ -111,7 +123,9 @@ export function createPluginRouter(
             event: header.event,
             requestId: header.requestId,
             result: okResult ?? undefined,
-            error: error ? { code: error.code, message: error.message } : undefined,
+            error: error
+              ? { code: error.code, message: error.message }
+              : undefined,
           };
         }
         if (header.requestId && options?.delegateToHost) {
@@ -123,7 +137,10 @@ export function createPluginRouter(
           } catch (e) {
             return invokeErrorResponse(
               header,
-              new CoreError('HOST_ERROR', e instanceof Error ? e.message : String(e)),
+              new CoreError(
+                'HOST_ERROR',
+                e instanceof Error ? e.message : String(e),
+              ),
             );
           }
         }
@@ -148,9 +165,7 @@ export interface PluginBus {
   ): Promise<Either<CoreError, TResult>>;
 }
 
-export function createPluginBus(
-  messenger: ProtocolMessenger,
-): PluginBus {
+export function createPluginBus(messenger: ProtocolMessenger): PluginBus {
   return {
     dispatch(envelope) {
       return messenger.dispatch({
@@ -160,7 +175,9 @@ export function createPluginBus(
         args: envelope.args,
       });
     },
-    async invoke<TResult>(envelope: InvokeEnvelope<string, Record<string, unknown>, TResult>) {
+    async invoke<TResult>(
+      envelope: InvokeEnvelope<string, Record<string, unknown>, TResult>,
+    ) {
       const response = await messenger.invoke(
         {
           type: 'INVOKE_REQUEST',
@@ -183,7 +200,13 @@ export function createPluginBus(
         return [null, response.result as TResult];
       }
 
-      return [new CoreError('INVALID_RESPONSE', `Unexpected response type ${response.type}`), null];
+      return [
+        new CoreError(
+          'INVALID_RESPONSE',
+          `Unexpected response type ${response.type}`,
+        ),
+        null,
+      ];
     },
   };
 }
@@ -201,7 +224,9 @@ function invokeErrorResponse(
   };
 }
 
-function isPluginDispatchHeader(header: MessageHeader): header is PluginDispatchHeader {
+function isPluginDispatchHeader(
+  header: MessageHeader,
+): header is PluginDispatchHeader {
   return (
     header.type === 'DISPATCH' &&
     typeof header.pluginId === 'string' &&
@@ -209,7 +234,9 @@ function isPluginDispatchHeader(header: MessageHeader): header is PluginDispatch
   );
 }
 
-function isPluginInvokeRequestHeader(header: MessageHeader): header is PluginInvokeRequestHeader {
+function isPluginInvokeRequestHeader(
+  header: MessageHeader,
+): header is PluginInvokeRequestHeader {
   return (
     header.type === 'INVOKE_REQUEST' &&
     typeof header.pluginId === 'string' &&
@@ -217,7 +244,9 @@ function isPluginInvokeRequestHeader(header: MessageHeader): header is PluginInv
   );
 }
 
-function isPluginInvokeResponseHeader(header: MessageHeader): header is PluginInvokeResponseHeader {
+function isPluginInvokeResponseHeader(
+  header: MessageHeader,
+): header is PluginInvokeResponseHeader {
   return (
     header.type === 'INVOKE_RESPONSE' &&
     typeof header.pluginId === 'string' &&

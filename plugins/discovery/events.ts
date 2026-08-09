@@ -8,7 +8,11 @@ export type DiscoveryListResult = {
 
 export const discoveryEvents = {
   discovery: {
-    list(): InvokeEnvelope<'discovery.list', Record<string, never>, DiscoveryListResult> {
+    list(): InvokeEnvelope<
+      'discovery.list',
+      Record<string, never>,
+      DiscoveryListResult
+    > {
       return {
         kind: 'invoke',
         pluginId: 'core.discovery',

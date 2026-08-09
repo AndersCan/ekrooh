@@ -1,6 +1,6 @@
 # Nanostores + lit-html rendering
 
-Condensed reference for this repo. Implementation: [`web/use-store.ts`](web/use-store.ts).
+Condensed reference for this repo. Implementation: [`examples/web/use-store.ts`](examples/web/use-store.ts).
 
 ## Core rule
 
@@ -22,7 +22,7 @@ Use **`repeat()`** from `lit-html/directives/repeat.js` with a stable **key func
 
 ## Routing
 
-Router store: [`web/router.ts`](web/router.ts). In the shell template, use **`useStore($router, (page) => cache(routeView(page)))`** and wrap each route’s subtree in **`cache()`** from `lit-html/directives/cache.js` so DOM is preserved across transitions and async directives are paused correctly. Use **`getPagePath($router, 'routeName')`** for `<a href>` so the router’s document click handler can intercept in-app navigation.
+Router store: [`examples/web/router.ts`](examples/web/router.ts). In the shell template, use **`useStore($router, (page) => cache(routeView(page)))`** and wrap each route's subtree in **`cache()`** from `lit-html/directives/cache.js` so DOM is preserved across transitions and async directives are paused correctly. Use **`getPagePath($router, 'routeName')`** for `<a href>` so the router's document click handler can intercept in-app navigation.
 
 ## Memory: `AsyncDirective` and teardown
 
@@ -38,11 +38,11 @@ For **`map`** stores, **`listenKeys($store, ['name', ...], cb)`** avoids firing 
 
 ## Rules summary
 
-| Practice | Why |
-|----------|-----|
-| One root `render()`, directives for updates | Avoids full template re-evaluation |
-| `listen()` in directives | No duplicate initial push |
-| `computed` / `batched` / `listenKeys` | Minimal subscriptions, one update per tick where needed |
-| `repeat` + keys | DOM reuse for lists |
-| `cache` for route views | Preserves DOM and directive lifecycle |
-| `rootPart.setConnected(false)` before removal | Prevents subscription leaks |
+| Practice                                      | Why                                                     |
+| --------------------------------------------- | ------------------------------------------------------- |
+| One root `render()`, directives for updates   | Avoids full template re-evaluation                      |
+| `listen()` in directives                      | No duplicate initial push                               |
+| `computed` / `batched` / `listenKeys`         | Minimal subscriptions, one update per tick where needed |
+| `repeat` + keys                               | DOM reuse for lists                                     |
+| `cache` for route views                       | Preserves DOM and directive lifecycle                   |
+| `rootPart.setConnected(false)` before removal | Prevents subscription leaks                             |

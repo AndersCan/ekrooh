@@ -14,7 +14,10 @@ function ok<T>(result: T): Either<CoreError, T> {
   return [null, result];
 }
 
-function mergeCapabilityRows(a: CapabilityDescriptor[], b: CapabilityDescriptor[]): CapabilityDescriptor[] {
+function mergeCapabilityRows(
+  a: CapabilityDescriptor[],
+  b: CapabilityDescriptor[],
+): CapabilityDescriptor[] {
   const map = new Map<string, CapabilityDescriptor>();
   for (const row of [...a, ...b]) {
     const existing = map.get(row.pluginId);
@@ -27,7 +30,10 @@ function mergeCapabilityRows(a: CapabilityDescriptor[], b: CapabilityDescriptor[
       });
     } else {
       const ev = new Set([...existing.events, ...row.events]);
-      const rt = new Set<RuntimeTarget>([...existing.runtimes, ...row.runtimes]);
+      const rt = new Set<RuntimeTarget>([
+        ...existing.runtimes,
+        ...row.runtimes,
+      ]);
       const caps = new Set([...existing.capabilities, ...row.capabilities]);
       map.set(row.pluginId, {
         pluginId: row.pluginId,
@@ -50,7 +56,9 @@ export type DiscoveryPluginDeps = {
   queryHostCapabilities: () => Promise<CapabilityDescriptor[]>;
 };
 
-export function createDiscoveryPlugin(deps: DiscoveryPluginDeps): PluginManifest {
+export function createDiscoveryPlugin(
+  deps: DiscoveryPluginDeps,
+): PluginManifest {
   return {
     id: 'core.discovery',
     capabilities: ['discovery'],

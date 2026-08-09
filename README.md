@@ -1,35 +1,56 @@
-# Bare Android
+# @less/bare
 
-Template for cross-platform apps: a small **protocol kernel** in `core/`, capabilities in `plugins/`, a **web UI** in `web/`, and an **Android shell** in `android/` that embeds the backend and WebView.
+The **boring bootstrap** for cross-platform apps on the Bare runtime
+(holepunch): a binary wire protocol, plugin kernel, RPC messenger, transports,
+and native host bridges — plus a reference app that demonstrates all of it.
 
-## Frontend vs backend (UI perspective)
+> Read `vision.md` for what this project is and is not, `AGENTS.md` for how to
+> develop it, `CONTRIBUTING.md` for how to contribute, and `RELEASING.md` for
+> how to cut a release.
 
-The **frontend** (browser or WebView) is written as if there is only a **backend** reachable over a **WebSocket** (binary framed messages). It picks a transport automatically:
+## The model (UI perspective)
+
+The **frontend** (browser or WebView) is written as if there is only a
+**backend** reachable over a **WebSocket** (binary framed messages). It picks a
+transport automatically:
 
 - **WebSocket** in local dev and when no injected bridge is present.
 - **Mock transport** when `VITE_TRANSPORT_MODE=mock` (tests).
-- **Bootstrap bridge** when `window.NativeBridge` exists (embedded WebView): same framed messages, delivered through the injected object instead of a socket.
+- **Bootstrap bridge** when `window.NativeBridge` exists (embedded WebView).
 
-The UI does **not** branch on worklets, Bare, or host IPC. Shared types and helpers (`MessageProtocol`, plugin bus, event builders) describe the **wire protocol** to the backend, not the runtime that implements it.
-
-Repository docs below describe the **full stack** (host, worklet, delegation) for contributors shipping native shells.
+The UI does **not** branch on worklets, Bare, or host IPC. Shared types and
+helpers (`@less/bare/core`) describe the **wire protocol** to the backend, not
+the runtime that implements it.
 
 ## Glossary
 
-| Term         | Meaning                                                                                                                                                                 |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Frontend** | Web UI: Vite bundle in the browser; same bundle in the Android WebView.                                                                                                 |
-| **Backend**  | Logic that runs the core bundle and speaks the framed message protocol with the frontend (WebSocket server in dev; worklet on device).                                  |
-| **Host**     | Native shell (e.g. Android): starts the backend, owns system APIs, and may expose a small bootstrap bridge to the WebView. Not a concept the UI code models explicitly. |
+| Term         | Meaning                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------ |
+| **Frontend** | Web UI: Vite bundle in the browser; same bundle in the Android WebView.                          |
+| **Backend**  | Logic that runs the core bundle and speaks the framed message protocol with the frontend.        |
+| **Host**     | Native shell (e.g. Android): starts the backend, owns system APIs, exposes the bootstrap bridge. |
 
 ## Repository structure
 
-- `core/`: protocol kernel (wire codec, plugin router, RPC messenger) and dev WebSocket server.
-- `plugins/`: app capabilities and typed event builders (kept out of core).
-- `web/`: UI entrypoint and transports (WebSocket, mock, bootstrap bridge).
-- `android/`: Android host (worklet + IPC + WebView).
-- `prebuilds/`: Bare Kit prebuilds required by Android packaging (not committed).
-- `e2e/`: Playwright tests against the browser runtime.
+- `core/` — framework: wire protocol codec, plugin router, RPC messenger, host
+  IPC (`core/messages`), dev WebSocket server, Bare worklet entry.
+- `plugins/` — framework: canonical plugins (`core.health`, `core.discovery`,
+  `core.permissions`) and typed event builders.
+- `web/transports/` — framework: `MessageTransport` plus WebSocket, mock, and
+  bootstrap-bridge transports.
+- `android/` — framework: Android host **library** (`:bare-host`) — IPC
+  coordinator, host plugin registry, WebView bridge.
+- `examples/` — reference app: `web/` (lit-html + nanostores + Tailwind UI)
+  and `android-app/` (the Android shell that embeds the backend and WebView).
+- `e2e/` — Playwright tests against the browser runtime on the mock transport.
+- `scripts/` — dev backend runner, Playwright browser wrapper, prebuilds
+  fetcher.
+- `prebuilds/` — Bare Kit prebuilds (build output, gitignored).
+
+The framework's public surface is the `exports` map of the root `package.json`
+(`@less/bare/core`, `/plugins`, `/plugins/*/events`, `/transports`). The package
+ships TypeScript source and is consumed through a bundler (Vite, esbuild, or
+bare-pack).
 
 ## Support matrix
 
@@ -38,7 +59,7 @@ Repository docs below describe the **full stack** (host, worklet, delegation) fo
 | Browser (dev)  | first-class | WebSocket                         | Vite + local backend server                                 |
 | Browser (test) | first-class | Mock                              | Deterministic Playwright runs                               |
 | Android        | first-class | WebSocket and/or bootstrap bridge | Same protocol; bridge when the shell injects `NativeBridge` |
-| iOS / desktop  | template    | —                                 | Adapters follow the same plugin contracts                   |
+| iOS / desktop  | contract    | —                                 | Adapters follow the same plugin contracts                   |
 
 ### Parity policy
 
@@ -47,7 +68,7 @@ Repository docs below describe the **full stack** (host, worklet, delegation) fo
 - Plugins report unsupported behavior with deterministic errors.
 - Feature code calls plugin events, not raw platform APIs from shared UI code.
 
-## Architecture (contributors)
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -66,30 +87,6 @@ flowchart LR
   coreRuntime <-->|delegation| hostIpc
 ```
 
-```mermaid
-flowchart LR
-  webUi[WebUI]
-  transport[Transport]
-  wsTransport[WebSocket]
-  bootstrapTransport[Bootstrap bridge]
-  mockTransport[Mock]
-  coreProtocol[Message protocol]
-  coreRuntime[Core + plugins]
-  browserTests[Playwright]
-  androidShell[Android WebView]
-
-  webUi --> transport
-  transport --> wsTransport
-  transport --> bootstrapTransport
-  transport --> mockTransport
-  wsTransport --> coreProtocol
-  bootstrapTransport --> coreProtocol
-  mockTransport --> coreProtocol
-  coreProtocol --> coreRuntime
-  browserTests --> mockTransport
-  androidShell --> bootstrapTransport
-```
-
 ## Message protocol
 
 Binary frame:
@@ -102,83 +99,68 @@ Binary frame:
 
 Implementation: `MessageProtocol` in `core/messages` (see `wire-codec.ts`).
 
-## Asset hygiene
-
-- Vite and Gradle clean hashed `android/app/src/main/assets/assets/main-*.{js,css}` before rebuilding web assets.
-- Treat files under `android/app/src/main/assets/assets/` as build output, not source.
-
 ## Plugin-first architecture
 
-Core does not ship product features (camera, permissions, BLE, etc.). Teams add plugins with namespaced events and per-runtime handlers.
+Core does not ship product features (camera, permissions, BLE, etc.). Teams
+add plugins with namespaced events and per-runtime handlers.
 
-### Capability discovery
-
-Invoke `core.discovery` / `discovery.list` on the backend for a merged capability list (`schemaVersion`, plugin rows, events, runtimes, etc.).
-
-### Naming and routing
-
-- Plugin IDs: `vendor.plugin`.
-- Events: plugin-local (`health.ping`, `permissions.request`).
-- Header types: `DISPATCH`, `INVOKE_REQUEST`, `INVOKE_RESPONSE`.
-- Invoke requests include `requestId`; responses echo it.
-
-### Dispatch vs invoke
-
-- `dispatch`: fire-and-forget.
-- `invoke`: request/response, timeout-bound, deterministic failures when unresolved.
+- Plugin IDs: `vendor.plugin`; events are plugin-local (`health.ping`).
+- Header types: `DISPATCH`, `INVOKE_REQUEST`, `INVOKE_RESPONSE`; invoke
+  responses echo `requestId`.
+- `dispatch` is fire-and-forget; `invoke` is request/response and timeout-bound.
+- Runtime adapters: `web`, `android`, `ios`, `bare`.
 
 ### Bootstrap bridge (embedded WebView)
 
-Web → native: JSON envelope with `type`, `header`, optional `payloadBase64` (see `BareBridge.send` in `MainActivity.kt`).
-
-Native → web: evaluate `window.onBackendMessage({ type, header, payload })` where `header` is a JSON object and `payload` is base64 or omitted.
+- Web → native: JSON envelope with `type`, `header`, optional `payloadBase64`
+  (see `BareBridge` in the host library).
+- Native → web: `window.onBackendMessage({ type, header, payload })`.
 
 ## Scripts
 
-| Script                 | Purpose                                                    |
-| ---------------------- | ---------------------------------------------------------- |
-| `npm run dev`          | Vite + Bare backend server (watch restart)                 |
-| `npm run dev:bare`     | Backend server only (used by `dev`)                        |
-| `npm run dev:mock`     | Vite with mock transport                                   |
-| `npm run dev:ws`       | Vite only (backend started separately)                     |
-| `npm run dev:e2e`      | Vite on fixed host/port for Playwright                     |
-| `npm run build:web`    | Build web assets into Android `assets/`                    |
-| `npm run build:core`   | Bundle `core/main.core.ts` with esbuild                    |
-| `npm run build:bare`   | Alias for `build:core`                                     |
-| `npm run build`        | `build:core` then `build:web` (`build:android-assets`)     |
-| `npm run playwright:install` | Download Chromium into `.playwright-browsers/` (run after `npm install` / `npm ci` before e2e tests) |
-| `npm run test:e2e:web`       | Playwright                                                                             |
-| `npm run lint`               | Prettier                                                                               |
+| Script                       | Purpose                                            |
+| ---------------------------- | -------------------------------------------------- |
+| `npm run check`              | Format + lint + type-check (`vp check`)            |
+| `npm run typecheck`          | `tsc --noEmit` only                                |
+| `npm run test`               | Unit tests + Playwright e2e                        |
+| `npm run test:unit`          | Unit tests (vitest)                                |
+| `npm run test:e2e:web`       | Playwright e2e                                     |
+| `npm run dev`                | Vite dev server + Bare backend (watch restart)     |
+| `npm run dev:mock`           | Vite with mock transport                           |
+| `npm run dev:ws`             | Vite only (backend started separately)             |
+| `npm run build`              | Core bundle + web assets for the Android app       |
+| `npm run build:core`         | Bundle `core/main.core.ts` with esbuild            |
+| `npm run build:web`          | Build `examples/web` into the Android app's assets |
+| `npm run prebuilds`          | Fetch Bare Kit prebuilds (requires `gh`)           |
+| `npm run playwright:install` | Download Chromium into `.playwright-browsers/`     |
 
-## Browser-first testing
+## Testing
 
-Playwright runs against local Vite with `MockTransport`, so you get fast feedback without an emulator while exercising the same binary protocol as `core/messages`.
-
-**Browsers and Cursor’s sandbox:** Playwright resolves the browser directory when `playwright-core` first loads. Sandboxes may preset `PLAYWRIGHT_BROWSERS_PATH` to an empty cache, so setting the path only in `playwright.config.ts` is too late. **`npm run playwright:install`** and **`npm run test:e2e:web`** go through [`scripts/playwright-local-browsers.mjs`](scripts/playwright-local-browsers.mjs), which sets `PLAYWRIGHT_BROWSERS_PATH` to **`.playwright-browsers/`** in the repo before spawning the CLI (and `playwright.config.ts` keeps the same path in sync). After `npm install` / `npm ci`, run **`npm run playwright:install`** once (or whenever you upgrade `@playwright/test`); output is gitignored.
+- **Unit** — vitest (`vp test`) for the protocol codec, plugin router, RPC
+  messenger, and transports; JUnit for the Kotlin host.
+- **Type check** — `tsc --noEmit` (part of `vp check`).
+- **Integration** — Playwright e2e against the mock transport exercising the
+  real binary protocol (`npm run test:e2e:web`). Browsers resolve through
+  `scripts/playwright-local-browsers.mjs`, which pins `PLAYWRIGHT_BROWSERS_PATH`
+  to the repo-local `.playwright-browsers/`.
 
 ## Android build
 
-1. Place Bare Kit prebuilds under `prebuilds/android/bare-kit` (see **Prebuilds**).
-2. From repo root:
+Prerequisites: Android SDK (`local.properties` with `sdk.dir=...`) and Bare Kit
+prebuilds.
 
 ```bash
 npm ci
-npm run build
+npm run prebuilds   # fetches prebuilds into prebuilds/ (gitignored)
+npm run build       # core bundle + web assets
+./gradlew :examples:android-app:assembleDebug
 ```
 
-3. APK:
+`./gradlew build` additionally runs the host library's JUnit tests.
 
-```bash
-cd android
-./gradlew assembleDebug
-```
+## Asset hygiene
 
-## Prebuilds
-
-Download a Bare Kit release:
-
-```bash
-gh release download --repo holepunchto/bare-kit <version>
-```
-
-Unpack `prebuilds.zip` and put `android/bare-kit` inside this repository’s `prebuilds/` directory.
+- Vite cleans hashed `examples/android-app/src/main/assets/assets/main-*.{js,css}`
+  before rebuilding web assets.
+- Treat files under `examples/android-app/src/main/assets/` as build output,
+  not source.

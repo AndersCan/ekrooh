@@ -2,6 +2,7 @@ pluginManagement {
   repositories {
     google()
     mavenCentral()
+    gradlePluginPortal()
   }
 }
 
@@ -12,5 +13,8 @@ dependencyResolutionManagement {
   }
 }
 
-include ":app"
-project(":app").projectDir = file("android/app")
+include ":bare-host"
+project(":bare-host").projectDir = file("android")
+
+include ":examples:android-app"
+project(":examples:android-app").projectDir = file("examples/android-app")

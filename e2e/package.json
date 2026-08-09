@@ -1,0 +1,12 @@
+{
+  "name": "@less/bare-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Playwright end-to-end specs for the @less/bare reference web app.",
+  "dependencies": {
+    "@less/bare": "file:../.."
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}

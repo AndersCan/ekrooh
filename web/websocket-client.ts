@@ -15,6 +15,18 @@ type QueuedMessage = {
   header: MessageHeader;
 };
 
+/**
+ * `websocket.send` needs a `BufferSource` backed by a plain `ArrayBuffer`;
+ * the codec may produce a view into a pooled Buffer, so slice a standalone
+ * copy of just the frame.
+ */
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+}
+
 export interface MessageTransport {
   send(
     type: MessageTypeValue,
@@ -63,7 +75,7 @@ export function createWebSocketTransport(
 
   websocket.onopen = () => {
     for (const queuedMessage of queued) {
-      websocket.send(queuedMessage.bytes);
+      websocket.send(toArrayBuffer(queuedMessage.bytes));
     }
     queued.length = 0;
   };
@@ -90,7 +102,7 @@ export function createWebSocketTransport(
     send(type, header, payload) {
       const encoded = protocol.encode(type, header, payload);
       if (websocket.readyState === WebSocket.OPEN) {
-        websocket.send(encoded);
+        websocket.send(toArrayBuffer(encoded));
         return;
       }
       if (websocket.readyState === WebSocket.CONNECTING) {

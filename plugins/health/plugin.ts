@@ -11,6 +11,8 @@ function err(code: string, message: string): Either<CoreError, never> {
 export function createHealthPlugin(): PluginManifest {
   return {
     id: 'core.health',
+    capabilities: ['health'],
+    events: ['health.ping', 'health.payloadEcho', 'health.roundtrip'],
     runtimes: {
       bare: {
         invoke: (event, args, context) => {

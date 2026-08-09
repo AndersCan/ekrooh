@@ -14,7 +14,10 @@ const configDir = path.dirname(fileURLToPath(import.meta.url));
  *
  * @see https://playwright.dev/docs/browsers#hermetic-install
  */
-process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(configDir, '.playwright-browsers');
+process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(
+  configDir,
+  '.playwright-browsers',
+);
 
 /**
  * See https://playwright.dev/docs/test-configuration.

@@ -1,4 +1,49 @@
 plugins {
-  id "com.android.application" version '8.13.2' apply false
-  id "org.jetbrains.kotlin.android" version "1.9.23" apply false
+  id "com.android.library"
+  id "org.jetbrains.kotlin.android"
+}
+
+android {
+  namespace = "to.holepunch.bare.android"
+  compileSdk = 35
+  ndkVersion = "27.2.12479018"
+
+  defaultConfig {
+    minSdk = 29
+  }
+
+  compileOptions {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = "17"
+  }
+
+  sourceSets {
+    main {
+      jniLibs.srcDirs "../prebuilds/android/bare-kit/jni"
+    }
+  }
+
+  packaging {
+    jniLibs {
+      useLegacyPackaging = true
+    }
+  }
+}
+
+dependencies {
+  // Bare Kit runtime prebuilt (IPC + Worklet). Local file until AAR publishing
+  // lands; see RELEASING.md.
+  api fileTree(dir: "../prebuilds/android", include: ["bare-kit/classes.jar"])
+  // Public API of the host surfaces these types (BareWebViewClient,
+  // WebViewBackendMessenger), so they are `api` for consumers.
+  api "androidx.webkit:webkit:1.15.0"
+  api "androidx.appcompat:appcompat:1.7.0"
+
+  testImplementation "junit:junit:4.13.2"
+  // Real org.json for unit tests (shadows the android.jar stub).
+  testImplementation "org.json:json:20240303"
 }

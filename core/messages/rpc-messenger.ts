@@ -1,16 +1,31 @@
-import { MessageHeader, PluginDispatchHeader, PluginInvokeRequestHeader } from './types';
+import {
+  MessageHeader,
+  PluginDispatchHeader,
+  PluginInvokeRequestHeader,
+} from './types';
 
-type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never;
+type DistributiveOmit<T, K extends keyof any> = T extends any
+  ? Omit<T, K>
+  : never;
 
 type InternalDispatchRequest =
   | (PluginDispatchHeader & { requestId: string })
   | (PluginInvokeRequestHeader & { requestId: string });
 
-export type DispatchRequest = DistributiveOmit<PluginDispatchHeader, 'requestId'>;
-export type InvokeRequest = DistributiveOmit<PluginInvokeRequestHeader, 'requestId'>;
+export type DispatchRequest = DistributiveOmit<
+  PluginDispatchHeader,
+  'requestId'
+>;
+export type InvokeRequest = DistributiveOmit<
+  PluginInvokeRequestHeader,
+  'requestId'
+>;
 
 export interface ProtocolMessenger {
-  dispatch(request: DispatchRequest, payload?: Uint8Array | ArrayBuffer | string | null): string;
+  dispatch(
+    request: DispatchRequest,
+    payload?: Uint8Array | ArrayBuffer | string | null,
+  ): string;
   invoke(
     request: InvokeRequest,
     payload?: Uint8Array | ArrayBuffer | string | null,
@@ -47,7 +62,9 @@ export function createProtocolMessenger(
       return new Promise<MessageHeader>((resolvePromise, rejectPromise) => {
         const timer = setTimeout(() => {
           pending.delete(requestId);
-          rejectPromise(new Error(`invoke timeout for ${request.type} (${requestId})`));
+          rejectPromise(
+            new Error(`invoke timeout for ${request.type} (${requestId})`),
+          );
         }, timeoutMs);
 
         pending.set(requestId, {
@@ -75,6 +92,8 @@ function createRequestId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function withRequestId<T extends object>(request: T): T & { requestId: string } {
+function withRequestId<T extends object>(
+  request: T,
+): T & { requestId: string } {
   return { ...request, requestId: createRequestId() };
 }
