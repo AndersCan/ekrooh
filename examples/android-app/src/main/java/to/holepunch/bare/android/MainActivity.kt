@@ -1,6 +1,7 @@
 package to.holepunch.bare.android
 
 import android.annotation.SuppressLint
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -8,7 +9,11 @@ import android.util.Log
 import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import androidx.webkit.WebViewCompat
 import org.json.JSONObject
 import to.holepunch.bare.kit.IPC
@@ -23,6 +28,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var storageDir: File
     private lateinit var webappDir: File
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // vendor.media: native picker/camera launchers. The host handlers run on the
+    // IPC thread and launch on the main thread; the result routes back through
+    // [pendingMedia] to the worklet as the HOST_INVOKE_RESPONSE.
+    private lateinit var pickLauncher: ActivityResultLauncher<PickVisualMediaRequest>
+    private lateinit var imageCaptureLauncher: ActivityResultLauncher<Uri>
+    private lateinit var videoCaptureLauncher: ActivityResultLauncher<Uri>
+    @Volatile
+    private var pendingMedia: ((HostPluginRegistry.HostInvokeOutcome) -> Unit)? = null
+    @Volatile
+    private var pendingCaptureFile: File? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -103,11 +119,14 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val json = JSONObject(text)
                     val origin = json.getString("origin")
+                    val port = json.getInt("port")
                     val token = json.getString("token")
                     WebViewCompat.addDocumentStartJavaScript(
                         webView,
                         "window.__lessBareToken='$token';window.BareShell=true;",
-                        setOf("http://127.0.0.1:*"),
+                        // allowedOriginRules cannot wildcard the port; the
+                        // handoff already knows the exact ephemeral port.
+                        setOf("http://127.0.0.1:$port"),
                     )
                     webView.loadUrl("$origin/index.html")
                     return
@@ -144,15 +163,21 @@ class MainActivity : AppCompatActivity() {
         for (name in names) {
             val assetPath = if (prefix.isEmpty()) name else "$prefix/$name"
             val dest = File(destDir, assetPath)
-            // AssetManager.list() returns null for files and an array for
-            // directories (empty for an empty dir).
-            if (assets.list(assetPath) != null) {
+            val children = assets.list(assetPath)
+            if (children != null && children.isNotEmpty()) {
+                // Directory with children — recurse.
                 dest.mkdirs()
                 copyAssetTree(assetPath, destDir)
             } else {
-                assets.open(assetPath).use { input ->
-                    dest.parentFile?.mkdirs()
-                    dest.outputStream().use { input.copyTo(it) }
+                try {
+                    assets.open(assetPath).use { input ->
+                        dest.parentFile?.mkdirs()
+                        dest.outputStream().use { input.copyTo(it) }
+                    }
+                } catch (e: java.io.FileNotFoundException) {
+                    // Empty directory (list() returns [] for both files and
+                    // empty dirs on some Android versions).
+                    dest.mkdirs()
                 }
             }
         }
@@ -167,30 +192,109 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Reference host handlers for `vendor.media`: the worklet serves the
-     * returned path over its loopback HTTP server, so no bytes cross the
-     * bridge. Stubs return a bundled sample; wire up a real picker/camera.
+     * returned path over its loopback HTTP server, so no bytes cross the wire.
+     * `media.pick` opens the system photo/video picker; `media.capture` opens
+     * the camera. Both copy the result into the app cache and return a
+     * filesystem path the worklet can serve.
      */
     private fun registerMediaHostPlugins(registry: HostPluginRegistry) {
-        for (event in listOf("media.pick", "media.capture")) {
-            registry.register("vendor.media", event) { _, _ ->
-                HostPluginRegistry.HostInvokeOutcome.Ok(
-                    JSONObject().put("path", sampleMediaPath()),
+        // Registered in onCreate (before the activity is started), per the
+        // Activity Result API contract.
+        pickLauncher = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            val respond = pendingMedia ?: return@registerForActivityResult
+            pendingMedia = null
+            if (uri == null) {
+                respond(
+                    HostPluginRegistry.HostInvokeOutcome.Fail(
+                        ErrorCodes.HOST_ERROR,
+                        "Media pick cancelled",
+                    ),
                 )
+                return@registerForActivityResult
+            }
+            val path = copyUriToCache(uri)
+            if (path == null) {
+                respond(
+                    HostPluginRegistry.HostInvokeOutcome.Fail(
+                        ErrorCodes.HOST_ERROR,
+                        "Failed to copy picked media",
+                    ),
+                )
+            } else {
+                respond(HostPluginRegistry.HostInvokeOutcome.Ok(JSONObject().put("path", path)))
+            }
+        }
+        imageCaptureLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+            finishCapture(ok)
+        }
+        videoCaptureLauncher =
+            registerForActivityResult(ActivityResultContracts.TakeVideo()) { thumbnail ->
+                // TakeVideo's result is a thumbnail Bitmap (null when cancelled).
+                finishCapture(thumbnail != null)
+            }
+
+        registry.register("vendor.media", "media.pick") { args, _, respond ->
+            val kind = args?.optString("kind") ?: "image"
+            pendingMedia = respond
+            val selector =
+                if (kind == "video") {
+                    ActivityResultContracts.PickVisualMedia.VideoOnly
+                } else {
+                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                }
+            mainHandler.post { pickLauncher.launch(PickVisualMediaRequest(selector)) }
+        }
+        registry.register("vendor.media", "media.capture") { args, _, respond ->
+            val kind = args?.optString("kind") ?: "image"
+            pendingMedia = respond
+            val ext = if (kind == "video") ".mp4" else ".jpg"
+            val file = File(cacheDir, "capture-${System.currentTimeMillis()}$ext")
+            pendingCaptureFile = file
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            mainHandler.post {
+                if (kind == "video") videoCaptureLauncher.launch(uri) else imageCaptureLauncher.launch(uri)
             }
         }
     }
 
-    private var sampleMediaPath: String? = null
-
-    private fun sampleMediaPath(): String {
-        sampleMediaPath?.let { return it }
-        val dest = File(cacheDir, "sample.png")
-        if (!dest.exists()) {
-            resources.openRawResource(R.raw.sample).use { input ->
-                dest.outputStream().use { output -> input.copyTo(output) }
-            }
+    private fun finishCapture(success: Boolean) {
+        val respond = pendingMedia ?: return
+        pendingMedia = null
+        val file = pendingCaptureFile ?: return
+        pendingCaptureFile = null
+        if (success && file.exists() && file.length() > 0L) {
+            respond(HostPluginRegistry.HostInvokeOutcome.Ok(JSONObject().put("path", file.absolutePath)))
+        } else {
+            respond(
+                HostPluginRegistry.HostInvokeOutcome.Fail(
+                    ErrorCodes.HOST_ERROR,
+                    "Capture cancelled or failed",
+                ),
+            )
         }
-        sampleMediaPath = dest.absolutePath
-        return dest.absolutePath
+    }
+
+    /** Copies a picker content:// URI into the app cache so the worklet can
+     * serve it from the filesystem. */
+    private fun copyUriToCache(uri: Uri): String? {
+        return try {
+            val ext =
+                contentResolver.getType(uri)?.let { mime ->
+                    when {
+                        mime.startsWith("image/") -> ".jpg"
+                        mime.startsWith("video/") -> ".mp4"
+                        else -> ".bin"
+                    }
+                } ?: ".bin"
+            val dest = File(cacheDir, "media-${System.currentTimeMillis()}$ext")
+            val copied =
+                contentResolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { output -> input.copyTo(output) }
+                }
+            if (copied == null) null else dest.absolutePath
+        } catch (e: Exception) {
+            Log.e("BARE_KOTLIN", "Failed to copy picked media", e)
+            null
+        }
     }
 }

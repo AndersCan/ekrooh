@@ -20,7 +20,10 @@ public final class HostPluginRegistry {
     case fail(code: String, message: String)
   }
 
-  public typealias Handler = ([String: Any]?, Data?) -> HostInvokeOutcome
+  /// Handlers respond asynchronously ([respond] may be called later, e.g. after
+  /// a native picker/camera result), mirroring the Kotlin registry.
+  public typealias Handler =
+    ([String: Any]?, Data?, @escaping (HostInvokeOutcome) -> Void) -> Void
 
   private var handlers: [Key: Handler] = [:]
 
@@ -57,14 +60,18 @@ public final class HostPluginRegistry {
     pluginId: String,
     event: String,
     args: [String: Any]?,
-    payload: Data?
-  ) -> HostInvokeOutcome {
+    payload: Data?,
+    respond: @escaping (HostInvokeOutcome) -> Void
+  ) {
     guard let handler = handlers[Key(pluginId: pluginId, event: event)] else {
-      return .fail(
-        code: ErrorCodes.unsupportedCapability,
-        message: "No host handler for \(pluginId).\(event)"
+      respond(
+        .fail(
+          code: ErrorCodes.unsupportedCapability,
+          message: "No host handler for \(pluginId).\(event)"
+        )
       )
+      return
     }
-    return handler(args, payload)
+    handler(args, payload, respond)
   }
 }

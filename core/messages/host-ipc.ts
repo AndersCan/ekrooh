@@ -120,7 +120,7 @@ export function createHostIpcBridge(config: {
     async invokeOnHost(
       header: PluginInvokeRequestHeader,
       payload: Uint8Array,
-      timeoutMs = 30000,
+      timeoutMs = 300000,
     ): Promise<PluginInvokeResponseHeader | null> {
       const requestId = header.requestId;
       if (!requestId) return null;

@@ -59,33 +59,38 @@ public final class HostIpcCoordinator {
       let pluginId = header["pluginId"] as? String ?? ""
       let event = header["event"] as? String ?? ""
       let args = header["args"] as? [String: Any]
-      let outcome = hostPlugins.dispatch(
+      hostPlugins.dispatch(
         pluginId: pluginId,
         event: event,
         args: args,
         payload: message.payload
-      )
-      var responseHeader: [String: Any] = [
-        "type": "HOST_INVOKE_RESPONSE",
-        "requestId": reqId,
-        "pluginId": pluginId,
-        "event": event,
-      ]
-      switch outcome {
-      case .ok(let value):
-        responseHeader["result"] = value
-      case .fail(let code, let message):
-        responseHeader["error"] = [
-          "code": code,
-          "message": message,
+      ) { outcome in
+        var responseHeader: [String: Any] = [
+          "type": "HOST_INVOKE_RESPONSE",
+          "requestId": reqId,
+          "pluginId": pluginId,
+          "event": event,
         ]
+        switch outcome {
+        case .ok(let value):
+          responseHeader["result"] = value
+        case .fail(let code, let message):
+          responseHeader["error"] = [
+            "code": code,
+            "message": message,
+          ]
+        }
+        let frame = try? BareProtocol.buildMessage(
+          type: BareProtocol.MessageType.envelope,
+          headerJson: BareProtocol.encodeJSON(responseHeader),
+          payload: nil
+        )
+        if let frame {
+          Task { [weak self] in
+            try? await self?.ipc.write(data: frame)
+          }
+        }
       }
-      let frame = try BareProtocol.buildMessage(
-        type: BareProtocol.MessageType.envelope,
-        headerJson: BareProtocol.encodeJSON(responseHeader),
-        payload: nil
-      )
-      try await ipc.write(data: frame)
 
     default:
       break

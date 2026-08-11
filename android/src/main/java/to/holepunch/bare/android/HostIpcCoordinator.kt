@@ -41,31 +41,32 @@ class HostIpcCoordinator(
                         val pluginId = headerObj.getString("pluginId")
                         val event = headerObj.getString("event")
                         val args = headerObj.optJSONObject("args")
-                        val outcome = hostPlugins.dispatch(pluginId, event, args, message.payload)
-                        val respHeader = JSONObject().apply {
-                            put("type", "HOST_INVOKE_RESPONSE")
-                            put("requestId", reqId)
-                            put("pluginId", pluginId)
-                            put("event", event)
+                        hostPlugins.dispatch(pluginId, event, args, message.payload) { outcome ->
+                            val respHeader = JSONObject().apply {
+                                put("type", "HOST_INVOKE_RESPONSE")
+                                put("requestId", reqId)
+                                put("pluginId", pluginId)
+                                put("event", event)
+                            }
+                            when (outcome) {
+                                is HostPluginRegistry.HostInvokeOutcome.Ok ->
+                                    respHeader.put("result", outcome.value)
+                                is HostPluginRegistry.HostInvokeOutcome.Fail ->
+                                    respHeader.put(
+                                        "error",
+                                        JSONObject().apply {
+                                            put("code", outcome.code)
+                                            put("message", outcome.message)
+                                        },
+                                    )
+                            }
+                            val buf = BareProtocol.buildMessage(
+                                BareProtocol.MessageType.ENVELOPE,
+                                respHeader.toString(),
+                                null,
+                            )
+                            ipc.write(buf)
                         }
-                        when (outcome) {
-                            is HostPluginRegistry.HostInvokeOutcome.Ok ->
-                                respHeader.put("result", outcome.value)
-                            is HostPluginRegistry.HostInvokeOutcome.Fail ->
-                                respHeader.put(
-                                    "error",
-                                    JSONObject().apply {
-                                        put("code", outcome.code)
-                                        put("message", outcome.message)
-                                    },
-                                )
-                        }
-                        val buf = BareProtocol.buildMessage(
-                            BareProtocol.MessageType.ENVELOPE,
-                            respHeader.toString(),
-                            null,
-                        )
-                        ipc.write(buf)
                     }
                 }
             } catch (e: Exception) {

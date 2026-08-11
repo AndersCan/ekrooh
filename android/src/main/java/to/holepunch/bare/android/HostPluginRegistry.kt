@@ -5,12 +5,14 @@ import org.json.JSONObject
 
 /**
  * Registers host-side invoke handlers for events delegated from the Bare worklet over IPC.
+ * Handlers respond asynchronously ([respond] may be called later, e.g. after an Activity
+ * result), mirroring how native pickers/cameras return their payloads.
  */
 class HostPluginRegistry {
     data class Key(val pluginId: String, val event: String)
 
     fun interface Handler {
-        fun invoke(args: JSONObject?, payload: ByteArray?): HostInvokeOutcome
+        fun invoke(args: JSONObject?, payload: ByteArray?, respond: (HostInvokeOutcome) -> Unit)
     }
 
     sealed class HostInvokeOutcome {
@@ -45,12 +47,20 @@ class HostPluginRegistry {
         return arr
     }
 
-    fun dispatch(pluginId: String, event: String, args: JSONObject?, payload: ByteArray?): HostInvokeOutcome {
+    fun dispatch(
+        pluginId: String,
+        event: String,
+        args: JSONObject?,
+        payload: ByteArray?,
+        respond: (HostInvokeOutcome) -> Unit,
+    ) {
         val h = handlers[Key(pluginId, event)]
-            ?: return HostInvokeOutcome.Fail(
-                ErrorCodes.UNSUPPORTED_CAPABILITY,
-                "No host handler for $pluginId.$event",
+            ?: return respond(
+                HostInvokeOutcome.Fail(
+                    ErrorCodes.UNSUPPORTED_CAPABILITY,
+                    "No host handler for $pluginId.$event",
+                ),
             )
-        return h.invoke(args, payload)
+        h.invoke(args, payload, respond)
     }
 }

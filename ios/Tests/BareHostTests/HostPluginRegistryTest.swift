@@ -2,20 +2,41 @@ import XCTest
 import BareHost
 
 final class HostPluginRegistryTest: XCTestCase {
+  private func dispatchSync(
+    _ registry: HostPluginRegistry,
+    pluginId: String,
+    event: String,
+    args: [String: Any]? = nil
+  ) -> HostPluginRegistry.HostInvokeOutcome {
+    let expectation = expectation(description: "dispatch responded")
+    var captured: HostPluginRegistry.HostInvokeOutcome?
+    registry.dispatch(
+      pluginId: pluginId,
+      event: event,
+      args: args,
+      payload: nil
+    ) { outcome in
+      captured = outcome
+      expectation.fulfill()
+    }
+    wait(for: [expectation], timeout: 5)
+    return captured ?? .fail(code: "TEST", message: "no outcome")
+  }
+
   func testDispatchesToARegisteredHandler() {
     let registry = HostPluginRegistry()
     registry.register(
       pluginId: "core.permissions",
       event: "permissions.requestStorage"
-    ) { _, _ in
-      .ok(["granted": true])
+    ) { _, _, respond in
+      respond(.ok(["granted": true]))
     }
 
-    let outcome = registry.dispatch(
+    let outcome = dispatchSync(
+      registry,
       pluginId: "core.permissions",
       event: "permissions.requestStorage",
-      args: [:],
-      payload: nil
+      args: [:]
     )
 
     guard case .ok(let value) = outcome else {
@@ -27,11 +48,10 @@ final class HostPluginRegistryTest: XCTestCase {
   func testReturnsUnsupportedCapabilityForUnregisteredEvents() {
     let registry = HostPluginRegistry()
 
-    let outcome = registry.dispatch(
+    let outcome = dispatchSync(
+      registry,
       pluginId: "core.health",
-      event: "health.ping",
-      args: nil,
-      payload: nil
+      event: "health.ping"
     )
 
     guard case .fail(let code, let message) = outcome else {
@@ -46,20 +66,20 @@ final class HostPluginRegistryTest: XCTestCase {
     registry.register(
       pluginId: "core.permissions",
       event: "permissions.requestStorage"
-    ) { _, _ in
-      .ok(["granted": true])
+    ) { _, _, respond in
+      respond(.ok(["granted": true]))
     }
     registry.register(
       pluginId: "core.permissions",
       event: "permissions.requestOther"
-    ) { _, _ in
-      .ok(["granted": true])
+    ) { _, _, respond in
+      respond(.ok(["granted": true]))
     }
     registry.register(
       pluginId: "core.health",
       event: "health.ping"
-    ) { _, _ in
-      .ok(["granted": true])
+    ) { _, _, respond in
+      respond(.ok(["granted": true]))
     }
 
     let rows = registry.toCapabilitiesJSON()

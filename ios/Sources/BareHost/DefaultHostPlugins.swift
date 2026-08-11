@@ -8,8 +8,8 @@ public func registerDefaultHostPlugins(_ registry: HostPluginRegistry) {
   registry.register(
     pluginId: "core.permissions",
     event: "permissions.requestStorage"
-  ) { _, _ in
+  ) { _, _, respond in
     // Stub: integrate with a real permission prompt for production.
-    .ok(["granted": true])
+    respond(.ok(["granted": true]))
   }
 }

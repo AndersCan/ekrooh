@@ -113,6 +113,7 @@ export function invokeEvent<TSpec extends EventSpec<any, any>>(
   spec: TSpec,
   args: TSpec['args'],
   payload?: Uint8Array | ArrayBuffer | string | null,
+  timeoutMs?: number,
 ): InvokeEnvelope<TSpec['name'], TSpec['args'], TSpec['result']> {
   return {
     kind: 'invoke',
@@ -120,6 +121,7 @@ export function invokeEvent<TSpec extends EventSpec<any, any>>(
     event: spec.name,
     args,
     payload,
+    timeoutMs,
   };
 }
 

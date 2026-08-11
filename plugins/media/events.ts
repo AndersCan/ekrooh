@@ -9,6 +9,10 @@ export type MediaResult = {
   path: string;
 };
 
+// The native picker/camera is user-mediated and can stay open for minutes;
+// never let the invoke timeout (default 5s) abort it.
+const MEDIA_INVOKE_TIMEOUT_MS = 5 * 60 * 1000;
+
 export const mediaSpecs = {
   pick: {
     pluginId: 'vendor.media',
@@ -29,12 +33,22 @@ export const mediaEvents = {
     pick(
       kind: MediaKind = 'image',
     ): InvokeEnvelope<'media.pick', { kind?: MediaKind }, MediaResult> {
-      return invokeEvent(mediaSpecs.pick, { kind });
+      return invokeEvent(
+        mediaSpecs.pick,
+        { kind },
+        null,
+        MEDIA_INVOKE_TIMEOUT_MS,
+      );
     },
     capture(
       kind: MediaKind = 'image',
     ): InvokeEnvelope<'media.capture', { kind?: MediaKind }, MediaResult> {
-      return invokeEvent(mediaSpecs.capture, { kind });
+      return invokeEvent(
+        mediaSpecs.capture,
+        { kind },
+        null,
+        MEDIA_INVOKE_TIMEOUT_MS,
+      );
     },
   },
 };
