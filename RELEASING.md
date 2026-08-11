@@ -32,15 +32,16 @@ cut a release by following this document with no human beyond the tag decision.
    ./gradlew :examples:android-app:assembleDebug
    ```
 
-4. (iOS, local only) verify the Swift host on a simulator:
+4. (iOS) verify the Swift host on a simulator (also covered by CI on the macOS
+   runner):
 
    ```bash
    npm run build:ios
    npm run test:ios
    ```
 
-   iOS CI is not set up yet; the Swift host ships as source in `ios/` on the
-   tag, so a broken host is caught on the next local build.
+   The Swift host ships as source in `ios/` on the tag; CI (`test.yml`, macOS
+   job) keeps it green.
 
 ### 2. Version and changelog
 
@@ -80,6 +81,10 @@ cut a release by following this document with no human beyond the tag decision.
      consumed by `examples/ios-app`) on the same tag; no separate artifact is
      published until distribution is decided (see `vision.md`). Consumers
      embed `BareKit.xcframework` from `prebuilds/ios/`.
+
+The `@less/bare` exports map is frozen at first publish: `core`, `plugins`,
+`plugins/*/events`, and `transports` (WebSocket + mock only — the pre-1.0
+bootstrap bridges were removed in Phase 2).
 
 ### 4. Announce
 

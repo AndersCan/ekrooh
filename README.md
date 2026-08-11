@@ -14,11 +14,12 @@ The **frontend** (browser or WebView) is written as if there is only a
 **backend** reachable over a **WebSocket** (binary framed messages). It picks a
 transport automatically:
 
-- **WebSocket** in local dev and when no injected bridge is present.
+- **WebSocket** everywhere on-device: the worklet runs **one loopback HTTP+WS
+  server** that serves the web app, the media files, and the protocol socket,
+  so the page connects to the same origin it was served from (`ws://location.host`).
 - **Mock transport** when `VITE_TRANSPORT_MODE=mock` (tests).
-- **Bootstrap bridge** when `window.BareShell` exists (embedded WebView).
-- **WKWebView bridge** when `window.webkit?.messageHandlers?.bareHost` exists
-  (iOS shell).
+- Browser dev points the WebSocket at the dev backend explicitly
+  (`VITE_BARE_WS_URL`).
 
 The UI does **not** branch on worklets, Bare, or host IPC. Shared types and
 helpers (`@less/bare/core`) describe the **wire protocol** to the backend, not
@@ -26,30 +27,31 @@ the runtime that implements it.
 
 ## Glossary
 
-| Term         | Meaning                                                                                         |
-| ------------ | ----------------------------------------------------------------------------------------------- |
-| **Frontend** | Web UI: Vite bundle in the browser; same bundle in the Android/iOS WebView.                     |
-| **Backend**  | Logic that runs the core bundle and speaks the framed message protocol with the frontend.       |
-| **Host**     | Native shell (Android/iOS): starts the backend, owns system APIs, exposes the bootstrap bridge. |
+| Term         | Meaning                                                                                      |
+| ------------ | -------------------------------------------------------------------------------------------- |
+| **Frontend** | Web UI: Vite bundle in the browser; same bundle in the Android/iOS WebView.                  |
+| **Backend**  | Logic that runs the core bundle and speaks the framed message protocol with the frontend.    |
+| **Host**     | Native shell (Android/iOS): starts the backend, owns system APIs, injects the session token. |
 
 ## Repository structure
 
 - `core/` — framework: wire protocol codec, plugin router, RPC messenger, host
-  IPC (`core/messages`), dev WebSocket server, Bare worklet entry.
+  IPC (`core/messages`), the unified loopback server (HTTP + WS + cookie auth),
+  Bare worklet entry.
 - `plugins/` — framework: canonical plugins (`core.health`, `core.discovery`,
-  `core.permissions`) and typed event builders.
-- `web/transports/` — framework: `MessageTransport` plus WebSocket, mock, and
-  bootstrap-bridge transports.
+  `core.permissions`, `vendor.media`) and typed event builders.
+- `web/transports/` — framework: `MessageTransport` plus WebSocket and mock
+  transports.
 - `android/` — framework: Android host **library** (`:bare-host`) — IPC
-  coordinator, host plugin registry, WebView bridge.
+  coordinator, host plugin registry, WebView client.
 - `ios/` — framework: iOS host **Swift package** (`BareHost`) — IPC
-  coordinator, host plugin registry, WKWebView bridge.
+  coordinator, host plugin registry.
 - `examples/` — reference app: `web/` (lit-html + nanostores + Tailwind UI),
   `android-app/` (the Android shell that embeds the backend and WebView), and
   `ios-app/` (the iOS shell).
 - `e2e/` — Playwright tests against the browser runtime on the mock transport.
 - `scripts/` — dev backend runner, Playwright browser wrapper, prebuilds
-  fetcher.
+  fetcher, loopback smoke test.
 - `prebuilds/` — Bare Kit prebuilds (build output, gitignored).
 
 The framework's public surface is the `exports` map of the root `package.json`
@@ -59,13 +61,13 @@ bare-pack).
 
 ## Support matrix
 
-| Runtime        | Status        | Transport                         | Notes                                                                          |
-| -------------- | ------------- | --------------------------------- | ------------------------------------------------------------------------------ |
-| Browser (dev)  | first-class   | WebSocket                         | Vite + local backend server                                                    |
-| Browser (test) | first-class   | Mock                              | Deterministic Playwright runs                                                  |
-| Android        | first-class   | WebSocket and/or bootstrap bridge | Same protocol; bridge when the shell exposes `BareShell`                       |
-| iOS            | contract-only | WKWebView bridge                  | Same protocol; base64 frames over `messageHandlers.bareHost` + `onBareMessage` |
-| Desktop        | contract      | —                                 | Adapters follow the same plugin contracts                                      |
+| Runtime        | Status        | Transport | Notes                                                                                   |
+| -------------- | ------------- | --------- | --------------------------------------------------------------------------------------- |
+| Browser (dev)  | first-class   | WebSocket | Vite + local backend server (`VITE_BARE_WS_URL`)                                        |
+| Browser (test) | first-class   | Mock      | Deterministic Playwright runs                                                           |
+| Android        | first-class   | WebSocket | Same-origin loopback socket; cookie auth via the injected token                         |
+| iOS            | contract-only | WebSocket | Same-origin loopback socket; host ships as source (`ios/`, SPM) on the same release tag |
+| Desktop        | contract      | —         | Adapters follow the same plugin contracts                                               |
 
 ### Parity policy
 
@@ -118,35 +120,35 @@ add plugins with namespaced events and per-runtime handlers.
 - Canonical plugins: `core.health`, `core.discovery`, `core.permissions`, and
   `vendor.media` (reference for out-of-band binary transfer).
 
-### Bootstrap bridge (embedded WebView)
+### Loopback server + cookie auth
 
-- The shell (Android host) hands the page a `WebMessagePort` on load; both
-  directions carry **raw `MessageProtocol` frames** — no JSON envelope, no
-  base64 re-serialization (see `BarePortMessenger` in the host library).
-- API 34+ WebViews transport frames as `ArrayBuffer` bytes; older ones carry
-  the same bytes base64-encoded, decoded by the web transport.
-- The shell exposes `window.BareShell` as a capability marker so the web layer
-  can pick the bootstrap bridge over the WebSocket transport.
+One loopback HTTP+WS server (`core/server/static-file-server.ts`) serves the
+web app at `/`, the media files mounted by plugins, and the framed-protocol
+WebSocket socket. On device it binds `127.0.0.1` on an ephemeral port and every
+request is gated by a per-session token:
 
-### iOS WKWebView bridge
+- The shell injects `window.__lessBareToken` (plus `window.BareShell` as a
+  presence marker) before the page loads.
+- The page exchanges it for a `bare_session` cookie via `POST /login`
+  (`HttpOnly; SameSite=Lax; Path=/`).
+- The cookie then authorizes `<img>`/`<video>`/`fetch` and the WebSocket
+  upgrade. `X-Bare-Token`/`?token=` remain as a fallback for non-browser
+  clients.
+- The worklet writes `{ origin, port, token }` to `handoff.json` in the
+  sandbox dir the host passed via `Worklet.Configuration.assets`; the host
+  reads it, injects the token, and loads `http://127.0.0.1:<port>/index.html`.
 
-WKWebView has no `WebMessagePort`, so the iOS shell carries the **same frame
-bytes** base64-encoded in both directions (see `BareWebViewBridge` in the host
-package):
-
-- Web → worklet: `window.webkit.messageHandlers.bareHost.postMessage(base64)`.
-- worklet → Web: the injected `window.onBareMessage(base64)` callback.
-- The web transport (`bootstrap-bridge-wkwebview.ts`) encodes/decodes with the
-  same `MessageProtocol`, so the wire bytes are identical to every transport.
+The dev backend runs the same bundle with auth off on a fixed port
+(`ws://localhost:8080`), so browser dev needs no token.
 
 ### Media (out-of-band bytes)
 
-Images/videos never cross the wire protocol (the frame cap is 16 MiB) or the
-WebView bridge. `vendor.media` demonstrates the intended pattern: the host
-picks/captures a file natively and returns its path; the worklet mounts it on a
-loopback HTTP server (`core/server/static-file-server.ts`) and returns a URL.
-The web layer loads the URL directly — one serving implementation for every
-runtime. Reference hosts stub the pick with a bundled sample image.
+Images/videos never cross the wire protocol (the frame cap is 16 MiB).
+`vendor.media` demonstrates the intended pattern: the host picks/captures a
+file natively and returns its path; the worklet mounts it on the loopback
+server and returns a URL. The web layer loads the URL directly (same-origin,
+cookie-authenticated) — one serving implementation for every runtime. Reference
+hosts stub the pick with a bundled sample image.
 
 ## Scripts
 
@@ -167,6 +169,7 @@ runtime. Reference hosts stub the pick with a bundled sample image.
 | `npm run prebuilds`          | Fetch Bare Kit prebuilds (requires `gh`)               |
 | `npm run test:ios`           | XCTest + UI test on the iOS simulator                  |
 | `npm run playwright:install` | Download Chromium into `.playwright-browsers/`         |
+| `npm run smoke:loopback`     | Smoke-test the unified loopback server under `bare`    |
 
 ## Testing
 

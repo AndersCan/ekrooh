@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { createMediaPlugin } from './plugin';
-import type { StaticFileServer } from '../../core/server/static-file-server';
+import type { LoopbackServer } from '../../core/server/static-file-server';
 import {
   createPluginRegistry,
   createPluginRouter,
@@ -10,14 +10,21 @@ import {
 
 const context: PluginContext = { runtime: 'bare', payload: new Uint8Array(0) };
 
-function stubServer(): StaticFileServer {
+function stubServer(): LoopbackServer {
   return {
     origin: vi.fn(async () => 'http://127.0.0.1:4242'),
-    url: vi.fn(
-      async (p: string) => `http://127.0.0.1:4242${p}?token=testtoken`,
-    ),
+    url: vi.fn(async (p: string) => `http://127.0.0.1:4242${p}`),
+    token: vi.fn(() => 'testtoken'),
+    credentials: vi.fn(async () => ({
+      origin: 'http://127.0.0.1:4242',
+      port: 4242,
+      token: 'testtoken',
+    })),
     mount: vi.fn(),
     unmount: vi.fn(),
+    mountDir: vi.fn(),
+    onConnection: vi.fn(),
+    close: vi.fn(),
   };
 }
 
@@ -51,9 +58,9 @@ describe('createMediaPlugin', () => {
     expect(error).toBeNull();
     expect(media?.path).toBe('/tmp/sample.png');
     expect(media?.url).toMatch(
-      /^http:\/\/127\.0\.0\.1:4242\/media\/image-[0-9a-z]+-[0-9a-z]+\?token=testtoken$/,
+      /^http:\/\/127\.0\.0\.1:4242\/media\/image-[0-9a-z]+-[0-9a-z]+$/,
     );
-    expect(media?.url).toContain('?token=');
+    expect(media?.url).not.toContain('?token=');
     expect(media?.url).toContain('/media/image-');
     expect(staticServer.url).toHaveBeenCalledWith(
       expect.stringContaining('/media/image-'),

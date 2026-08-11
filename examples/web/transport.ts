@@ -1,27 +1,27 @@
 import {
-  createBootstrapBridgeTransport,
   createMockTransport,
   createWebSocketTransport,
-  createWkWebViewBridgeTransport,
   type MessageTransport,
 } from '@less/bare/transports';
 
 let transport: MessageTransport | null = null;
 
+const env = (import.meta as { env?: Record<string, string | undefined> }).env;
+
 export function getTransport(): MessageTransport {
   if (transport) return transport;
 
-  const mode = (import.meta as { env?: { VITE_TRANSPORT_MODE?: string } }).env
-    ?.VITE_TRANSPORT_MODE;
-  if (mode === 'mock') {
+  if (env?.VITE_TRANSPORT_MODE === 'mock') {
     transport = createMockTransport();
-  } else if (window.BareShell) {
-    transport = createBootstrapBridgeTransport();
-  } else if (window.webkit?.messageHandlers?.bareHost) {
-    transport = createWkWebViewBridgeTransport();
-  } else {
-    transport = createWebSocketTransport();
+    return transport;
   }
+
+  // On-device the page is served by the worklet's loopback server, so the
+  // transport defaults to the same origin. Browser dev is cross-origin (the
+  // Vite dev server), so point at the dev backend explicitly.
+  const devUrl =
+    env?.VITE_BARE_WS_URL ?? (env?.DEV ? 'ws://localhost:8080' : undefined);
+  transport = createWebSocketTransport(devUrl ? { url: devUrl } : {});
 
   return transport;
 }

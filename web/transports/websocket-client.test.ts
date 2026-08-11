@@ -20,6 +20,7 @@ class FakeWebSocket {
   readyState: number = FakeWebSocket.CONNECTING;
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
   onmessage: ((event: { data?: Uint8Array | ArrayBuffer }) => void) | null =
     null;
   sent: ArrayBuffer[] = [];
@@ -56,51 +57,118 @@ function lastSocket(): FakeWebSocket {
 }
 
 const protocol = new MessageProtocol();
+const nextTick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 beforeEach(() => {
   FakeWebSocket.instances = [];
   (globalThis as Record<string, unknown>).WebSocket = FakeWebSocket;
+  vi.stubGlobal('window', {});
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true })),
+  );
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('createWebSocketTransport', () => {
-  it('appends the injected token to the WebSocket URL', () => {
+describe('createWebSocketTransport URL selection', () => {
+  it('defaults to the page same-origin when no URL is given', async () => {
+    vi.stubGlobal('window', { location: { host: '127.0.0.1:4321' } });
+
+    createWebSocketTransport();
+
+    await nextTick();
+    expect(lastSocket().url).toBe('ws://127.0.0.1:4321');
+  });
+
+  it('falls back to localhost:8080 when there is no page origin', async () => {
+    createWebSocketTransport();
+
+    await nextTick();
+    expect(lastSocket().url).toBe('ws://localhost:8080');
+  });
+
+  it('uses an explicit URL verbatim', async () => {
+    createWebSocketTransport('ws://example.test/socket');
+
+    await nextTick();
+    expect(lastSocket().url).toBe('ws://example.test/socket');
+  });
+});
+
+describe('createWebSocketTransport /login bootstrap', () => {
+  it('exchanges an injected token for a session cookie before opening', async () => {
     vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+    const fetchMock = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
 
     createWebSocketTransport('ws://test');
 
-    expect(lastSocket().url).toBe('ws://test/?token=secret-token');
+    await nextTick();
+    expect(fetchMock).toHaveBeenCalledWith('/login', {
+      method: 'POST',
+      body: 'secret-token',
+    });
+    expect(lastSocket().url).toBe('ws://test');
   });
 
-  it('preserves an existing query when appending the token', () => {
+  it('falls back to the query token when login is rejected', async () => {
     vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false })),
+    );
 
     createWebSocketTransport('ws://test?foo=1');
 
+    await nextTick();
     expect(lastSocket().url).toBe('ws://test/?foo=1&token=secret-token');
   });
 
-  it('leaves the URL unchanged when no token is injected', () => {
-    vi.stubGlobal('window', {});
+  it('falls back to the query token when login throws', async () => {
+    vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('network down');
+      }),
+    );
 
     createWebSocketTransport('ws://test');
 
-    expect(lastSocket().url).toBe('ws://test');
+    await nextTick();
+    expect(lastSocket().url).toBe('ws://test/?token=secret-token');
   });
 
-  it('leaves the URL unchanged when the token is empty', () => {
-    vi.stubGlobal('window', { __lessBareToken: '' });
+  it('does not call /login when no token is injected', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
 
     createWebSocketTransport('ws://test');
 
-    expect(lastSocket().url).toBe('ws://test');
+    await nextTick();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('queues messages while connecting and flushes them on open', () => {
+  it('skips login when explicitly disabled', async () => {
+    vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+    const fetchMock = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    createWebSocketTransport({ url: 'ws://test', login: false });
+
+    await nextTick();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(lastSocket().url).toBe('ws://test');
+  });
+});
+
+describe('createWebSocketTransport messaging', () => {
+  it('queues messages while connecting and flushes them on open', async () => {
     const transport = createWebSocketTransport('ws://test');
+    await nextTick();
     const socket = lastSocket();
 
     transport.send(
@@ -119,8 +187,9 @@ describe('createWebSocketTransport', () => {
     expect(socket.sent).toHaveLength(1);
   });
 
-  it('delivers decoded frames to subscribers', () => {
+  it('delivers decoded frames to subscribers', async () => {
     const transport = createWebSocketTransport('ws://test');
+    await nextTick();
     const socket = lastSocket();
     const headers: unknown[] = [];
     transport.subscribe((message) => headers.push(message.header));
@@ -146,8 +215,12 @@ describe('createWebSocketTransport', () => {
     });
   });
 
-  it('fails queued invokes with TRANSPORT_ERROR on close', () => {
-    const transport = createWebSocketTransport('ws://test');
+  it('fails queued invokes with TRANSPORT_ERROR once retries are exhausted', async () => {
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+    });
+    await nextTick();
     const socket = lastSocket();
     const headers: unknown[] = [];
     transport.subscribe((message) => headers.push(message.header));
@@ -164,19 +237,32 @@ describe('createWebSocketTransport', () => {
     );
     socket.close();
 
-    expect(headers).toHaveLength(1);
     const header = headers[0] as PluginInvokeResponseHeader;
     expect(header.type).toBe('INVOKE_RESPONSE');
     expect(header.error?.code).toBe('TRANSPORT_ERROR');
   });
+});
 
-  it('emits TRANSPORT_ERROR immediately when the socket is already closed', () => {
-    const transport = createWebSocketTransport('ws://test');
-    const socket = lastSocket();
-    socket.readyState = FakeWebSocket.CLOSED;
-    const headers: unknown[] = [];
-    transport.subscribe((message) => headers.push(message.header));
+describe('createWebSocketTransport reconnect', () => {
+  it('reconnects with backoff after an unexpected close', async () => {
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 3,
+      backoffMs: 5,
+    });
+    await nextTick();
+    const first = lastSocket();
+    transport.subscribe(() => {});
 
+    first.close();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(FakeWebSocket.instances.length).toBe(2);
+    const second = lastSocket();
+    expect(second).not.toBe(first);
+    expect(second.url).toBe('ws://test');
+
+    // Messages sent during the backoff are queued and flushed on reopen.
     transport.send(
       MessageType.ENVELOPE,
       {
@@ -187,6 +273,37 @@ describe('createWebSocketTransport', () => {
       },
       null,
     );
+    expect(second.sent).toHaveLength(0);
+    second.open();
+    expect(second.sent).toHaveLength(1);
+  });
+
+  it('queues during the reconnect window and errors after the cap', async () => {
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 1,
+      backoffMs: 5,
+    });
+    await nextTick();
+    const headers: unknown[] = [];
+    transport.subscribe((message) => headers.push(message.header));
+
+    const first = lastSocket();
+    first.close();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const second = lastSocket();
+
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'q4',
+      },
+      null,
+    );
+    second.close();
 
     const header = headers[0] as PluginInvokeResponseHeader;
     expect(header.type).toBe('INVOKE_RESPONSE');

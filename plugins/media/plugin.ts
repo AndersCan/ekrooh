@@ -7,12 +7,12 @@ import {
   PluginInvokeResponseHeader,
   PluginManifest,
 } from '../../core/messages';
-import type { StaticFileServer } from '../../core/server/static-file-server';
+import type { LoopbackServer } from '../../core/server/static-file-server';
 import { mediaSpecs, MediaKind } from './events';
 
 export type MediaPluginDeps = {
-  /** Worklet-side loopback HTTP server exposing picked files to the web layer. */
-  staticServer: StaticFileServer;
+  /** Worklet-side loopback server exposing picked files to the web layer. */
+  staticServer: LoopbackServer;
   /** Delegates the native pick/capture to the host (`HOST_INVOKE_REQUEST`). */
   invokeOnHost: (
     header: PluginInvokeRequestHeader,

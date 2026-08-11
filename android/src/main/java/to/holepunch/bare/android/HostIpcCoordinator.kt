@@ -6,12 +6,13 @@ import to.holepunch.bare.kit.IPC
 import java.nio.ByteBuffer
 
 /**
- * Handles host-side IPC: capability queries, host invoke, and forwarding other envelopes to the WebView.
+ * Handles host-side IPC: capability queries and host invokes. The web layer
+ * talks to the worklet over the loopback WebSocket socket, so nothing is
+ * relayed to a WebView here.
  */
 class HostIpcCoordinator(
     private val ipc: IPC,
     private val hostPlugins: HostPluginRegistry,
-    private val relayToWebView: (ByteArray) -> Unit,
 ) {
     fun start() {
         ipc.readable {
@@ -66,7 +67,6 @@ class HostIpcCoordinator(
                         )
                         ipc.write(buf)
                     }
-                    else -> relayToWebView(raw)
                 }
             } catch (e: Exception) {
                 Log.e("BARE_KOTLIN", "Error in readable callback", e)

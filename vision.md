@@ -16,9 +16,9 @@ the plumbing — and only the plumbing:
   messenger
 - **plugin contracts** (`plugins`): namespaced events, manifests, deterministic
   errors
-- **transports** (`web/transports`): WebSocket, mock, bootstrap bridge
+- **transports** (`web/transports`): WebSocket, mock
 - **native hosts**: Android (Kotlin) today, iOS by contract — host IPC, plugin
-  registry, WebView bridge
+  registry, loopback page load
 - a **reference implementation** (`examples`): a runnable app demonstrating
   every plugin and doubling as the integration test harness
 
@@ -28,14 +28,14 @@ top of this framework.
 
 ## What it is not
 
-| Not this                                               | Because                                                                          |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| A product app                                          | Consumers add product features as their own plugins                              |
-| A general-purpose Android framework or WebView wrapper | This framework is specific to the Bare runtime + its protocol                    |
-| An iOS/desktop implementation                          | iOS is a contract for future shells; desktop is out of scope                     |
-| A Node.js application                                  | On device the runtime is Bare (worklet); Node only runs the dev WebSocket server |
-| A peer-to-peer framework                               | Bare is the runtime; this project is not Pears or a P2P layer                    |
-| Owned by one app team                                  | It is a distributable framework with multiple consumers                          |
+| Not this                                               | Because                                                                 |
+| ------------------------------------------------------ | ----------------------------------------------------------------------- |
+| A product app                                          | Consumers add product features as their own plugins                     |
+| A general-purpose Android framework or WebView wrapper | This framework is specific to the Bare runtime + its protocol           |
+| An iOS/desktop implementation                          | iOS is a contract for future shells; desktop is out of scope            |
+| A Node.js application                                  | On device the runtime is Bare (worklet); Node only runs the dev backend |
+| A peer-to-peer framework                               | Bare is the runtime; this project is not Pears or a P2P layer           |
+| Owned by one app team                                  | It is a distributable framework with multiple consumers                 |
 
 ## Distribution and versioning
 
@@ -83,12 +83,12 @@ major version or be blocked by stability fears.
 
 ## Platforms and parity
 
-| Runtime        | Status        | Transport                                                                                    |
-| -------------- | ------------- | -------------------------------------------------------------------------------------------- |
-| Browser (dev)  | first-class   | WebSocket                                                                                    |
-| Browser (test) | first-class   | Mock (deterministic Playwright runs)                                                         |
-| Android        | first-class   | WebSocket and/or bootstrap bridge                                                            |
-| iOS            | contract-only | WKWebView bridge (base64 frames); host ships as source (`ios/`, SPM) on the same release tag |
+| Runtime        | Status        | Transport                            |
+| -------------- | ------------- | ------------------------------------ |
+| Browser (dev)  | first-class   | WebSocket                            |
+| Browser (test) | first-class   | Mock (deterministic Playwright runs) |
+| Android        | first-class   | WebSocket and/or bootstrap bridge    |
+| iOS            | contract-only | WebSocket (same-origin loopback)     | host ships as source (`ios/`, SPM) on the same release tag |
 
 Parity policy:
 

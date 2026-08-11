@@ -75,3 +75,31 @@ jobs:
 
       - name: Gradle build (includes host JUnit tests)
         run: ./gradlew build
+
+  ios:
+    runs-on: macos-latest
+    name: ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Fetch Bare Kit prebuilds
+        run: npm run prebuilds
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build iOS app inputs (addons, bundle, web assets, xcodeproj)
+        run: npm run build:ios
+
+      - name: iOS XCTest + UI test on the simulator
+        run: npm run test:ios

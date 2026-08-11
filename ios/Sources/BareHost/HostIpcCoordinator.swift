@@ -2,23 +2,21 @@ import BareKit
 import Foundation
 
 /**
- * Handles host-side IPC: capability queries, host invoke, and forwarding every
- * other envelope to the web layer as the **original bytes** (no re-parse, no
- * re-serialization). Mirror of `android/.../HostIpcCoordinator.kt`.
+ * Handles host-side IPC: capability queries and host invokes. The web layer
+ * talks to the worklet over the loopback WebSocket socket, so nothing is
+ * relayed to a WKWebView here. Mirror of
+ * `android/.../HostIpcCoordinator.kt`.
  */
 public final class HostIpcCoordinator {
   private let ipc: IPC
   private let hostPlugins: HostPluginRegistry
-  private let relayToWebView: (Data) -> Void
 
   public init(
     ipc: IPC,
-    hostPlugins: HostPluginRegistry,
-    relayToWebView: @escaping (Data) -> Void
+    hostPlugins: HostPluginRegistry
   ) {
     self.ipc = ipc
     self.hostPlugins = hostPlugins
-    self.relayToWebView = relayToWebView
   }
 
   public func start() {
@@ -90,8 +88,7 @@ public final class HostIpcCoordinator {
       try await ipc.write(data: frame)
 
     default:
-      // Not a host envelope: relay the original bytes untouched.
-      relayToWebView(data)
+      break
     }
   }
 

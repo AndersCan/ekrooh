@@ -3,15 +3,13 @@
 The Android host for `@less/bare`, published as an AAR. Package
 `to.holepunch.bare.android`.
 
-| Class                | Responsibility                                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `BareProtocol`       | Kotlin mirror of the binary wire protocol (encode/decode).                                                         |
-| `HostIpcCoordinator` | Reads the IPC channel: answers capability queries, dispatches host invokes, relays other envelopes to the WebView. |
-| `HostPluginRegistry` | Registers host-side handlers and produces capability rows.                                                         |
-| `DefaultHostPlugins` | Registers the canonical host plugin handlers (`core.permissions` stub).                                            |
-| `BarePortMessenger`  | WebMessagePort bridge: forwards framed bytes between the WebView and the IPC channel (no JSON re-encoding).        |
-| `BareShellMarker`    | Injected `window.BareShell` marker so the web layer can detect the bootstrap bridge.                               |
-| `BareWebViewClient`  | Serves packaged assets via `WebViewAssetLoader` with an SPA fallback.                                              |
+| Class                | Responsibility                                                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `BareProtocol`       | Kotlin mirror of the binary wire protocol (encode/decode).                                                              |
+| `HostIpcCoordinator` | Reads the IPC channel: answers capability queries and dispatches host invokes (the web layer uses the loopback socket). |
+| `HostPluginRegistry` | Registers host-side handlers and produces capability rows.                                                              |
+| `DefaultHostPlugins` | Registers the canonical host plugin handlers (`core.permissions` stub).                                                 |
+| `BareWebViewClient`  | Logs WebView resource errors (the worklet serves the page over loopback).                                               |
 
 Build:
 

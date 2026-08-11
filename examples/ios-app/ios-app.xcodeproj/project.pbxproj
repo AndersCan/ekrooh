@@ -32,7 +32,6 @@
 		AA5FED1B4B838A318D10FE93 /* HostPluginRegistryTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55CF015E82E567D876F8D3B7 /* HostPluginRegistryTest.swift */; };
 		AABD71D6E7CC9D4C74E9D8DF /* bare-path.3.1.1.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B8FEAEB827838FCF9EAD4039 /* bare-path.3.1.1.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		B33D29B5D178093370890F96 /* bare-inspect.3.1.4.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = DFFF96FE138547EA56445631 /* bare-inspect.3.1.4.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		B5D3C0F73C615A3457332A5F /* BareAssetSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91E75B6020D4A57EADB07BC4 /* BareAssetSchemeHandler.swift */; };
 		B72CAAC02E248633F39D933E /* bare-pipe.4.2.3.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1CB84B74CE878695DC2D3E63 /* bare-pipe.4.2.3.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		B9DCE48C487BF0D16F178097 /* bare-tcp.2.5.4.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 842B49DD52B0FCDEDFED6C40 /* bare-tcp.2.5.4.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		BF94C12A2D32BAB8D0D5B4AC /* main.core.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 7A5416083BDA6FC221B9A772 /* main.core.bundle */; };
@@ -108,7 +107,6 @@
 		5849DFFD2048A6823C6A1F5D /* bare-os.3.9.3.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-os.3.9.3.xcframework"; path = "addons/bare-os.3.9.3.xcframework"; sourceTree = "<group>"; };
 		7A5416083BDA6FC221B9A772 /* main.core.bundle */ = {isa = PBXFileReference; lastKnownFileType = wrapper.cfbundle; path = main.core.bundle; sourceTree = "<group>"; };
 		842B49DD52B0FCDEDFED6C40 /* bare-tcp.2.5.4.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-tcp.2.5.4.xcframework"; path = "addons/bare-tcp.2.5.4.xcframework"; sourceTree = "<group>"; };
-		91E75B6020D4A57EADB07BC4 /* BareAssetSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BareAssetSchemeHandler.swift; sourceTree = "<group>"; };
 		9DEA7DC996C7B6B55CFFB7C9 /* BareProtocolTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BareProtocolTest.swift; sourceTree = "<group>"; };
 		A021468273BDA9ECF0BE0B04 /* BareKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = BareKit.xcframework; path = ../../prebuilds/ios/BareKit.xcframework; sourceTree = "<group>"; };
 		A6B0675F401F1C1D5E1686FB /* bare-tls.3.1.8.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-tls.3.1.8.xcframework"; path = "addons/bare-tls.3.1.8.xcframework"; sourceTree = "<group>"; };
@@ -226,7 +224,6 @@
 		918AD4D0A9922747EAD8CF95 /* app */ = {
 			isa = PBXGroup;
 			children = (
-				91E75B6020D4A57EADB07BC4 /* BareAssetSchemeHandler.swift */,
 				1D5CB96407D44F3B0E85B872 /* BareRuntime.swift */,
 				CF770F49D6C546F930063C7E /* ContentView.swift */,
 				1F1D6942DE4BD9FC5467A46E /* Info.plist */,
@@ -423,7 +420,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B5D3C0F73C615A3457332A5F /* BareAssetSchemeHandler.swift in Sources */,
 				6361C285832EAC0D24EC00BD /* BareRuntime.swift in Sources */,
 				4FC07E586CBE29DBFBA557D5 /* ContentView.swift in Sources */,
 				13B95E1E6C3F3F85E944E2A0 /* IOSApp.swift in Sources */,

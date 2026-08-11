@@ -57,6 +57,7 @@
     "build:bare": "npm run build:core",
     "build:bare:app": "esbuild core/main.core.ts --bundle --packages=external --platform=node --format=esm --outfile=core/main.core.gen.js",
     "playwright:install": "node scripts/playwright-local-browsers.mjs install chromium",
+    "smoke:loopback": "esbuild scripts/smoke-loopback.mjs --bundle --packages=external --platform=node --format=esm --outfile=scripts/smoke-loopback.gen.mjs && bare scripts/smoke-loopback.gen.mjs",
     "prebuilds": "node scripts/fetch-prebuilds.mjs",
     "prepare": "vp config"
   },

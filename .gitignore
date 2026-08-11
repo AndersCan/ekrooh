@@ -77,3 +77,6 @@ examples/android-app/src/main/addons/
 examples/android-app/src/main/assets/index.html
 examples/android-app/src/main/assets/assets/main-*.js
 examples/android-app/src/main/assets/assets/main-*.css
+
+# Bundled smoke test (scripts/smoke-loopback.mjs, run under the bare runtime)
+scripts/smoke-loopback.gen.mjs
