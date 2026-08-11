@@ -1,0 +1,767 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		084CA622D5E2F01CBAC4C399 /* BareHost in Frameworks */ = {isa = PBXBuildFile; productRef = F3B521EF07E654ADEB74EA2B /* BareHost */; };
+		13B95E1E6C3F3F85E944E2A0 /* IOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D1A2234F9E83EF38A5E1C7 /* IOSApp.swift */; };
+		276218F1B8248CE826300C05 /* bare-crypto.1.15.3.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D3D06758BE43184460274780 /* bare-crypto.1.15.3.xcframework */; };
+		27AF8F5818E489B763BA4788 /* BareKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A021468273BDA9ECF0BE0B04 /* BareKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		29C240A81BE97F1DA2631B5D /* BareHost in Frameworks */ = {isa = PBXBuildFile; productRef = 1A07DF693EDED0A38DE8D2AF /* BareHost */; };
+		389346D0EDBC2035996C1D73 /* BareProtocolTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DEA7DC996C7B6B55CFFB7C9 /* BareProtocolTest.swift */; };
+		40A780063ED3C4F2FE8C85C5 /* MediaHostPlugins.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11BF7C8B096B22DDFAD66293 /* MediaHostPlugins.swift */; };
+		427AED8ABB3ED9B6FCE50833 /* bare-crypto.1.15.3.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D3D06758BE43184460274780 /* bare-crypto.1.15.3.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		43E76CECF2D1AECF970DB6A0 /* bare-os.3.9.3.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5849DFFD2048A6823C6A1F5D /* bare-os.3.9.3.xcframework */; };
+		48542F1447132B321F8D0695 /* bare-os.3.9.3.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 5849DFFD2048A6823C6A1F5D /* bare-os.3.9.3.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		4FC07E586CBE29DBFBA557D5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF770F49D6C546F930063C7E /* ContentView.swift */; };
+		51CF34F1195DA1CE2B68849E /* bare-dns.2.1.4.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 4485140824DAC5EC8F8DB53A /* bare-dns.2.1.4.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		529590D7E1020EAF769FF8EB /* bare-buffer.3.6.2.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1CE6738BCA78B55AD03FCD21 /* bare-buffer.3.6.2.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		5A949FBAA32EE57EB2F612CD /* bare-inspect.3.1.4.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFFF96FE138547EA56445631 /* bare-inspect.3.1.4.xcframework */; };
+		5AB8E35EE0F698348C1855CA /* sample.png in Resources */ = {isa = PBXBuildFile; fileRef = 307EA3BF66FC1B0535D55DEB /* sample.png */; };
+		6361C285832EAC0D24EC00BD /* BareRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D5CB96407D44F3B0E85B872 /* BareRuntime.swift */; };
+		803F07871D74C7760B802C01 /* bare-dns.2.1.4.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4485140824DAC5EC8F8DB53A /* bare-dns.2.1.4.xcframework */; };
+		92E0224C342D2574A4BED599 /* bare-url.2.5.1.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A839E3BF7296CF4E6A6C85EE /* bare-url.2.5.1.xcframework */; };
+		9322A3EF44E84B29DD928FD3 /* IOSAppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3388436ED8A7DFA861845077 /* IOSAppUITests.swift */; };
+		94AF7D2CB16A06E578589A49 /* bare-fs.4.8.0.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D3622F49707B3232B5B3F532 /* bare-fs.4.8.0.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		9A8E8AB17DF9E0C7F9D97D86 /* bare-fs.4.8.0.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D3622F49707B3232B5B3F532 /* bare-fs.4.8.0.xcframework */; };
+		A14F47CE4E4CA5BB370D4DDD /* bare-type.1.1.0.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = CA1E372DE81899FC3F10CDD1 /* bare-type.1.1.0.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		AA5FED1B4B838A318D10FE93 /* HostPluginRegistryTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55CF015E82E567D876F8D3B7 /* HostPluginRegistryTest.swift */; };
+		AABD71D6E7CC9D4C74E9D8DF /* bare-path.3.1.1.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B8FEAEB827838FCF9EAD4039 /* bare-path.3.1.1.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B33D29B5D178093370890F96 /* bare-inspect.3.1.4.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = DFFF96FE138547EA56445631 /* bare-inspect.3.1.4.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B5D3C0F73C615A3457332A5F /* BareAssetSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91E75B6020D4A57EADB07BC4 /* BareAssetSchemeHandler.swift */; };
+		B72CAAC02E248633F39D933E /* bare-pipe.4.2.3.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1CB84B74CE878695DC2D3E63 /* bare-pipe.4.2.3.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B9DCE48C487BF0D16F178097 /* bare-tcp.2.5.4.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 842B49DD52B0FCDEDFED6C40 /* bare-tcp.2.5.4.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		BF94C12A2D32BAB8D0D5B4AC /* main.core.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 7A5416083BDA6FC221B9A772 /* main.core.bundle */; };
+		BF9CD5B6C1E320E4C1A151A0 /* BareKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6179373D1020F959C776AE38 /* BareKit */; };
+		C976FB0045CC687D2FDE005F /* bare-path.3.1.1.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B8FEAEB827838FCF9EAD4039 /* bare-path.3.1.1.xcframework */; };
+		CCC0A28FB854BACB7E89192F /* bare-pipe.4.2.3.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1CB84B74CE878695DC2D3E63 /* bare-pipe.4.2.3.xcframework */; };
+		D17ED3082C769BA393A537A5 /* BareKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A021468273BDA9ECF0BE0B04 /* BareKit.xcframework */; };
+		D1A5717CF622C90C6637BB55 /* bare-url.2.5.1.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A839E3BF7296CF4E6A6C85EE /* bare-url.2.5.1.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		DA09BBBB624E8FB6EAE42787 /* bare-tls.3.1.8.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A6B0675F401F1C1D5E1686FB /* bare-tls.3.1.8.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		DB26E0AB8DA65A1C5EACF939 /* bare-buffer.3.6.2.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1CE6738BCA78B55AD03FCD21 /* bare-buffer.3.6.2.xcframework */; };
+		DCF21141BC5F353F759B178B /* bare-type.1.1.0.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = CA1E372DE81899FC3F10CDD1 /* bare-type.1.1.0.xcframework */; };
+		DF1BA68397E71C3F36485808 /* bare-tcp.2.5.4.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 842B49DD52B0FCDEDFED6C40 /* bare-tcp.2.5.4.xcframework */; };
+		DFBC7196A39202DB940A571E /* WebAssets in Resources */ = {isa = PBXBuildFile; fileRef = DD61A0891866A23E00B97028 /* WebAssets */; };
+		F0373DA75A63C8C570A5581E /* ErrorCodesParityTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = F604F0B0DC78EE1D4578CE8E /* ErrorCodesParityTest.swift */; };
+		F8AB3DC402F426BEC5BFAA2D /* bare-tls.3.1.8.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A6B0675F401F1C1D5E1686FB /* bare-tls.3.1.8.xcframework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		5B868D22A49E0250D23EF4CB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0EE6967BC4D48AACAA44C723 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FC1DD20D21A034E5D954D341;
+			remoteInfo = "ios-app";
+		};
+		C1EACA09D83450276DB2035E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0EE6967BC4D48AACAA44C723 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FC1DD20D21A034E5D954D341;
+			remoteInfo = "ios-app";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D7CC586719AF243A8C8DFB47 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				27AF8F5818E489B763BA4788 /* BareKit.xcframework in Embed Frameworks */,
+				529590D7E1020EAF769FF8EB /* bare-buffer.3.6.2.xcframework in Embed Frameworks */,
+				427AED8ABB3ED9B6FCE50833 /* bare-crypto.1.15.3.xcframework in Embed Frameworks */,
+				51CF34F1195DA1CE2B68849E /* bare-dns.2.1.4.xcframework in Embed Frameworks */,
+				94AF7D2CB16A06E578589A49 /* bare-fs.4.8.0.xcframework in Embed Frameworks */,
+				B33D29B5D178093370890F96 /* bare-inspect.3.1.4.xcframework in Embed Frameworks */,
+				48542F1447132B321F8D0695 /* bare-os.3.9.3.xcframework in Embed Frameworks */,
+				AABD71D6E7CC9D4C74E9D8DF /* bare-path.3.1.1.xcframework in Embed Frameworks */,
+				B72CAAC02E248633F39D933E /* bare-pipe.4.2.3.xcframework in Embed Frameworks */,
+				B9DCE48C487BF0D16F178097 /* bare-tcp.2.5.4.xcframework in Embed Frameworks */,
+				DA09BBBB624E8FB6EAE42787 /* bare-tls.3.1.8.xcframework in Embed Frameworks */,
+				A14F47CE4E4CA5BB370D4DDD /* bare-type.1.1.0.xcframework in Embed Frameworks */,
+				D1A5717CF622C90C6637BB55 /* bare-url.2.5.1.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		0D031ED14C83C3237ECF82B8 /* ios */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ios; path = ../../ios; sourceTree = SOURCE_ROOT; };
+		11BF7C8B096B22DDFAD66293 /* MediaHostPlugins.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaHostPlugins.swift; sourceTree = "<group>"; };
+		1CB84B74CE878695DC2D3E63 /* bare-pipe.4.2.3.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-pipe.4.2.3.xcframework"; path = "addons/bare-pipe.4.2.3.xcframework"; sourceTree = "<group>"; };
+		1CE6738BCA78B55AD03FCD21 /* bare-buffer.3.6.2.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-buffer.3.6.2.xcframework"; path = "addons/bare-buffer.3.6.2.xcframework"; sourceTree = "<group>"; };
+		1D5CB96407D44F3B0E85B872 /* BareRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BareRuntime.swift; sourceTree = "<group>"; };
+		1F1D6942DE4BD9FC5467A46E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		307EA3BF66FC1B0535D55DEB /* sample.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = sample.png; sourceTree = "<group>"; };
+		3388436ED8A7DFA861845077 /* IOSAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSAppUITests.swift; sourceTree = "<group>"; };
+		4485140824DAC5EC8F8DB53A /* bare-dns.2.1.4.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-dns.2.1.4.xcframework"; path = "addons/bare-dns.2.1.4.xcframework"; sourceTree = "<group>"; };
+		55CF015E82E567D876F8D3B7 /* HostPluginRegistryTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostPluginRegistryTest.swift; sourceTree = "<group>"; };
+		57C1C7C5430B28C17D73DFF8 /* ios-app.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "ios-app.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		5849DFFD2048A6823C6A1F5D /* bare-os.3.9.3.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-os.3.9.3.xcframework"; path = "addons/bare-os.3.9.3.xcframework"; sourceTree = "<group>"; };
+		7A5416083BDA6FC221B9A772 /* main.core.bundle */ = {isa = PBXFileReference; lastKnownFileType = wrapper.cfbundle; path = main.core.bundle; sourceTree = "<group>"; };
+		842B49DD52B0FCDEDFED6C40 /* bare-tcp.2.5.4.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-tcp.2.5.4.xcframework"; path = "addons/bare-tcp.2.5.4.xcframework"; sourceTree = "<group>"; };
+		91E75B6020D4A57EADB07BC4 /* BareAssetSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BareAssetSchemeHandler.swift; sourceTree = "<group>"; };
+		9DEA7DC996C7B6B55CFFB7C9 /* BareProtocolTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BareProtocolTest.swift; sourceTree = "<group>"; };
+		A021468273BDA9ECF0BE0B04 /* BareKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = BareKit.xcframework; path = ../../prebuilds/ios/BareKit.xcframework; sourceTree = "<group>"; };
+		A6B0675F401F1C1D5E1686FB /* bare-tls.3.1.8.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-tls.3.1.8.xcframework"; path = "addons/bare-tls.3.1.8.xcframework"; sourceTree = "<group>"; };
+		A839E3BF7296CF4E6A6C85EE /* bare-url.2.5.1.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-url.2.5.1.xcframework"; path = "addons/bare-url.2.5.1.xcframework"; sourceTree = "<group>"; };
+		B8FEAEB827838FCF9EAD4039 /* bare-path.3.1.1.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-path.3.1.1.xcframework"; path = "addons/bare-path.3.1.1.xcframework"; sourceTree = "<group>"; };
+		C521227D3BAFDF01C0F623E3 /* ios-appUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "ios-appUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		CA1E372DE81899FC3F10CDD1 /* bare-type.1.1.0.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-type.1.1.0.xcframework"; path = "addons/bare-type.1.1.0.xcframework"; sourceTree = "<group>"; };
+		CF770F49D6C546F930063C7E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		D3622F49707B3232B5B3F532 /* bare-fs.4.8.0.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-fs.4.8.0.xcframework"; path = "addons/bare-fs.4.8.0.xcframework"; sourceTree = "<group>"; };
+		D3D06758BE43184460274780 /* bare-crypto.1.15.3.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-crypto.1.15.3.xcframework"; path = "addons/bare-crypto.1.15.3.xcframework"; sourceTree = "<group>"; };
+		DD4F8FDDDF1B5B749011B786 /* ios-appTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "ios-appTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		DD61A0891866A23E00B97028 /* WebAssets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WebAssets; path = Resources/WebAssets; sourceTree = SOURCE_ROOT; };
+		DFFF96FE138547EA56445631 /* bare-inspect.3.1.4.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-inspect.3.1.4.xcframework"; path = "addons/bare-inspect.3.1.4.xcframework"; sourceTree = "<group>"; };
+		E7D1A2234F9E83EF38A5E1C7 /* IOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSApp.swift; sourceTree = "<group>"; };
+		F604F0B0DC78EE1D4578CE8E /* ErrorCodesParityTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorCodesParityTest.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		29A5D1DB5BC4F6943D6CEFC8 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				29C240A81BE97F1DA2631B5D /* BareHost in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		85086FAE523C91584760A0F4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				084CA622D5E2F01CBAC4C399 /* BareHost in Frameworks */,
+				BF9CD5B6C1E320E4C1A151A0 /* BareKit in Frameworks */,
+				D17ED3082C769BA393A537A5 /* BareKit.xcframework in Frameworks */,
+				DB26E0AB8DA65A1C5EACF939 /* bare-buffer.3.6.2.xcframework in Frameworks */,
+				276218F1B8248CE826300C05 /* bare-crypto.1.15.3.xcframework in Frameworks */,
+				803F07871D74C7760B802C01 /* bare-dns.2.1.4.xcframework in Frameworks */,
+				9A8E8AB17DF9E0C7F9D97D86 /* bare-fs.4.8.0.xcframework in Frameworks */,
+				5A949FBAA32EE57EB2F612CD /* bare-inspect.3.1.4.xcframework in Frameworks */,
+				43E76CECF2D1AECF970DB6A0 /* bare-os.3.9.3.xcframework in Frameworks */,
+				C976FB0045CC687D2FDE005F /* bare-path.3.1.1.xcframework in Frameworks */,
+				CCC0A28FB854BACB7E89192F /* bare-pipe.4.2.3.xcframework in Frameworks */,
+				DF1BA68397E71C3F36485808 /* bare-tcp.2.5.4.xcframework in Frameworks */,
+				F8AB3DC402F426BEC5BFAA2D /* bare-tls.3.1.8.xcframework in Frameworks */,
+				DCF21141BC5F353F759B178B /* bare-type.1.1.0.xcframework in Frameworks */,
+				92E0224C342D2574A4BED599 /* bare-url.2.5.1.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		3166738E3FB6874A3FF8087C /* ios */ = {
+			isa = PBXGroup;
+			children = (
+				5A45C4DD7AAB6E4A2D1E57D6 /* Tests */,
+			);
+			path = ios;
+			sourceTree = "<group>";
+		};
+		366CBDD5A81FF6A7D4D44996 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				57C1C7C5430B28C17D73DFF8 /* ios-app.app */,
+				DD4F8FDDDF1B5B749011B786 /* ios-appTests.xctest */,
+				C521227D3BAFDF01C0F623E3 /* ios-appUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		5A45C4DD7AAB6E4A2D1E57D6 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				B4C3ACF0EBE93205B0D3C172 /* BareHostTests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		5C5877DB842C650D1BDFA7D8 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				3388436ED8A7DFA861845077 /* IOSAppUITests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		7699546AB8EDD964BCCBE8C9 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				1CE6738BCA78B55AD03FCD21 /* bare-buffer.3.6.2.xcframework */,
+				D3D06758BE43184460274780 /* bare-crypto.1.15.3.xcframework */,
+				4485140824DAC5EC8F8DB53A /* bare-dns.2.1.4.xcframework */,
+				D3622F49707B3232B5B3F532 /* bare-fs.4.8.0.xcframework */,
+				DFFF96FE138547EA56445631 /* bare-inspect.3.1.4.xcframework */,
+				5849DFFD2048A6823C6A1F5D /* bare-os.3.9.3.xcframework */,
+				B8FEAEB827838FCF9EAD4039 /* bare-path.3.1.1.xcframework */,
+				1CB84B74CE878695DC2D3E63 /* bare-pipe.4.2.3.xcframework */,
+				842B49DD52B0FCDEDFED6C40 /* bare-tcp.2.5.4.xcframework */,
+				A6B0675F401F1C1D5E1686FB /* bare-tls.3.1.8.xcframework */,
+				CA1E372DE81899FC3F10CDD1 /* bare-type.1.1.0.xcframework */,
+				A839E3BF7296CF4E6A6C85EE /* bare-url.2.5.1.xcframework */,
+				A021468273BDA9ECF0BE0B04 /* BareKit.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		8C8A7C7E1078544F500C3B49 /* less-bare-android */ = {
+			isa = PBXGroup;
+			children = (
+				3166738E3FB6874A3FF8087C /* ios */,
+			);
+			name = "less-bare-android";
+			path = ../..;
+			sourceTree = "<group>";
+		};
+		918AD4D0A9922747EAD8CF95 /* app */ = {
+			isa = PBXGroup;
+			children = (
+				91E75B6020D4A57EADB07BC4 /* BareAssetSchemeHandler.swift */,
+				1D5CB96407D44F3B0E85B872 /* BareRuntime.swift */,
+				CF770F49D6C546F930063C7E /* ContentView.swift */,
+				1F1D6942DE4BD9FC5467A46E /* Info.plist */,
+				E7D1A2234F9E83EF38A5E1C7 /* IOSApp.swift */,
+				11BF7C8B096B22DDFAD66293 /* MediaHostPlugins.swift */,
+				E78224C624D11CE7D01703C4 /* SampleMedia */,
+			);
+			path = app;
+			sourceTree = "<group>";
+		};
+		B4C3ACF0EBE93205B0D3C172 /* BareHostTests */ = {
+			isa = PBXGroup;
+			children = (
+				9DEA7DC996C7B6B55CFFB7C9 /* BareProtocolTest.swift */,
+				F604F0B0DC78EE1D4578CE8E /* ErrorCodesParityTest.swift */,
+				55CF015E82E567D876F8D3B7 /* HostPluginRegistryTest.swift */,
+			);
+			path = BareHostTests;
+			sourceTree = "<group>";
+		};
+		DB76B8BFB04ACA79099923CC /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				7A5416083BDA6FC221B9A772 /* main.core.bundle */,
+				DD61A0891866A23E00B97028 /* WebAssets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		E3D3C85EBAA3388EEDBA60AA = {
+			isa = PBXGroup;
+			children = (
+				918AD4D0A9922747EAD8CF95 /* app */,
+				8C8A7C7E1078544F500C3B49 /* less-bare-android */,
+				F9A6D78FE1A44E617DB6AB3D /* Packages */,
+				DB76B8BFB04ACA79099923CC /* Resources */,
+				5C5877DB842C650D1BDFA7D8 /* UITests */,
+				7699546AB8EDD964BCCBE8C9 /* Frameworks */,
+				366CBDD5A81FF6A7D4D44996 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E78224C624D11CE7D01703C4 /* SampleMedia */ = {
+			isa = PBXGroup;
+			children = (
+				307EA3BF66FC1B0535D55DEB /* sample.png */,
+			);
+			path = SampleMedia;
+			sourceTree = "<group>";
+		};
+		F9A6D78FE1A44E617DB6AB3D /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				0D031ED14C83C3237ECF82B8 /* ios */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F37F335CA4FC0E88B9A1A356 /* ios-appTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7C698B1A36D1C7E2BFB3C11B /* Build configuration list for PBXNativeTarget "ios-appTests" */;
+			buildPhases = (
+				2012AE3A13AB7EB664411A90 /* Sources */,
+				29A5D1DB5BC4F6943D6CEFC8 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1DCA081AF88420F3745486F3 /* PBXTargetDependency */,
+			);
+			name = "ios-appTests";
+			packageProductDependencies = (
+				1A07DF693EDED0A38DE8D2AF /* BareHost */,
+			);
+			productName = "ios-appTests";
+			productReference = DD4F8FDDDF1B5B749011B786 /* ios-appTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		FA6698A0E3F32A954C677460 /* ios-appUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1576FFBE5C8B2B1C79199F80 /* Build configuration list for PBXNativeTarget "ios-appUITests" */;
+			buildPhases = (
+				8967DA92B5608D1333C13EC9 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				ACDABD4E6084E4610B516B3C /* PBXTargetDependency */,
+			);
+			name = "ios-appUITests";
+			packageProductDependencies = (
+			);
+			productName = "ios-appUITests";
+			productReference = C521227D3BAFDF01C0F623E3 /* ios-appUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		FC1DD20D21A034E5D954D341 /* ios-app */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 032A87B8DE408205AD184F59 /* Build configuration list for PBXNativeTarget "ios-app" */;
+			buildPhases = (
+				F2FE3E4B89686B3751E26793 /* Sources */,
+				85BCC33E7072B828DCF2439C /* Resources */,
+				85086FAE523C91584760A0F4 /* Frameworks */,
+				D7CC586719AF243A8C8DFB47 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "ios-app";
+			packageProductDependencies = (
+				F3B521EF07E654ADEB74EA2B /* BareHost */,
+				6179373D1020F959C776AE38 /* BareKit */,
+			);
+			productName = "ios-app";
+			productReference = 57C1C7C5430B28C17D73DFF8 /* ios-app.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		0EE6967BC4D48AACAA44C723 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					FA6698A0E3F32A954C677460 = {
+						TestTargetID = FC1DD20D21A034E5D954D341;
+					};
+				};
+			};
+			buildConfigurationList = 4E02D9E7D979ADC62A5E35A5 /* Build configuration list for PBXProject "ios-app" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = E3D3C85EBAA3388EEDBA60AA;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				83CE0172213A80E8E3A757E9 /* XCRemoteSwiftPackageReference "bare-kit-swift" */,
+				1AE823308B72CD908DF2F522 /* XCLocalSwiftPackageReference "../../ios" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 366CBDD5A81FF6A7D4D44996 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				FC1DD20D21A034E5D954D341 /* ios-app */,
+				F37F335CA4FC0E88B9A1A356 /* ios-appTests */,
+				FA6698A0E3F32A954C677460 /* ios-appUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		85BCC33E7072B828DCF2439C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DFBC7196A39202DB940A571E /* WebAssets in Resources */,
+				BF94C12A2D32BAB8D0D5B4AC /* main.core.bundle in Resources */,
+				5AB8E35EE0F698348C1855CA /* sample.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		2012AE3A13AB7EB664411A90 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				389346D0EDBC2035996C1D73 /* BareProtocolTest.swift in Sources */,
+				F0373DA75A63C8C570A5581E /* ErrorCodesParityTest.swift in Sources */,
+				AA5FED1B4B838A318D10FE93 /* HostPluginRegistryTest.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8967DA92B5608D1333C13EC9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9322A3EF44E84B29DD928FD3 /* IOSAppUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F2FE3E4B89686B3751E26793 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B5D3C0F73C615A3457332A5F /* BareAssetSchemeHandler.swift in Sources */,
+				6361C285832EAC0D24EC00BD /* BareRuntime.swift in Sources */,
+				4FC07E586CBE29DBFBA557D5 /* ContentView.swift in Sources */,
+				13B95E1E6C3F3F85E944E2A0 /* IOSApp.swift in Sources */,
+				40A780063ED3C4F2FE8C85C5 /* MediaHostPlugins.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1DCA081AF88420F3745486F3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FC1DD20D21A034E5D954D341 /* ios-app */;
+			targetProxy = C1EACA09D83450276DB2035E /* PBXContainerItemProxy */;
+		};
+		ACDABD4E6084E4610B516B3C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FC1DD20D21A034E5D954D341 /* ios-app */;
+			targetProxy = 5B868D22A49E0250D23EF4CB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		020E4924A9F68C22BE3995BE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = to.holepunch.bare.ios.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ios-app.app/ios-app";
+			};
+			name = Release;
+		};
+		02C8BC6686C30621EBF4A9FC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = to.holepunch.bare.ios.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ios-app.app/ios-app";
+			};
+			name = Debug;
+		};
+		312187468948EAA2511CAA8A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = to.holepunch.bare.ios.uitests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "ios-app";
+			};
+			name = Release;
+		};
+		6D03FF8E5EB6E6B94AB0EDFC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		8BECE36A1DE3462C5B54854C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"../../prebuilds/ios\"",
+					"\"addons\"",
+				);
+				INFOPLIST_FILE = app/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = to.holepunch.bare.ios;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A9F6A7B25AC72F86257026D4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"../../prebuilds/ios\"",
+					"\"addons\"",
+				);
+				INFOPLIST_FILE = app/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = to.holepunch.bare.ios;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		E3791687D831283ED7CA96CD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		FBAFC24AB3D96D58905A5FE7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = to.holepunch.bare.ios.uitests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "ios-app";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		032A87B8DE408205AD184F59 /* Build configuration list for PBXNativeTarget "ios-app" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8BECE36A1DE3462C5B54854C /* Debug */,
+				A9F6A7B25AC72F86257026D4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		1576FFBE5C8B2B1C79199F80 /* Build configuration list for PBXNativeTarget "ios-appUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FBAFC24AB3D96D58905A5FE7 /* Debug */,
+				312187468948EAA2511CAA8A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		4E02D9E7D979ADC62A5E35A5 /* Build configuration list for PBXProject "ios-app" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6D03FF8E5EB6E6B94AB0EDFC /* Debug */,
+				E3791687D831283ED7CA96CD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7C698B1A36D1C7E2BFB3C11B /* Build configuration list for PBXNativeTarget "ios-appTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				02C8BC6686C30621EBF4A9FC /* Debug */,
+				020E4924A9F68C22BE3995BE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		1AE823308B72CD908DF2F522 /* XCLocalSwiftPackageReference "../../ios" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../ios;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		83CE0172213A80E8E3A757E9 /* XCRemoteSwiftPackageReference "bare-kit-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/holepunchto/bare-kit-swift";
+			requirement = {
+				kind = revision;
+				revision = ef26bbde9bb47eaebeb4e50944306b4ff23934ce;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1A07DF693EDED0A38DE8D2AF /* BareHost */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BareHost;
+		};
+		6179373D1020F959C776AE38 /* BareKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 83CE0172213A80E8E3A757E9 /* XCRemoteSwiftPackageReference "bare-kit-swift" */;
+			productName = BareKit;
+		};
+		F3B521EF07E654ADEB74EA2B /* BareHost */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BareHost;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 0EE6967BC4D48AACAA44C723 /* Project object */;
+}

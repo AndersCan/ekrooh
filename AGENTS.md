@@ -41,6 +41,9 @@ Run from the repo root. The gate for every change is `vp check` + `vp test`.
 | `npm run build:web`                             | Build the reference web app into `examples/android-app/src/main/assets` |
 | `npm run dev`                                   | Vite dev server + Bare backend (watch + restart)                        |
 | `./gradlew :examples:android-app:assembleDebug` | Build the Android APK                                                   |
+| `npm run prebuilds`                             | Fetch Bare Kit prebuilds (Android + iOS) for the pinned release         |
+| `npm run build:ios`                             | Build iOS reference app inputs (`bare-link`, `bare-pack`, web assets)   |
+| `npm run test:ios`                              | Run the Swift host XCTest + UI tests on the iOS simulator               |
 
 Notes:
 
@@ -53,18 +56,20 @@ Notes:
 
 ## Repo map (ownership)
 
-| Path                                           | Owner        | Contents                                                                                       |
-| ---------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------- |
-| `core/messages`                                | framework    | Wire protocol: codec, plugin kernel, RPC messenger, host IPC, types                            |
-| `core/server`, `core/lib`, `core/main.core.ts` | framework    | Dev WebSocket backend + Bare worklet entry                                                     |
-| `plugins`                                      | framework    | Canonical plugins (`core.health`, `core.discovery`, `core.permissions`) + typed event builders |
-| `web/transports`, `web/websocket-client.ts`    | framework    | `MessageTransport` + WebSocket / mock / bootstrap-bridge transports                            |
-| `android`                                      | framework    | Android host library (`:bare-host`): IPC coordinator, host plugin registry, WebView bridge     |
-| `examples/web`                                 | example      | Reference web UI (lit-html + nanostores + Tailwind)                                            |
-| `examples/android-app`                         | example      | Reference Android app consuming `:bare-host` + web assets                                      |
-| `e2e`                                          | tooling      | Playwright specs against the mock transport                                                    |
-| `scripts`                                      | tooling      | Dev-bare runner, playwright browser wrapper, prebuild fetcher                                  |
-| `prebuilds`                                    | build output | Bare Kit prebuilds (gitignored, fetched from a GitHub release)                                 |
+| Path                                           | Owner        | Contents                                                                                                       |
+| ---------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------- |
+| `core/messages`                                | framework    | Wire protocol: codec, plugin kernel, RPC messenger, host IPC, types                                            |
+| `core/server`, `core/lib`, `core/main.core.ts` | framework    | Dev WebSocket backend + Bare worklet entry                                                                     |
+| `plugins`                                      | framework    | Canonical plugins (`core.health`, `core.discovery`, `core.permissions`, `vendor.media`) + typed event builders |
+| `web/transports`, `web/websocket-client.ts`    | framework    | `MessageTransport` + WebSocket / mock / bootstrap-bridge transports                                            |
+| `android`                                      | framework    | Android host library (`:bare-host`): IPC coordinator, host plugin registry, WebView bridge                     |
+| `ios`                                          | framework    | iOS host Swift package (`BareHost`): IPC coordinator, host plugin registry, WKWebView bridge                   |
+| `examples/web`                                 | example      | Reference web UI (lit-html + nanostores + Tailwind)                                                            |
+| `examples/android-app`                         | example      | Reference Android app consuming `:bare-host` + web assets                                                      |
+| `examples/ios-app`                             | example      | Reference iOS app consuming `BareHost` + web assets (xcodegen project)                                         |
+| `e2e`                                          | tooling      | Playwright specs against the mock transport                                                                    |
+| `scripts`                                      | tooling      | Dev-bare runner, playwright browser wrapper, prebuild fetcher                                                  |
+| `prebuilds`                                    | build output | Bare Kit prebuilds (gitignored, fetched from a GitHub release)                                                 |
 
 The framework's public API surface is the `exports` map in `package.json`
 (`@less/bare/core`, `/plugins`, `/plugins/*/events`, `/transports`). Per the
@@ -77,11 +82,12 @@ Everything else (layout, tooling, internals) can change freely.
 - **Do** read `vision.md` before deciding what belongs here.
 - **Do** keep `vp check` and `vp test` green before finishing a change.
 - **Do** co-locate unit tests as `*.test.ts` next to the source they cover.
-- **Do** fetch Bare Kit prebuilds via the documented script before Android
-  work (never commit them): `gh release download --repo holepunchto/bare-kit
-<version>` then unzip `android/*` into `prebuilds/`.
+- **Do** fetch Bare Kit prebuilds via the documented script before Android or
+  iOS work (never commit them): `gh release download --repo holepunchto/bare-kit
+<version>` then unzip `android/*` and `ios/*` into `prebuilds/`.
 - **Don't** commit build output: `core/main.core.gen.js`, web assets under
-  `examples/android-app/src/main/assets/`, `prebuilds/`, `.playwright-browsers/`.
+  `examples/android-app/src/main/assets/`, `prebuilds/`,
+  `examples/ios-app/addons/`, `examples/ios-app/Resources/`, `.playwright-browsers/`.
 - **Don't** touch the `<!--VITE PLUS START/END-->` block — Vite+ manages it.
 - **Don't** reference `npm run <script>` in docs when a `vp` built-in exists;
   `vp run <name>` runs a package script explicitly.
@@ -91,3 +97,9 @@ Everything else (layout, tooling, internals) can change freely.
 Releases are **tag-driven and single-version** (`vX.Y.Z`): CI builds and
 publishes every artifact for the tag together. Follow `RELEASING.md`, never
 ad-hoc publish.
+
+## Planning
+
+The transport/auth roadmap lives in `plan.md` (Phase 1 done; Phase 2 unifies
+the loopback server + cookie auth; Phase 3 is release readiness). Follow it
+when extending the host/transport surface.

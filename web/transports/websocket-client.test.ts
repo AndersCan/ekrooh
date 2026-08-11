@@ -1,4 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vite-plus/test';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vite-plus/test';
 import { MessageProtocol, MessageType } from '../../core/messages';
 import type { PluginInvokeResponseHeader } from '../../core/messages';
 import { createWebSocketTransport } from '../websocket-client';
@@ -55,7 +62,43 @@ beforeEach(() => {
   (globalThis as Record<string, unknown>).WebSocket = FakeWebSocket;
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('createWebSocketTransport', () => {
+  it('appends the injected token to the WebSocket URL', () => {
+    vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+
+    createWebSocketTransport('ws://test');
+
+    expect(lastSocket().url).toBe('ws://test/?token=secret-token');
+  });
+
+  it('preserves an existing query when appending the token', () => {
+    vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+
+    createWebSocketTransport('ws://test?foo=1');
+
+    expect(lastSocket().url).toBe('ws://test/?foo=1&token=secret-token');
+  });
+
+  it('leaves the URL unchanged when no token is injected', () => {
+    vi.stubGlobal('window', {});
+
+    createWebSocketTransport('ws://test');
+
+    expect(lastSocket().url).toBe('ws://test');
+  });
+
+  it('leaves the URL unchanged when the token is empty', () => {
+    vi.stubGlobal('window', { __lessBareToken: '' });
+
+    createWebSocketTransport('ws://test');
+
+    expect(lastSocket().url).toBe('ws://test');
+  });
+
   it('queues messages while connecting and flushes them on open', () => {
     const transport = createWebSocketTransport('ws://test');
     const socket = lastSocket();

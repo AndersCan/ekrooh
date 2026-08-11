@@ -1,4 +1,10 @@
-import { MessageType, MessageTypeValue, VERSION } from './constants';
+import {
+  MAX_FRAME_BYTES,
+  MAX_HEADER_BYTES,
+  MessageType,
+  MessageTypeValue,
+  VERSION,
+} from './constants';
 import {
   WireMessage,
   CapabilityDescriptor,
@@ -14,12 +20,15 @@ export interface ProtocolOptions {
   encode?: Encoder;
   decode?: Decoder;
   allowUnknownTypes?: boolean;
+  /** Override the default {@link MAX_FRAME_BYTES} cap. */
+  maxFrameBytes?: number;
 }
 
 export class MessageProtocol {
   private encodeStr: Encoder;
   private decodeStr: Decoder;
   private allowUnknownTypes: boolean;
+  private maxFrameBytes: number;
 
   constructor(options?: ProtocolOptions) {
     this.encodeStr =
@@ -27,6 +36,7 @@ export class MessageProtocol {
     this.decodeStr =
       options?.decode || ((bytes) => new TextDecoder().decode(bytes));
     this.allowUnknownTypes = options?.allowUnknownTypes ?? false;
+    this.maxFrameBytes = options?.maxFrameBytes ?? MAX_FRAME_BYTES;
   }
 
   encode(
@@ -36,6 +46,12 @@ export class MessageProtocol {
   ): Uint8Array {
     const headerJson = JSON.stringify(header);
     const headerBytes = this.encodeStr(headerJson);
+
+    if (headerBytes.byteLength > MAX_HEADER_BYTES) {
+      throw new Error(
+        `Header too large: ${headerBytes.byteLength} bytes, maximum is ${MAX_HEADER_BYTES}`,
+      );
+    }
 
     let payloadBytes: Uint8Array;
     if (payload == null) {
@@ -51,6 +67,12 @@ export class MessageProtocol {
     const hLen = headerBytes.byteLength;
     const pLen = payloadBytes.byteLength;
     const totalLength = 4 + hLen + pLen;
+
+    if (totalLength > this.maxFrameBytes) {
+      throw new Error(
+        `Frame too large: ${totalLength} bytes, maximum is ${this.maxFrameBytes}`,
+      );
+    }
 
     let buffer: Uint8Array;
     if (
@@ -80,6 +102,12 @@ export class MessageProtocol {
 
     if (byteLength < 4) {
       throw new Error(`Message too short: ${byteLength} bytes`);
+    }
+
+    if (byteLength > this.maxFrameBytes) {
+      throw new Error(
+        `Frame too large: ${byteLength} bytes, maximum is ${this.maxFrameBytes}`,
+      );
     }
 
     const version = view[0];
@@ -117,80 +145,100 @@ function parseAndValidateHeader(headerJson: string): MessageHeader {
     throw new Error('Invalid header: expected object');
   }
   const header = parsed as Record<string, unknown>;
-  if (header.type === 'DISPATCH' && isValidPluginHeaderFields(header)) {
-    return {
-      type: 'DISPATCH',
-      pluginId: header.pluginId,
-      event: header.event,
-      requestId: asOptionalString(header.requestId),
-      args: asOptionalRecord(header.args),
-    };
-  }
-  if (header.type === 'INVOKE_REQUEST' && isValidPluginHeaderFields(header)) {
-    return {
-      type: 'INVOKE_REQUEST',
-      pluginId: header.pluginId,
-      event: header.event,
-      requestId: asOptionalString(header.requestId),
-      args: asOptionalRecord(header.args),
-    };
-  }
-  if (header.type === 'INVOKE_RESPONSE' && isValidPluginHeaderFields(header)) {
-    return {
-      type: 'INVOKE_RESPONSE',
-      pluginId: header.pluginId,
-      event: header.event,
-      requestId: asOptionalString(header.requestId),
-      result: header.result,
-      error: parseCoreErrorWire(header.error),
-    };
-  }
-  if (
-    header.type === 'HOST_CAPABILITIES_QUERY' &&
-    typeof header.requestId === 'string'
-  ) {
-    return { type: 'HOST_CAPABILITIES_QUERY', requestId: header.requestId };
-  }
-  if (
-    header.type === 'HOST_CAPABILITIES_RESPONSE' &&
-    typeof header.requestId === 'string'
-  ) {
-    return {
-      type: 'HOST_CAPABILITIES_RESPONSE',
-      requestId: header.requestId,
-      capabilities: parseCapabilityDescriptors(header.capabilities),
-    };
-  }
-  if (
-    header.type === 'HOST_INVOKE_REQUEST' &&
-    typeof header.requestId === 'string' &&
-    typeof header.pluginId === 'string' &&
-    typeof header.event === 'string'
-  ) {
-    return {
-      type: 'HOST_INVOKE_REQUEST',
-      requestId: header.requestId,
-      pluginId: header.pluginId,
-      event: header.event,
-      args: asOptionalRecord(header.args),
-    };
-  }
-  if (
-    header.type === 'HOST_INVOKE_RESPONSE' &&
-    typeof header.requestId === 'string' &&
-    typeof header.pluginId === 'string' &&
-    typeof header.event === 'string'
-  ) {
-    return {
-      type: 'HOST_INVOKE_RESPONSE',
-      requestId: header.requestId,
-      pluginId: header.pluginId,
-      event: header.event,
-      result: header.result,
-      error: parseCoreErrorWire(header.error),
-    };
+  switch (header.type) {
+    case 'DISPATCH':
+      if (isValidPluginHeaderFields(header)) {
+        return mergeHeader(header, {
+          type: 'DISPATCH',
+          pluginId: header.pluginId,
+          event: header.event,
+          requestId: asOptionalString(header.requestId),
+          args: asOptionalRecord(header.args),
+        });
+      }
+      break;
+    case 'INVOKE_REQUEST':
+      if (isValidPluginHeaderFields(header)) {
+        return mergeHeader(header, {
+          type: 'INVOKE_REQUEST',
+          pluginId: header.pluginId,
+          event: header.event,
+          requestId: asOptionalString(header.requestId),
+          args: asOptionalRecord(header.args),
+        });
+      }
+      break;
+    case 'INVOKE_RESPONSE':
+      if (isValidPluginHeaderFields(header)) {
+        return mergeHeader(header, {
+          type: 'INVOKE_RESPONSE',
+          pluginId: header.pluginId,
+          event: header.event,
+          requestId: asOptionalString(header.requestId),
+          result: header.result,
+          error: parseCoreErrorWire(header.error),
+        });
+      }
+      break;
+    case 'HOST_CAPABILITIES_QUERY':
+      if (typeof header.requestId === 'string') {
+        return mergeHeader(header, {
+          type: 'HOST_CAPABILITIES_QUERY',
+          requestId: header.requestId,
+        });
+      }
+      break;
+    case 'HOST_CAPABILITIES_RESPONSE':
+      if (typeof header.requestId === 'string') {
+        return mergeHeader(header, {
+          type: 'HOST_CAPABILITIES_RESPONSE',
+          requestId: header.requestId,
+          capabilities: parseCapabilityDescriptors(header.capabilities),
+        });
+      }
+      break;
+    case 'HOST_INVOKE_REQUEST':
+      if (
+        typeof header.requestId === 'string' &&
+        typeof header.pluginId === 'string' &&
+        typeof header.event === 'string'
+      ) {
+        return mergeHeader(header, {
+          type: 'HOST_INVOKE_REQUEST',
+          requestId: header.requestId,
+          pluginId: header.pluginId,
+          event: header.event,
+          args: asOptionalRecord(header.args),
+        });
+      }
+      break;
+    case 'HOST_INVOKE_RESPONSE':
+      if (
+        typeof header.requestId === 'string' &&
+        typeof header.pluginId === 'string' &&
+        typeof header.event === 'string'
+      ) {
+        return mergeHeader(header, {
+          type: 'HOST_INVOKE_RESPONSE',
+          requestId: header.requestId,
+          pluginId: header.pluginId,
+          event: header.event,
+          result: header.result,
+          error: parseCoreErrorWire(header.error),
+        });
+      }
+      break;
   }
   throw new Error(`Unsupported header type: ${String(header.type)}`);
+}
+
+/** Validated known fields win, unknown fields pass through untouched so
+ * forward-compatible peers can relay envelopes without losing data. */
+function mergeHeader<T extends MessageHeader>(
+  parsed: Record<string, unknown>,
+  known: T,
+): T {
+  return { ...parsed, ...known } as T;
 }
 
 function isValidPluginHeaderFields(

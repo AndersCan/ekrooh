@@ -1,0 +1,57 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish v${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: tools platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Fetch Bare Kit prebuilds
+        run: npm run prebuilds
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build core bundle and web assets
+        run: npm run build
+
+      - name: Run all gates (JS + Gradle, includes host JUnit)
+        run: ./gradlew build
+
+      - name: Publish @less/bare to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish :bare-host AAR to GitHub Packages
+        run: ./gradlew :bare-host:publishMavenAarPublicationToGitHubPackagesRepository
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ github.token }}

@@ -1,14 +1,12 @@
-import { PluginManifest } from '../../core/messages';
+import { definePlugin, PluginManifest } from '../../core/messages';
+import { permissionSpecs } from './events';
 
 /**
  * Declares host-only permission events. Handlers are registered on the Android host
  * via {@code HostPluginRegistry}; the worklet delegates invokes here over IPC.
  */
 export function createPermissionsPluginStub(): PluginManifest {
-  return {
-    id: 'core.permissions',
+  return definePlugin('core.permissions', permissionSpecs, {
     capabilities: ['permissions'],
-    events: ['permissions.requestStorage'],
-    runtimes: {},
-  };
+  });
 }

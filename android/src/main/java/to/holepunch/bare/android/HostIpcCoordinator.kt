@@ -3,6 +3,7 @@ package to.holepunch.bare.android
 import android.util.Log
 import org.json.JSONObject
 import to.holepunch.bare.kit.IPC
+import java.nio.ByteBuffer
 
 /**
  * Handles host-side IPC: capability queries, host invoke, and forwarding other envelopes to the WebView.
@@ -10,13 +11,14 @@ import to.holepunch.bare.kit.IPC
 class HostIpcCoordinator(
     private val ipc: IPC,
     private val hostPlugins: HostPluginRegistry,
-    private val pushToWebView: (BareProtocol.WireMessage) -> Unit,
+    private val relayToWebView: (ByteArray) -> Unit,
 ) {
     fun start() {
         ipc.readable {
             try {
                 val data = ipc.read() ?: return@readable
-                val message = BareProtocol.parseMessage(data) ?: return@readable
+                val raw = ByteArray(data.remaining()).also { data.get(it) }
+                val message = BareProtocol.parseMessage(ByteBuffer.wrap(raw)) ?: return@readable
                 val headerObj = JSONObject(message.header)
                 when (headerObj.optString("type")) {
                     "HOST_CAPABILITIES_QUERY" -> {
@@ -64,7 +66,7 @@ class HostIpcCoordinator(
                         )
                         ipc.write(buf)
                     }
-                    else -> pushToWebView(message)
+                    else -> relayToWebView(raw)
                 }
             } catch (e: Exception) {
                 Log.e("BARE_KOTLIN", "Error in readable callback", e)

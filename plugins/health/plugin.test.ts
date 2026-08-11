@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { createHealthPlugin } from './plugin';
-import type { PluginContext } from '../../core/messages';
+import {
+  createPluginRegistry,
+  createPluginRouter,
+  type PluginContext,
+} from '../../core/messages';
 
 const context: PluginContext = { runtime: 'bare', payload: new Uint8Array(0) };
 
@@ -41,11 +45,21 @@ describe('createHealthPlugin', () => {
     expect(result).toEqual({ pong: true, ts: expect.any(Number) });
   });
 
-  it('rejects unsupported events deterministically', async () => {
-    const [error, result] = await invoke('health.bogus', {}, context);
-    expect(result).toBeNull();
-    expect(error?.code).toBe('UNSUPPORTED_EVENT');
-    expect(error?.message).toContain('health.bogus');
+  it('rejects unsupported events deterministically via the router', async () => {
+    const registry = createPluginRegistry();
+    registry.register(createHealthPlugin());
+    const router = createPluginRouter(registry, 'bare');
+    const response = await router.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.bogus',
+        requestId: 'r1',
+      },
+      new Uint8Array(0),
+    );
+    expect(response?.error?.code).toBe('UNSUPPORTED_EVENT');
+    expect(response?.error?.message).toContain('health.bogus');
   });
 
   it('declares its events and capabilities', () => {

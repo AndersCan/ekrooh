@@ -1,0 +1,107 @@
+name: ios-app
+options:
+  bundleIdPrefix: to.holepunch.bare.ios
+  deploymentTarget:
+    iOS: '14.0'
+  createIntermediateGroups: true
+packages:
+  BareHost:
+    path: ../../ios
+  BareKit:
+    url: https://github.com/holepunchto/bare-kit-swift
+    revision: ef26bbde9bb47eaebeb4e50944306b4ff23934ce
+targets:
+  ios-app:
+    type: application
+    platform: iOS
+    deploymentTarget: '14.0'
+    sources:
+      - path: app
+      - path: Resources/main.core.bundle
+        buildPhase: resources
+      - path: Resources/WebAssets
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: BareHost
+      - package: BareKit
+      - framework: ../../prebuilds/ios/BareKit.xcframework
+        embed: true
+      # Native addons produced by `bare-link --preset ios` (gitignored; see
+      # scripts/build-ios-app.mjs). Keep in sync with that output.
+      - framework: addons/bare-buffer.3.6.2.xcframework
+        embed: true
+      - framework: addons/bare-crypto.1.15.3.xcframework
+        embed: true
+      - framework: addons/bare-dns.2.1.4.xcframework
+        embed: true
+      - framework: addons/bare-fs.4.8.0.xcframework
+        embed: true
+      - framework: addons/bare-inspect.3.1.4.xcframework
+        embed: true
+      - framework: addons/bare-os.3.9.3.xcframework
+        embed: true
+      - framework: addons/bare-path.3.1.1.xcframework
+        embed: true
+      - framework: addons/bare-pipe.4.2.3.xcframework
+        embed: true
+      - framework: addons/bare-tcp.2.5.4.xcframework
+        embed: true
+      - framework: addons/bare-tls.3.1.8.xcframework
+        embed: true
+      - framework: addons/bare-type.1.1.0.xcframework
+        embed: true
+      - framework: addons/bare-url.2.5.1.xcframework
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: to.holepunch.bare.ios
+        INFOPLIST_FILE: app/Info.plist
+        SWIFT_VERSION: '5.0'
+  ios-appTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: '14.0'
+    sources:
+      - path: ../../ios/Tests/BareHostTests
+    dependencies:
+      - target: ios-app
+      - package: BareHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: to.holepunch.bare.ios.tests
+        SWIFT_VERSION: '5.0'
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: '$(BUILT_PRODUCTS_DIR)/ios-app.app/ios-app'
+        BUNDLE_LOADER: '$(TEST_HOST)'
+  ios-appUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: '14.0'
+    sources:
+      - path: UITests
+    dependencies:
+      - target: ios-app
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: to.holepunch.bare.ios.uitests
+        SWIFT_VERSION: '5.0'
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: ios-app
+schemes:
+  ios-app:
+    build:
+      targets:
+        ios-app: all
+        ios-appTests: [test]
+        ios-appUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: ios-appTests
+          parallelizable: false
+        - name: ios-appUITests
+          parallelizable: false

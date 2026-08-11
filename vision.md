@@ -47,11 +47,14 @@ top of this framework.
     (`@less/bare/core`, `@less/bare/plugins`, `@less/bare/transports`). The
     package ships TypeScript source; consumers bundle it (Vite, esbuild,
     bare-pack) — plain-Node execution is out of scope.
-  - Android host → **AAR, target GitHub Packages** (Maven format). **Not yet
-    publishable**: `:bare-host` compiles against a locally fetched Bare Kit
-    prebuilt, and AAR publishing is blocked on packaging that runtime into the
-    artifact (see `RELEASING.md`). Until then the host ships as source in this
-    repo.
+  - Android host → **AAR, GitHub Packages** (Maven format, `io.less:bare-host`).
+    The AAR is self-contained: Bare Kit runtime classes and native libs are
+    bundled into the artifact at build time, so consumers need no prebuilds
+    download.
+  - iOS host → **source in `ios/`** (SPM package `BareHost`, depending on
+    `bare-kit-swift`). Consumers embed `BareKit.xcframework` (prebuilds) plus
+    the linked addons themselves; distribution is revisited when a consumer
+    appears.
   - bare-kit prebuilds → **GitHub Release artifacts** (the pattern upstream
     `bare-kit` already uses), fetched by a documented script run by CI and on
     consumer setup. Prebuilds are never committed to this repository.
@@ -80,12 +83,12 @@ major version or be blocked by stability fears.
 
 ## Platforms and parity
 
-| Runtime        | Status        | Transport                                                                                                                    |
-| -------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Browser (dev)  | first-class   | WebSocket                                                                                                                    |
-| Browser (test) | first-class   | Mock (deterministic Playwright runs)                                                                                         |
-| Android        | first-class   | WebSocket and/or bootstrap bridge                                                                                            |
-| iOS            | contract-only | Must satisfy the same wire protocol and plugin contracts when built; distribution path decided then, on the same release tag |
+| Runtime        | Status        | Transport                                                                                    |
+| -------------- | ------------- | -------------------------------------------------------------------------------------------- |
+| Browser (dev)  | first-class   | WebSocket                                                                                    |
+| Browser (test) | first-class   | Mock (deterministic Playwright runs)                                                         |
+| Android        | first-class   | WebSocket and/or bootstrap bridge                                                            |
+| iOS            | contract-only | WKWebView bridge (base64 frames); host ships as source (`ios/`, SPM) on the same release tag |
 
 Parity policy:
 
@@ -117,11 +120,13 @@ was upgrading Vite to 8+ and Vitest to 4.1+ before `vp migrate`.
 
 - `core/`, `plugins/`, `web/transports` — sources of the single publishable
   package `@less/bare`.
-- `examples/` — the reference app (web UI + Android app), private workspace
-  package, consumes the framework and is the integration harness.
+- `examples/` — the reference app (web UI + Android app + iOS app), private
+  workspace package, consumes the framework and is the integration harness.
 - `e2e/` — Playwright specs against the reference app on the mock transport.
 - `android/` — the Android host as a **library module** (`com.android.library`)
   so it can be built and published as an AAR; the example app consumes it.
+- `ios/` — the iOS host as a **Swift package** (`BareHost`), mirroring the
+  Android host; the iOS example app consumes it.
 - `prebuilds/` — build output, gitignored, fetched from GitHub Release
   artifacts.
 
@@ -160,4 +165,5 @@ maintenance without a human in the loop:
 | `AGENTS.md`        | AI operating manual (commands, conventions, ownership) |
 | `CONTRIBUTING.md`  | How to contribute (human + agent)                      |
 | `RELEASING.md`     | The tag-driven release checklist                       |
+| `ios-handoff.md`   | Brief for building the iOS host (contract-only today)  |
 | per-module readmes | `core/`, `plugins/`, transports, Android host          |

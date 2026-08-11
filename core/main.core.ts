@@ -8,6 +8,7 @@ import {
   createPluginRouter,
   MessageProtocol,
 } from './messages/protocol';
+import { createStaticFileServer } from './server/static-file-server';
 import { startWebSocketServer } from './server/websocket-server';
 
 function toUint8Array(data: Uint8Array | ArrayBuffer | Buffer): Uint8Array {
@@ -42,10 +43,14 @@ const protocol = new MessageProtocol({
 
 const hostBridge = ipc ? createHostIpcBridge({ ipc, protocol }) : null;
 const pluginRegistry = createPluginRegistry();
+const staticServer = createStaticFileServer();
 for (const p of createDefaultPlugins({
   listBareCapabilities: () => pluginRegistry.listCapabilities(),
   queryHostCapabilities: () =>
     hostBridge?.queryCapabilities() ?? Promise.resolve([]),
+  staticServer,
+  invokeOnHost: (header, payload) =>
+    hostBridge?.invokeOnHost(header, payload) ?? Promise.resolve(null),
 })) {
   pluginRegistry.register(p);
 }
@@ -74,8 +79,9 @@ if (ipc) {
           protocol.encode(MessageType.ENVELOPE, pluginResponse, null),
         );
       }
-    } catch {
-      /* ignore malformed frames */
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error(`Malformed IPC frame dropped: ${message}`);
     }
   });
 }

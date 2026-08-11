@@ -1,4 +1,25 @@
-import { InvokeEnvelope } from '../../core/messages';
+import { EventSpec, invokeEvent, InvokeEnvelope } from '../../core/messages';
+
+export const healthSpecs = {
+  ping: {
+    pluginId: 'core.health',
+    name: 'health.ping',
+    args: {} as { message?: string },
+    result: {} as { message: string; ts: number },
+  },
+  payloadEcho: {
+    pluginId: 'core.health',
+    name: 'health.payloadEcho',
+    args: {} as { label: string },
+    result: {} as { label: string; payloadSize: number },
+  },
+  roundtrip: {
+    pluginId: 'core.health',
+    name: 'health.roundtrip',
+    args: {} as Record<string, never>,
+    result: {} as { pong: true; ts: number },
+  },
+} as const satisfies Record<string, EventSpec<any, any>>;
 
 export const healthEvents = {
   health: {
@@ -6,15 +27,10 @@ export const healthEvents = {
       message = 'ping',
     ): InvokeEnvelope<
       'health.ping',
-      { message: string },
+      { message?: string },
       { message: string; ts: number }
     > {
-      return {
-        kind: 'invoke',
-        pluginId: 'core.health',
-        event: 'health.ping',
-        args: { message },
-      };
+      return invokeEvent(healthSpecs.ping, { message });
     },
     payloadEcho(
       label: string,
@@ -24,25 +40,14 @@ export const healthEvents = {
       { label: string },
       { label: string; payloadSize: number }
     > {
-      return {
-        kind: 'invoke',
-        pluginId: 'core.health',
-        event: 'health.payloadEcho',
-        args: { label },
-        payload,
-      };
+      return invokeEvent(healthSpecs.payloadEcho, { label }, payload);
     },
     roundtrip(): InvokeEnvelope<
       'health.roundtrip',
       Record<string, never>,
       { pong: true; ts: number }
     > {
-      return {
-        kind: 'invoke',
-        pluginId: 'core.health',
-        event: 'health.roundtrip',
-        args: {},
-      };
+      return invokeEvent(healthSpecs.roundtrip, {});
     },
   },
 };

@@ -32,11 +32,22 @@ cut a release by following this document with no human beyond the tag decision.
    ./gradlew :examples:android-app:assembleDebug
    ```
 
+4. (iOS, local only) verify the Swift host on a simulator:
+
+   ```bash
+   npm run build:ios
+   npm run test:ios
+   ```
+
+   iOS CI is not set up yet; the Swift host ships as source in `ios/` on the
+   tag, so a broken host is caught on the next local build.
+
 ### 2. Version and changelog
 
-1. Bump `version` in the root `package.json` (the single source of the version).
-   Follow [Keep a Changelog](https://keepachangelog.com/) in `CHANGELOG.md` —
-   create it on the first release.
+1. Bump `version` in the root `package.json` (the single source of the version —
+   the Gradle publication reads it too). Follow
+   [Keep a Changelog](https://keepachangelog.com/) in `CHANGELOG.md` — create it
+   on the first release.
 2. Update `AGENTS.md`/`README.md` only if behavior or commands changed.
 
 ### 3. Tag and release
@@ -50,20 +61,25 @@ cut a release by following this document with no human beyond the tag decision.
    ```
 
 3. Create a GitHub release from the tag (title `vX.Y.Z`, body = the changelog
-   entry). A release workflow **should** then publish all artifacts; until that
-   workflow exists, publish manually:
+   entry). A release workflow (`release.yml`) publishes all artifacts on the
+   tag:
 
-   - **npm** (`@less/bare`): `npm publish` from the repo root. This claims the
-     reserved name on the first release. The package ships TypeScript source
-     via its `exports` map — consumers must bundle it (Vite, esbuild, or
-     bare-pack); plain-Node execution is not supported.
-   - **Android AAR**: not yet publishable — `:bare-host` is compiled against a
-     locally fetched Bare Kit prebuilt (`prebuilds/`, see `android/readme.md`).
-     Publishing to GitHub Packages is blocked on packaging the bare-kit runtime
-     into the AAR; revisit when that is resolved. (Vision.md marks this
-     artifact as pending.)
+   - **npm** (`@less/bare`): `npm publish --access public` from the repo root
+     (`release.yml` does this with the `NPM_TOKEN` secret). The first publish
+     claims the reserved name. The package ships TypeScript source via its
+     `exports` map — consumers must bundle it (Vite, esbuild, or bare-pack);
+     plain-Node execution is not supported.
+   - **Android AAR**: `:bare-host:publishMavenAarPublicationToGitHubPackagesRepository`
+     publishes `io.less:bare-host` to GitHub Packages (`release.yml` does this
+     with the automatic `GITHUB_TOKEN`). The AAR is self-contained: the Bare Kit
+     runtime jar ships in the AAR's `libs/` and its native libs in `jni/`, so
+     consumers need no prebuilds download.
    - **Prebuilds**: already published upstream by `holepunchto/bare-kit`; this
      repo never publishes them.
+   - **iOS host**: ships as **source** in `ios/` (SPM package `BareHost`,
+     consumed by `examples/ios-app`) on the same tag; no separate artifact is
+     published until distribution is decided (see `vision.md`). Consumers
+     embed `BareKit.xcframework` from `prebuilds/ios/`.
 
 ### 4. Announce
 

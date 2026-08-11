@@ -1,3 +1,4 @@
+import { ErrorCode } from './constants';
 import {
   CoreError,
   DispatchEnvelope,
@@ -10,6 +11,7 @@ import {
   PluginManifest,
   RuntimeTarget,
 } from './types';
+import { coerceErrorCode } from './errors';
 import { InvokeRequest, ProtocolMessenger } from './rpc-messenger';
 
 export interface PluginRegistry {
@@ -18,6 +20,7 @@ export interface PluginRegistry {
     pluginId: string,
     runtime: RuntimeTarget,
   ): PluginManifest['runtimes'][RuntimeTarget] | undefined;
+  get(pluginId: string): PluginManifest | undefined;
   listCapabilities(runtime?: RuntimeTarget): Array<{
     pluginId: string;
     capabilities: string[];
@@ -43,6 +46,9 @@ export function createPluginRegistry(): PluginRegistry {
     resolve(pluginId, runtime) {
       const plugin = plugins.get(pluginId);
       return plugin?.runtimes[runtime];
+    },
+    get(pluginId) {
+      return plugins.get(pluginId);
     },
     listCapabilities(runtime) {
       const rows: Array<{
@@ -78,55 +84,102 @@ export type PluginRouterOptions = {
     header: PluginInvokeRequestHeader,
     payload: Uint8Array,
   ) => Promise<PluginInvokeResponseHeader | null>;
+  logger?: Pick<Console, 'warn' | 'error'>;
 };
+
+/** Whether the router may synthesize an UNSUPPORTED_EVENT response. Events are
+ * only gated when the manifest declares them; undeclared plugins opt out of
+ * validation for backward compatibility. */
+function declaresEvent(plugin: PluginManifest | undefined, event: string) {
+  return plugin?.events ? plugin.events.includes(event) : true;
+}
 
 export function createPluginRouter(
   registry: PluginRegistry,
   runtime: RuntimeTarget,
   options?: PluginRouterOptions,
 ): PluginRouter {
+  const logger = options?.logger ?? console;
   return {
     async route(header, payload) {
+      const plugin = isPluginEnvelopeHeader(header)
+        ? registry.get(header.pluginId)
+        : undefined;
+
+      if (isPluginEnvelopeHeader(header)) {
+        if (!declaresEvent(plugin, header.event)) {
+          const error = new CoreError(
+            ErrorCode.UNSUPPORTED_EVENT,
+            `Unsupported event ${header.pluginId}.${header.event} on ${runtime}`,
+          );
+          if (isPluginDispatchHeader(header)) {
+            logger.warn(error.message);
+          }
+          return invokeErrorResponse(header, error);
+        }
+      }
+
       if (isPluginDispatchHeader(header)) {
         const runtimeAdapter = registry.resolve(header.pluginId, runtime);
         if (!runtimeAdapter?.dispatch) {
-          return invokeErrorResponse(
-            header,
-            new CoreError(
-              'UNSUPPORTED_CAPABILITY',
-              `Unsupported capability ${header.pluginId}.${header.event} on ${runtime}`,
-            ),
+          const error = new CoreError(
+            ErrorCode.UNSUPPORTED_CAPABILITY,
+            `Unsupported capability ${header.pluginId}.${header.event} on ${runtime}`,
           );
+          logger.warn(error.message);
+          return invokeErrorResponse(header, error);
         }
-        await runtimeAdapter.dispatch(header.event, header.args, {
-          runtime,
-          payload,
-        });
-        return null;
+        try {
+          await runtimeAdapter.dispatch(header.event, header.args, {
+            runtime,
+            payload,
+          });
+          return null;
+        } catch (e) {
+          const error = new CoreError(
+            ErrorCode.PLUGIN_ERROR,
+            e instanceof Error ? e.message : String(e),
+          );
+          logger.error(
+            `dispatch ${header.pluginId}.${header.event} failed: ${error.message}`,
+          );
+          return invokeErrorResponse(header, error);
+        }
       }
 
       if (isPluginInvokeRequestHeader(header)) {
         const runtimeAdapter = registry.resolve(header.pluginId, runtime);
         if (runtimeAdapter?.invoke) {
-          const result = await runtimeAdapter.invoke(
-            header.event,
-            header.args,
-            {
-              runtime,
-              payload,
-            },
-          );
-          const [error, okResult] = result;
-          return {
-            type: 'INVOKE_RESPONSE',
-            pluginId: header.pluginId,
-            event: header.event,
-            requestId: header.requestId,
-            result: okResult ?? undefined,
-            error: error
-              ? { code: error.code, message: error.message }
-              : undefined,
-          };
+          try {
+            const result = await runtimeAdapter.invoke(
+              header.event,
+              header.args,
+              {
+                runtime,
+                payload,
+              },
+            );
+            const [error, okResult] = result;
+            return {
+              type: 'INVOKE_RESPONSE',
+              pluginId: header.pluginId,
+              event: header.event,
+              requestId: header.requestId,
+              result: okResult ?? undefined,
+              error: error
+                ? { code: error.code, message: error.message }
+                : undefined,
+            };
+          } catch (e) {
+            const error = new CoreError(
+              ErrorCode.PLUGIN_ERROR,
+              e instanceof Error ? e.message : String(e),
+            );
+            logger.error(
+              `invoke ${header.pluginId}.${header.event} failed: ${error.message}`,
+            );
+            return invokeErrorResponse(header, error);
+          }
         }
         if (header.requestId && options?.delegateToHost) {
           try {
@@ -138,7 +191,7 @@ export function createPluginRouter(
             return invokeErrorResponse(
               header,
               new CoreError(
-                'HOST_ERROR',
+                ErrorCode.HOST_ERROR,
                 e instanceof Error ? e.message : String(e),
               ),
             );
@@ -147,7 +200,7 @@ export function createPluginRouter(
         return invokeErrorResponse(
           header,
           new CoreError(
-            'UNSUPPORTED_CAPABILITY',
+            ErrorCode.UNSUPPORTED_CAPABILITY,
             `Unsupported capability ${header.pluginId}.${header.event} on ${runtime}`,
           ),
         );
@@ -192,7 +245,7 @@ export function createPluginBus(messenger: ProtocolMessenger): PluginBus {
       if (isPluginInvokeResponseHeader(response)) {
         if (response.error) {
           const typedError = new CoreError(
-            String(response.error.code ?? 'PLUGIN_ERROR'),
+            coerceErrorCode(response.error.code),
             String(response.error.message ?? 'Plugin invoke failed'),
           );
           return [typedError, null];
@@ -202,7 +255,7 @@ export function createPluginBus(messenger: ProtocolMessenger): PluginBus {
 
       return [
         new CoreError(
-          'INVALID_RESPONSE',
+          ErrorCode.INVALID_RESPONSE,
           `Unexpected response type ${response.type}`,
         ),
         null,
@@ -232,6 +285,12 @@ function isPluginDispatchHeader(
     typeof header.pluginId === 'string' &&
     typeof header.event === 'string'
   );
+}
+
+function isPluginEnvelopeHeader(
+  header: MessageHeader,
+): header is PluginDispatchHeader | PluginInvokeRequestHeader {
+  return isPluginDispatchHeader(header) || isPluginInvokeRequestHeader(header);
 }
 
 function isPluginInvokeRequestHeader(

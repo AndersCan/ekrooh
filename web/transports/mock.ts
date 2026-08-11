@@ -1,9 +1,12 @@
-import { MessageType, WireMessage } from '../../core/messages';
+import { ErrorCode, MessageType, WireMessage } from '../../core/messages';
 import {
   createHealthInvokeHandlers,
   type MockInvokeHandler,
 } from './mock-handlers';
 import { MessageTransport } from '../websocket-client';
+
+const MOCK_MEDIA_DATA_URI =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAbUlEQVR4nO3O7UkCABiAQcd5hjXSyCKLPrCiklRswHOM/rw3wS0s4yquYxXruInb2MRd3MdDbOMxnuI5XuI13mIX7/ERn/EV3/ET+/iNQxzjFOf4y2ICE5jABCYwgQlMYAITmMAEJjCBCfx34ALvwBam5OydHgAAAABJRU5ErkJggg==';
 
 const mockInvokeHandlers: Record<string, MockInvokeHandler> = {
   ...createHealthInvokeHandlers(),
@@ -28,9 +31,17 @@ const mockInvokeHandlers: Record<string, MockInvokeHandler> = {
         events: ['permissions.requestStorage'],
         runtimes: [],
       },
+      {
+        pluginId: 'vendor.media',
+        capabilities: ['media'],
+        events: ['media.pick', 'media.capture'],
+        runtimes: ['bare'],
+      },
     ],
   }),
   'permissions.requestStorage': () => ({ granted: true }),
+  'media.pick': () => ({ url: MOCK_MEDIA_DATA_URI, path: '' }),
+  'media.capture': () => ({ url: MOCK_MEDIA_DATA_URI, path: '' }),
 };
 
 export function createMockTransport(): MessageTransport {
@@ -58,7 +69,7 @@ export function createMockTransport(): MessageTransport {
             event: header.event,
             requestId: header.requestId,
             error: {
-              code: 'UNSUPPORTED_EVENT',
+              code: ErrorCode.UNSUPPORTED_EVENT,
               message: `Unsupported mock event: ${header.event}`,
             },
           },

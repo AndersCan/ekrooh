@@ -1,30 +1,34 @@
-import { WireMessage } from '../../core/messages';
+import {
+  MessageProtocol,
+  MessageTypeValue,
+  MessageHeader,
+  WireMessage,
+} from '../../core/messages';
 import { MessageTransport } from '../websocket-client';
 
-type InjectedBridge = {
-  send(message: string): void;
-};
-
-type NativeEnvelope = {
-  type: number;
-  header: Record<string, unknown>;
-  payloadBase64?: string | null;
-};
+/** Sentinel prefix posted by the shell with the WebMessagePort; the mode
+ * suffix tells the transport whether the WebView supports raw binary frames
+ * (`:binary`, API 34+) or needs base64 strings (`:base64`). */
+const SENTINEL_PREFIX = '__less_bare_port__';
 
 declare global {
   interface Window {
-    /** Injected by the embedding shell when present; not used by browser dev. */
-    NativeBridge?: InjectedBridge;
-    /** Injected callback: framed messages from backend → UI (same shape as WebSocket decode). */
-    onBackendMessage?: (msg: {
-      type: number;
-      header: Record<string, unknown>;
-      payload?: string;
-    }) => void;
+    /** Injected by the embedding shell (Android host) when the bootstrap
+     * bridge is available; the data path itself is a WebMessagePort. */
+    BareShell?: unknown;
   }
 }
 
-function decodeBase64(data: string) {
+type FrameMode = 'binary' | 'base64';
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+}
+
+function decodeBase64(data: string): Uint8Array {
   const binaryString = atob(data);
   const bytes = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) {
@@ -33,39 +37,71 @@ function decodeBase64(data: string) {
   return bytes;
 }
 
-export function createBootstrapBridgeTransport(): MessageTransport {
-  const listeners = new Set<(message: WireMessage) => void>();
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
 
-  window.onBackendMessage = (msg) => {
-    const payload = msg.payload ? decodeBase64(msg.payload) : new Uint8Array(0);
-    const message: WireMessage = {
-      type: msg.type as WireMessage['type'],
-      header: msg.header as WireMessage['header'],
-      payload,
+/**
+ * Android bootstrap bridge. The shell hands over a WebMessagePort on page
+ * load; frames are raw `MessageProtocol` bytes in both directions (no JSON
+ * envelope, no re-serialization). Frames sent before the handoff are queued.
+ */
+export function createBootstrapBridgeTransport(): MessageTransport {
+  const protocol = new MessageProtocol();
+  const listeners = new Set<(message: WireMessage) => void>();
+  const queued: ArrayBuffer[] = [];
+  let port: MessagePort | null = null;
+  let mode: FrameMode = 'binary';
+
+  function deliver(bytes: Uint8Array) {
+    try {
+      const message = protocol.decode(bytes);
+      for (const listener of listeners) listener(message);
+    } catch (err) {
+      console.error('Failed to parse bootstrap bridge message:', err);
+    }
+  }
+
+  function postFrame(frame: ArrayBuffer) {
+    if (mode === 'base64') {
+      port?.postMessage(encodeBase64(new Uint8Array(frame)));
+    } else {
+      port?.postMessage(frame);
+    }
+  }
+
+  window.addEventListener('message', (event) => {
+    const data = (event as MessageEvent).data;
+    if (typeof data !== 'string' || !data.startsWith(SENTINEL_PREFIX)) {
+      return;
+    }
+    const remotePort = (event as MessageEvent).ports?.[0];
+    if (!remotePort) return;
+
+    port = remotePort;
+    mode = data.includes(':base64') ? 'base64' : 'binary';
+    remotePort.onmessage = (messageEvent) => {
+      const incoming = (messageEvent as MessageEvent).data;
+      if (mode === 'base64') {
+        if (typeof incoming === 'string') deliver(decodeBase64(incoming));
+      } else if (incoming instanceof ArrayBuffer) {
+        deliver(new Uint8Array(incoming));
+      }
     };
-    for (const listener of listeners) listener(message);
-  };
+    for (const frame of queued) postFrame(frame);
+    queued.length = 0;
+  });
 
   return {
-    send(type, header, payload) {
-      let payloadBase64: string | null = null;
-      if (payload) {
-        const bytes =
-          typeof payload === 'string'
-            ? new TextEncoder().encode(payload)
-            : payload instanceof ArrayBuffer
-              ? new Uint8Array(payload)
-              : payload;
-        let binary = '';
-        for (const byte of bytes) binary += String.fromCharCode(byte);
-        payloadBase64 = btoa(binary);
+    send(type: MessageTypeValue, header: MessageHeader, payload) {
+      const frame = toArrayBuffer(protocol.encode(type, header, payload));
+      if (port) {
+        postFrame(frame);
+        return;
       }
-      const envelope: NativeEnvelope = {
-        type,
-        header: header as Record<string, unknown>,
-        payloadBase64,
-      };
-      window.NativeBridge?.send(JSON.stringify(envelope));
+      queued.push(frame);
     },
     subscribe(handler) {
       listeners.add(handler);

@@ -1,4 +1,4 @@
-import { InvokeEnvelope } from '../../core/messages';
+import { EventSpec, invokeEvent } from '../../core/messages';
 import type { CapabilityDescriptor } from '../../core/messages/types';
 
 export type DiscoveryListResult = {
@@ -6,19 +6,19 @@ export type DiscoveryListResult = {
   capabilities: CapabilityDescriptor[];
 };
 
+export const discoverySpecs = {
+  list: {
+    pluginId: 'core.discovery',
+    name: 'discovery.list',
+    args: {} as Record<string, never>,
+    result: {} as DiscoveryListResult,
+  },
+} as const satisfies Record<string, EventSpec<any, any>>;
+
 export const discoveryEvents = {
   discovery: {
-    list(): InvokeEnvelope<
-      'discovery.list',
-      Record<string, never>,
-      DiscoveryListResult
-    > {
-      return {
-        kind: 'invoke',
-        pluginId: 'core.discovery',
-        event: 'discovery.list',
-        args: {},
-      };
+    list() {
+      return invokeEvent(discoverySpecs.list, {});
     },
   },
 };

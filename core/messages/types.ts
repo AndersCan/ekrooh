@@ -1,4 +1,4 @@
-import { MessageTypeValue } from './constants';
+import { ErrorCode, MessageTypeValue } from './constants';
 
 /** Decoded binary frame (version byte stripped); used by WebSocket and other transports. */
 export interface WireMessage {
@@ -13,9 +13,9 @@ type HeaderBase = {
 };
 
 export class CoreError extends Error {
-  code: string;
+  code: ErrorCode;
 
-  constructor(code: string, message: string) {
+  constructor(code: ErrorCode, message: string) {
     super(message);
     this.name = 'CoreError';
     this.code = code;

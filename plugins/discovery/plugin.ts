@@ -1,18 +1,11 @@
 import {
   CapabilityDescriptor,
-  CoreError,
-  Either,
+  definePlugin,
+  ok,
   PluginManifest,
   RuntimeTarget,
 } from '../../core/messages';
-
-function err(code: string, message: string): Either<CoreError, never> {
-  return [new CoreError(code, message), null];
-}
-
-function ok<T>(result: T): Either<CoreError, T> {
-  return [null, result];
-}
+import { discoverySpecs } from './events';
 
 function mergeCapabilityRows(
   a: CapabilityDescriptor[],
@@ -59,22 +52,15 @@ export type DiscoveryPluginDeps = {
 export function createDiscoveryPlugin(
   deps: DiscoveryPluginDeps,
 ): PluginManifest {
-  return {
-    id: 'core.discovery',
+  return definePlugin('core.discovery', discoverySpecs, {
     capabilities: ['discovery'],
-    events: ['discovery.list'],
-    runtimes: {
-      bare: {
-        invoke: async (event) => {
-          if (event !== 'discovery.list') {
-            return err('UNSUPPORTED_EVENT', `Unsupported event ${event}`);
-          }
-          const bareRows = deps.listBareCapabilities();
-          const hostRows = await deps.queryHostCapabilities();
-          const merged = mergeCapabilityRows(bareRows, hostRows);
-          return ok({ schemaVersion: 1 as const, capabilities: merged });
-        },
+    invoke: {
+      list: async () => {
+        const bareRows = deps.listBareCapabilities();
+        const hostRows = await deps.queryHostCapabilities();
+        const merged = mergeCapabilityRows(bareRows, hostRows);
+        return ok({ schemaVersion: 1 as const, capabilities: merged });
       },
     },
-  };
+  });
 }

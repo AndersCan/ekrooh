@@ -2,6 +2,7 @@ import {
   createBootstrapBridgeTransport,
   createMockTransport,
   createWebSocketTransport,
+  createWkWebViewBridgeTransport,
   type MessageTransport,
 } from '@less/bare/transports';
 
@@ -14,8 +15,10 @@ export function getTransport(): MessageTransport {
     ?.VITE_TRANSPORT_MODE;
   if (mode === 'mock') {
     transport = createMockTransport();
-  } else if (window.NativeBridge) {
+  } else if (window.BareShell) {
     transport = createBootstrapBridgeTransport();
+  } else if (window.webkit?.messageHandlers?.bareHost) {
+    transport = createWkWebViewBridgeTransport();
   } else {
     transport = createWebSocketTransport();
   }

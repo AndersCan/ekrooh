@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { createDiscoveryPlugin } from './plugin';
 import type { DiscoveryListResult } from './events';
-import type { CapabilityDescriptor, PluginContext } from '../../core/messages';
+import {
+  createPluginRegistry,
+  createPluginRouter,
+  type CapabilityDescriptor,
+  type PluginContext,
+} from '../../core/messages';
 
 const context: PluginContext = { runtime: 'bare', payload: new Uint8Array(0) };
 
@@ -42,16 +47,24 @@ describe('createDiscoveryPlugin', () => {
     expect(permissions?.runtimes).toEqual(['bare', 'android']);
   });
 
-  it('rejects unsupported events deterministically', async () => {
-    const plugin = createDiscoveryPlugin({
-      listBareCapabilities: () => [],
-      queryHostCapabilities: async () => [],
-    });
-    const invoke = plugin.runtimes.bare?.invoke;
-    if (!invoke) throw new Error('expected bare invoke adapter');
-
-    const [error, result] = await invoke('discovery.bogus', {}, context);
-    expect(result).toBeNull();
-    expect(error?.code).toBe('UNSUPPORTED_EVENT');
+  it('rejects unsupported events deterministically via the router', async () => {
+    const registry = createPluginRegistry();
+    registry.register(
+      createDiscoveryPlugin({
+        listBareCapabilities: () => [],
+        queryHostCapabilities: async () => [],
+      }),
+    );
+    const router = createPluginRouter(registry, 'bare');
+    const response = await router.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.discovery',
+        event: 'discovery.bogus',
+        requestId: 'r1',
+      },
+      new Uint8Array(0),
+    );
+    expect(response?.error?.code).toBe('UNSUPPORTED_EVENT');
   });
 });

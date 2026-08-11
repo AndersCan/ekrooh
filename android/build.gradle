@@ -1,6 +1,6 @@
-plugins {
-  id "com.android.library"
+plugins {  id "com.android.library"
   id "org.jetbrains.kotlin.android"
+  id "maven-publish"
 }
 
 android {
@@ -34,16 +34,53 @@ android {
   }
 }
 
+// The Bare Kit runtime is shipped in the published AAR: AGP packages the local
+// `api fileTree` jar into the AAR's libs/ and the native libs (jniLibs) into
+// jni/, so published consumers need no separate prebuilds download.
+
+// Single source of truth for the version is the root package.json (RELEASING.md).
+rootProject.ext.jsonVersion = {
+  def slurper = new groovy.json.JsonSlurper()
+  def pkg = slurper.parseText(file("../package.json").getText("UTF-8"))
+  return pkg.version as String
+}
+
 dependencies {
-  // Bare Kit runtime prebuilt (IPC + Worklet). Local file until AAR publishing
-  // lands; see RELEASING.md.
+  // Bare Kit runtime prebuilt (IPC + Worklet). Compile/runtime for local
+  // project dependents; published consumers get the classes from the AAR's
+  // libs/ (AGP packages this local jar into the AAR).
   api fileTree(dir: "../prebuilds/android", include: ["bare-kit/classes.jar"])
   // Public API of the host surfaces these types (BareWebViewClient,
-  // WebViewBackendMessenger), so they are `api` for consumers.
+  // BarePortMessenger), so they are `api` for consumers.
   api "androidx.webkit:webkit:1.15.0"
   api "androidx.appcompat:appcompat:1.7.0"
 
   testImplementation "junit:junit:4.13.2"
   // Real org.json for unit tests (shadows the android.jar stub).
   testImplementation "org.json:json:20240303"
+}
+
+// Publish the AAR to GitHub Packages (Maven format) under the single framework
+// version from the root package.json (see RELEASING.md).
+afterEvaluate {
+  publishing {
+    publications {
+      mavenAar(MavenPublication) {
+        groupId = "io.less"
+        artifactId = "bare-host"
+        version = rootProject.jsonVersion()
+        artifact(tasks.named("bundleReleaseAar"))
+      }
+    }
+    repositories {
+      maven {
+        name = "GitHubPackages"
+        url = uri("https://maven.pkg.github.com/AndersCan/less-bare-android")
+        credentials {
+          username = System.getenv("GITHUB_ACTOR") ?: "token"
+          password = System.getenv("GITHUB_TOKEN") ?: ""
+        }
+      }
+    }
+  }
 }

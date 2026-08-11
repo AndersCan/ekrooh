@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { MessageProtocol } from './wire-codec';
-import { MessageType } from './constants';
+import { MAX_FRAME_BYTES, MessageType } from './constants';
 import type { MessageHeader, RuntimeTarget } from './types';
 
 describe('MessageProtocol encode/decode', () => {
@@ -173,6 +173,75 @@ describe('MessageProtocol encode/decode', () => {
       capabilities: [
         { pluginId: 'a.plugin', capabilities: [], events: [], runtimes: [] },
       ],
+    });
+  });
+
+  it('rejects a header larger than the 16-bit length field', () => {
+    const protocol = new MessageProtocol();
+    const header = {
+      type: 'DISPATCH',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      args: { blob: 'x'.repeat(0x10000) },
+    } satisfies MessageHeader;
+    expect(() => protocol.encode(MessageType.ENVELOPE, header, null)).toThrow(
+      /Header too large/,
+    );
+  });
+
+  it('rejects frames larger than the configured maximum', () => {
+    const protocol = new MessageProtocol({ maxFrameBytes: 64 });
+    const payload = new Uint8Array(128);
+    expect(() =>
+      protocol.encode(
+        MessageType.ENVELOPE,
+        { type: 'DISPATCH', pluginId: 'a.b', event: 'e' },
+        payload,
+      ),
+    ).toThrow(/Frame too large/);
+  });
+
+  it('rejects oversized frames on decode', () => {
+    const protocol = new MessageProtocol();
+    const encoded = protocol.encode(
+      MessageType.ENVELOPE,
+      { type: 'DISPATCH', pluginId: 'a.b', event: 'e' },
+      new Uint8Array(4),
+    );
+    const small = new MessageProtocol({ maxFrameBytes: 16 });
+    expect(() => small.decode(encoded)).toThrow(/Frame too large/);
+  });
+
+  it('round-trips frames within the default maximum', () => {
+    const protocol = new MessageProtocol();
+    const payload = new Uint8Array(MAX_FRAME_BYTES - 128);
+    const encoded = protocol.encode(
+      MessageType.ENVELOPE,
+      { type: 'DISPATCH', pluginId: 'a.b', event: 'e' },
+      payload,
+    );
+    const decoded = protocol.decode(encoded);
+    expect(decoded.payload.byteLength).toBe(MAX_FRAME_BYTES - 128);
+  });
+
+  it('preserves unknown header fields on decode', () => {
+    const protocol = new MessageProtocol();
+    const header = {
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      requestId: 'req-fwd',
+      futureField: { nested: true },
+    } as unknown as MessageHeader;
+    const decoded = protocol.decode(
+      protocol.encode(MessageType.ENVELOPE, header, null),
+    );
+    expect(decoded.header).toMatchObject({
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      requestId: 'req-fwd',
+      futureField: { nested: true },
     });
   });
 });

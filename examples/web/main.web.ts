@@ -8,8 +8,9 @@ import {
 } from '@less/bare/core';
 import { discoveryEvents } from '@less/bare/plugins/discovery/events';
 import { healthEvents } from '@less/bare/plugins/health/events';
+import { mediaEvents } from '@less/bare/plugins/media/events';
 import { permissionEvents } from '@less/bare/plugins/permissions/events';
-import { $capabilitiesSummary, $lastResult } from './app-state';
+import { $capabilitiesSummary, $lastResult, $mediaUrl } from './app-state';
 import { $currentTime } from './current-time';
 import { handleMessage } from './handle-message';
 import { $router, type AppPage } from './router';
@@ -25,6 +26,14 @@ const bus = createPluginBus(messenger);
 main();
 
 function main() {
+  // The Android shell serves the app from /assets/index.html and the iOS shell
+  // (WKWebView) from a shell-specific path ending in index.html — neither
+  // matches a route. Normalize to the home route so first load doesn't land on
+  // "Not found".
+  if (window.location.pathname.endsWith('/index.html')) {
+    $router.open('/', true);
+  }
+
   transport.subscribe((message) => {
     messenger.handleIncoming(message.header);
     handleMessage(message);
@@ -125,8 +134,33 @@ function healthChecksView() {
         >
           Storage permission
         </button>
+
+        <button
+          class="rounded bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-700"
+          @click=${() => void runMediaPick()}
+        >
+          Pick image
+        </button>
+
+        <button
+          class="rounded bg-teal-600 px-4 py-2 text-white hover:bg-teal-700"
+          @click=${() => void runMediaCapture()}
+        >
+          Capture image
+        </button>
       </div>
       <p class="text-sm text-gray-700">${useStore($lastResult)}</p>
+
+      ${useStore($mediaUrl, (url) =>
+        url
+          ? html`<img
+              alt="Picked media"
+              class="mt-4 max-w-full rounded border border-slate-300"
+              src="${url}"
+              referrerpolicy="no-referrer"
+            />`
+          : null,
+      )}
     </section>
   `;
 }
@@ -197,4 +231,22 @@ async function runStoragePermission() {
       ? `Storage permission failed: ${err.message}`
       : `Storage permission: granted=${String(r?.granted)}`,
   );
+}
+
+async function runMediaPick() {
+  const [err, r] = await bus.invoke(mediaEvents.media.pick('image'));
+  $lastResult.set(
+    err ? `Media pick failed: ${err.message}` : `Media pick ok: ${r?.path}`,
+  );
+  $mediaUrl.set(r?.url ?? '');
+}
+
+async function runMediaCapture() {
+  const [err, r] = await bus.invoke(mediaEvents.media.capture('image'));
+  $lastResult.set(
+    err
+      ? `Media capture failed: ${err.message}`
+      : `Media capture ok: ${r?.path}`,
+  );
+  $mediaUrl.set(r?.url ?? '');
 }

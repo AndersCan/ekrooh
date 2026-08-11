@@ -17,6 +17,15 @@ yarn-error.log*
 prebuilds/
 android/prebuilds/
 
+# Swift package build artifacts
+ios/.build/
+ios/.swiftpm/
+ios/Package.resolved
+
+# iOS reference app generated inputs (see scripts/build-ios-app.mjs)
+examples/ios-app/addons/
+examples/ios-app/Resources/
+
 # External native build artifacts
 .externalNativeBuild
 .cxx

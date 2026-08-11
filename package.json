@@ -1,6 +1,6 @@
 {
   "name": "@less/bare",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "description": "The boring bootstrap for cross-platform apps on the Bare runtime: wire protocol, plugin kernel, RPC messenger, transports, and native host bridges.",
   "license": "MIT",
@@ -19,6 +19,7 @@
     "./plugins/health/events": "./plugins/health/events.ts",
     "./plugins/discovery/events": "./plugins/discovery/events.ts",
     "./plugins/permissions/events": "./plugins/permissions/events.ts",
+    "./plugins/media/events": "./plugins/media/events.ts",
     "./transports": "./web/transports/index.ts",
     "./package.json": "./package.json"
   },
@@ -51,6 +52,8 @@
     "build:web": "vp -C examples/web build",
     "build:core": "npm run build:bare:app",
     "build:android-assets": "npm run build:core && npm run build:web",
+    "build:ios": "node scripts/build-ios-app.mjs",
+    "test:ios": "node scripts/test-ios.mjs",
     "build:bare": "npm run build:core",
     "build:bare:app": "esbuild core/main.core.ts --bundle --packages=external --platform=node --format=esm --outfile=core/main.core.gen.js",
     "playwright:install": "node scripts/playwright-local-browsers.mjs install chromium",
@@ -72,6 +75,8 @@
   "dependencies": {
     "bare-encoding": "^1.0.3",
     "bare-env": "^3.0.0",
+    "bare-fs": "^4.8.0",
+    "bare-http1": "^4.5.7",
     "bare-tcp": "^2.2.7",
     "bare-ws": "^3.0.0"
   },

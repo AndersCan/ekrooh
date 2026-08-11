@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Fetch Bare Kit prebuilds for the Android host into `prebuilds/` (gitignored).
+ * Fetch Bare Kit prebuilds for the Android and iOS hosts into `prebuilds/`
+ * (gitignored).
  *
  * Usage:
  *   node scripts/fetch-prebuilds.mjs            # pinned version (see below)
@@ -26,15 +27,17 @@ execFileSync(
   { cwd: root, stdio: 'inherit' },
 );
 
-console.log('Unpacking android/* into prebuilds/ ...');
-execFileSync('unzip', ['-o', archive, 'android/*', '-d', 'prebuilds/'], {
-  cwd: root,
-  stdio: 'inherit',
-});
+console.log('Unpacking android/* and ios/* into prebuilds/ ...');
+execFileSync(
+  'unzip',
+  ['-o', archive, 'android/*', 'ios/*', '-d', 'prebuilds/'],
+  { cwd: root, stdio: 'inherit' },
+);
 
 // Best-effort cleanup of the downloaded archive.
 rmSync(archive, { force: true });
 
 console.log(
-  `Done. Prebuilds ready under prebuilds/android/bare-kit (${version}).`,
+  `Done. Prebuilds ready under prebuilds/android/bare-kit and ` +
+    `prebuilds/ios/BareKit.xcframework (${version}).`,
 );

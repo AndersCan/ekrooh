@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
+import { ErrorCode } from './constants';
 import { CoreError } from './types';
 import {
   createPluginBus,
@@ -18,7 +19,7 @@ function ok<T>(result: T): [null, T] {
   return [null, result];
 }
 
-function err(code: string, message: string): [CoreError, null] {
+function err(code: ErrorCode, message: string): [CoreError, null] {
   return [new CoreError(code, message), null];
 }
 
@@ -169,6 +170,78 @@ describe('createPluginRouter', () => {
       code: 'UNSUPPORTED_EVENT',
       message: 'nope',
     });
+  });
+
+  it('synthesizes UNSUPPORTED_EVENT for events not declared in the manifest', async () => {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'core.health',
+      events: ['health.ping'],
+      runtimes: { bare: { invoke: () => ok({ message: 'pong' }) } },
+    });
+    const router = createPluginRouter(registry, 'bare');
+    const response = await router.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.bogus',
+        requestId: 'r6',
+      },
+      new Uint8Array(0),
+    );
+    expect(response?.error?.code).toBe(ErrorCode.UNSUPPORTED_EVENT);
+    expect(response?.error?.message).toContain('health.bogus');
+  });
+
+  it('wraps adapter exceptions as PLUGIN_ERROR', async () => {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'core.health',
+      events: ['health.bogus'],
+      runtimes: {
+        bare: {
+          invoke: () => {
+            throw new Error('adapter exploded');
+          },
+        },
+      },
+    });
+    const router = createPluginRouter(registry, 'bare');
+    const response = await router.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.bogus',
+        requestId: 'r7',
+      },
+      new Uint8Array(0),
+    );
+    expect(response?.error?.code).toBe(ErrorCode.PLUGIN_ERROR);
+    expect(response?.error?.message).toBe('adapter exploded');
+  });
+
+  it('wraps dispatch exceptions as PLUGIN_ERROR and logs them', async () => {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'core.health',
+      runtimes: {
+        bare: {
+          dispatch: () => {
+            throw new Error('dispatch exploded');
+          },
+        },
+      },
+    });
+    const logger = { warn: vi.fn(), error: vi.fn() };
+    const router = createPluginRouter(registry, 'bare', { logger });
+    const response = await router.route(
+      { type: 'DISPATCH', pluginId: 'core.health', event: 'health.ping' },
+      new Uint8Array(0),
+    );
+    expect(response?.error?.code).toBe(ErrorCode.PLUGIN_ERROR);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('dispatch exploded'),
+    );
   });
 
   it('delegates to the host when no adapter exists', async () => {

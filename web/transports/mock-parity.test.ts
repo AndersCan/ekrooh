@@ -24,6 +24,12 @@ describe('mock-handlers parity with the health plugin', () => {
       message: 'hi',
     });
 
-    expect(mockResult).toEqual(pluginResult);
+    // Same shape and values; `ts` may differ by a millisecond because the mock
+    // and plugin call `Date.now()` at slightly different instants.
+    const plugin = pluginResult as { message: string; ts: number };
+    const mock = mockResult as { message: string; ts: number };
+    expect(Object.keys(mock).sort()).toEqual(Object.keys(plugin).sort());
+    expect(mock.message).toBe(plugin.message);
+    expect(Math.abs(mock.ts - plugin.ts)).toBeLessThanOrEqual(1);
   });
 });

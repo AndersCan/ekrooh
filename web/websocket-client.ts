@@ -1,4 +1,5 @@
 import {
+  ErrorCode,
   MessageHeader,
   MessageProtocol,
   MessageType,
@@ -6,9 +7,28 @@ import {
   WireMessage,
 } from '../core/messages';
 
+declare global {
+  interface Window {
+    /** Per-session token injected by the embedding shell on-device. The
+     * worklet WS server validates it when auth is enabled; browser dev has
+     * none. */
+    __lessBareToken?: string;
+  }
+}
+
 const protocol = new MessageProtocol();
 const WS_DISCONNECTED_MESSAGE =
   'WebSocket disconnected before request could be sent';
+
+/**
+ * Append the session token to the URL as a `?token=...` query param, keeping
+ * any query the URL already carries.
+ */
+function withToken(url: string, token: string): string {
+  const parsed = new URL(url);
+  parsed.searchParams.set('token', token);
+  return parsed.toString();
+}
 
 type QueuedMessage = {
   bytes: Uint8Array;
@@ -39,7 +59,9 @@ export interface MessageTransport {
 export function createWebSocketTransport(
   url = 'ws://localhost:8080',
 ): MessageTransport {
-  const websocket = new WebSocket(url);
+  const token =
+    typeof window !== 'undefined' ? window.__lessBareToken : undefined;
+  const websocket = new WebSocket(token ? withToken(url, token) : url);
   websocket.binaryType = 'arraybuffer';
   const listeners = new Set<(message: WireMessage) => void>();
   const queued: QueuedMessage[] = [];
@@ -57,7 +79,7 @@ export function createWebSocketTransport(
           event: header.event,
           requestId: header.requestId,
           error: {
-            code: 'TRANSPORT_ERROR',
+            code: ErrorCode.TRANSPORT_ERROR,
             message,
           },
         },

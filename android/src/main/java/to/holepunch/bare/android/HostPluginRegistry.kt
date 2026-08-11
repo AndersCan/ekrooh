@@ -48,7 +48,7 @@ class HostPluginRegistry {
     fun dispatch(pluginId: String, event: String, args: JSONObject?, payload: ByteArray?): HostInvokeOutcome {
         val h = handlers[Key(pluginId, event)]
             ?: return HostInvokeOutcome.Fail(
-                "UNSUPPORTED_CAPABILITY",
+                ErrorCodes.UNSUPPORTED_CAPABILITY,
                 "No host handler for $pluginId.$event",
             )
         return h.invoke(args, payload)
