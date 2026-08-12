@@ -79,18 +79,15 @@ let root: string;
 let webDir: string;
 let storageDir: string;
 let cacheDir: string;
-let devStorageDir: string;
 
 beforeAll(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-test-'));
   webDir = path.join(root, 'web');
   storageDir = path.join(root, 'storage');
   cacheDir = path.join(root, 'cache');
-  devStorageDir = path.join(root, 'dev-storage');
   fs.mkdirSync(webDir);
   fs.mkdirSync(storageDir);
   fs.mkdirSync(cacheDir);
-  fs.mkdirSync(devStorageDir);
   fs.writeFileSync(path.join(webDir, 'index.html'), '<html>app</html>');
 });
 
@@ -154,10 +151,13 @@ describe('createWorkletRuntime', () => {
     );
     expect(handoff).toEqual(creds);
 
-    // The mounted web app is public content; media stays auth-gated.
+    // The mounted web app is public content; the WS upgrade stays auth-gated.
     const page = await httpGet(`${creds.origin}/`);
     expect(page.status).toBe(200);
     expect(page.body).toBe('<html>app</html>');
+
+    const upgrade = await wsUpgrade(creds.origin, { token: undefined });
+    expect(upgrade.split('\r\n')[0]).not.toContain('101');
 
     runtime.close();
   });
@@ -171,11 +171,63 @@ describe('createWorkletRuntime', () => {
 
     const page = await httpGet(`${creds.origin}/`);
     expect(page.status).toBe(200);
-    expect(fs.existsSync(path.join(devStorageDir, 'handoff.json'))).toBe(false);
+
+    // Dev mode has no storage dir, so it never writes a handoff file.
+    expect(runtime.config.storage).toBeUndefined();
+
+    // Auth is off in dev: a token-less upgrade succeeds.
+    const upgrade = await wsUpgrade(creds.origin, { token: undefined });
+    expect(upgrade.split('\r\n')[0]).toContain('101');
 
     runtime.close();
   });
 });
+
+function wsUpgrade(
+  origin: string,
+  opts: { token?: string } = {},
+): Promise<string> {
+  const port = Number(origin.slice(origin.lastIndexOf(':') + 1));
+  const q = opts.token ? `?token=${opts.token}` : '';
+  return new Promise((resolve) => {
+    let data = '';
+    let done = false;
+    const finish = (v: string) => {
+      if (!done) {
+        done = true;
+        resolve(v);
+      }
+    };
+    const socket = net.connect({ host: '127.0.0.1', port });
+    socket.on('connect', () => {
+      socket.write(
+        [
+          `GET /ws${q} HTTP/1.1`,
+          `Host: 127.0.0.1:${port}`,
+          'Upgrade: websocket',
+          'Connection: Upgrade',
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+          'Sec-WebSocket-Version: 13',
+          `Origin: ${origin}`,
+          '\r\n',
+        ].join('\r\n'),
+      );
+      setTimeout(() => {
+        socket.destroy();
+        finish(data);
+      }, 3000);
+    });
+    socket.on('data', (d) => {
+      data += String(d);
+      if (data.includes('\r\n')) {
+        socket.destroy();
+        finish(data);
+      }
+    });
+    socket.on('close', () => finish(data));
+    socket.on('error', () => finish(data));
+  });
+}
 
 function httpGet(url: string): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
