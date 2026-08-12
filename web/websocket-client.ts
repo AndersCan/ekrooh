@@ -107,6 +107,9 @@ export function createWebSocketTransport(
   let retries = 0;
   let nextUrl = url;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Whether the query-token URL is already in play (from a failed `/login` or
+   * a rejected upgrade). Guards the fallback so it fires at most once. */
+  let tokenFallbackTried = false;
 
   const emitTransportError = (header: MessageHeader, message: string) => {
     if (header.type !== 'INVOKE_REQUEST') {
@@ -151,8 +154,10 @@ export function createWebSocketTransport(
     }
     socket = new WebSocket(nextUrl);
     socket.binaryType = 'arraybuffer';
+    let opened = false;
 
     socket.onopen = () => {
+      opened = true;
       retries = 0;
       flushQueued();
     };
@@ -169,6 +174,22 @@ export function createWebSocketTransport(
     };
 
     socket.onclose = () => {
+      // A close before ever opening means the upgrade was rejected — the
+      // `/login` cookie may not have ridden the handshake (WKWebView/WebView
+      // cookie-on-WS behavior varies). If a token is present and the query
+      // token URL isn't already in play, retry it immediately: this is a
+      // different connection, so it neither consumes a retry nor backs off.
+      if (
+        !opened &&
+        !tokenFallbackTried &&
+        typeof token === 'string' &&
+        token.length > 0
+      ) {
+        tokenFallbackTried = true;
+        nextUrl = withToken(url, token);
+        open();
+        return;
+      }
       if (retries >= maxRetries) {
         failQueuedMessages(WS_DISCONNECTED_MESSAGE);
         console.warn(
@@ -205,9 +226,11 @@ export function createWebSocketTransport(
           // Login rejected or timed out; fall back to the query param (the
           // server still accepts it for non-cookie clients).
           nextUrl = withToken(url, token!);
+          tokenFallbackTried = true;
         }
       } catch {
         nextUrl = withToken(url, token!);
+        tokenFallbackTried = true;
       }
     }
     open();

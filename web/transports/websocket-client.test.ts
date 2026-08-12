@@ -278,6 +278,88 @@ describe('createWebSocketTransport reconnect', () => {
     expect(second.sent).toHaveLength(1);
   });
 
+  it('retries with the query token when the upgrade is rejected despite a successful /login', async () => {
+    vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true })),
+    );
+
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 3,
+      backoffMs: 5,
+    });
+    await nextTick();
+
+    const first = lastSocket();
+    expect(first.url).toBe('ws://test');
+    transport.subscribe(() => {});
+
+    // The mock server rejects the upgrade: the socket closes without ever
+    // opening, so the HttpOnly cookie never rode the handshake.
+    first.close();
+
+    expect(FakeWebSocket.instances.length).toBe(2);
+    const second = lastSocket();
+    expect(second).not.toBe(first);
+    expect(second.url).toBe('ws://test/?token=secret-token');
+
+    // RPC sent during the fallback is queued and flushes once the token URL
+    // actually opens — the app does not dead-end.
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'rt1',
+      },
+      null,
+    );
+    expect(second.sent).toHaveLength(0);
+    second.open();
+    expect(second.sent).toHaveLength(1);
+  });
+
+  it('gives up after the retry cap once the token URL is also rejected', async () => {
+    vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true })),
+    );
+
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+      backoffMs: 5,
+    });
+    await nextTick();
+    const headers: unknown[] = [];
+    transport.subscribe((message) => headers.push(message.header));
+
+    const first = lastSocket();
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'rt2',
+      },
+      null,
+    );
+    first.close(); // rejected → falls back to the token URL once
+
+    const second = lastSocket();
+    expect(second.url).toBe('ws://test/?token=secret-token');
+    second.close(); // token URL also rejected → cap reached
+
+    const header = headers[0] as PluginInvokeResponseHeader;
+    expect(header.type).toBe('INVOKE_RESPONSE');
+    expect(header.error?.code).toBe('TRANSPORT_ERROR');
+  });
+
   it('queues during the reconnect window and errors after the cap', async () => {
     const transport = createWebSocketTransport({
       url: 'ws://test',
