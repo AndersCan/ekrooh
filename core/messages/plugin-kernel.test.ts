@@ -19,7 +19,7 @@ function ok<T>(result: T): [null, T] {
   return [null, result];
 }
 
-function err(code: ErrorCode, message: string): [CoreError, null] {
+function err(code: string, message: string): [CoreError, null] {
   return [new CoreError(code, message), null];
 }
 
@@ -360,6 +360,27 @@ describe('createPluginBus', () => {
     expect(error?.message).toBe('nope');
   });
 
+  it('preserves an app-scoped error code instead of flattening to PLUGIN_ERROR', async () => {
+    const bus = createPluginBus(
+      fakeMessenger(() => ({
+        type: 'INVOKE_RESPONSE',
+        pluginId: 'app.photos',
+        event: 'photo.url',
+        requestId: 'req-app',
+        error: { code: 'app.photos/not-found', message: 'missing' },
+      })),
+    );
+    const [error, result] = await bus.invoke({
+      kind: 'invoke',
+      pluginId: 'app.photos',
+      event: 'photo.url',
+      args: {},
+    });
+    expect(result).toBeNull();
+    expect(error?.code).toBe('app.photos/not-found');
+    expect(error?.message).toBe('missing');
+  });
+
   it('invoke rejects unexpected response types', async () => {
     const bus = createPluginBus(
       fakeMessenger(() => ({
@@ -426,5 +447,41 @@ describe('integration: messenger + protocol + bus over an encoded channel', () =
     });
     expect(error).toBeNull();
     expect(result).toEqual({ message: 'pong', ts: 123 });
+  });
+
+  it('round-trips an app-scoped error code end-to-end through the codec', async () => {
+    const protocol = new MessageProtocol();
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'app.photos',
+      runtimes: {
+        bare: {
+          invoke: () => err('app.photos/not-found', 'missing'),
+        },
+      },
+    });
+    const router = createPluginRouter(registry, 'bare');
+
+    const sender = vi.fn(async (request: MessageHeader) => {
+      const frame = protocol.encode(MessageType.ENVELOPE, request, null);
+      const decoded = protocol.decode(frame);
+      const response = await router.route(decoded.header, decoded.payload);
+      if (response) {
+        messenger.handleIncoming(response);
+      }
+    });
+
+    const messenger = createProtocolMessenger(sender);
+    const bus = createPluginBus(messenger);
+
+    const [error, result] = await bus.invoke({
+      kind: 'invoke',
+      pluginId: 'app.photos',
+      event: 'photo.url',
+      args: {},
+    });
+    expect(result).toBeNull();
+    expect(error?.code).toBe('app.photos/not-found');
+    expect(error?.message).toBe('missing');
   });
 });

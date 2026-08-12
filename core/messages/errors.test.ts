@@ -16,6 +16,17 @@ describe('Either result helpers', () => {
     expect(error.message).toBe('boom');
   });
 
+  it('err preserves an app-scoped code verbatim', () => {
+    const [error] = err('app.photos/not-found', 'missing');
+    expect(error).toBeInstanceOf(CoreError);
+    expect(error.code).toBe('app.photos/not-found');
+  });
+
+  it('CoreError keeps a non-canonical code as given', () => {
+    const error = new CoreError('app.photos/not-found', 'missing');
+    expect(error.code).toBe('app.photos/not-found');
+  });
+
   it('coerceErrorCode preserves known wire codes', () => {
     expect(coerceErrorCode('UNSUPPORTED_EVENT')).toBe('UNSUPPORTED_EVENT');
     expect(coerceErrorCode('HOST_ERROR')).toBe('HOST_ERROR');

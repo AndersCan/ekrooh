@@ -11,7 +11,6 @@ import {
   PluginManifest,
   RuntimeTarget,
 } from './types';
-import { coerceErrorCode } from './errors';
 import { InvokeRequest, ProtocolMessenger } from './rpc-messenger';
 
 export interface PluginRegistry {
@@ -244,8 +243,10 @@ export function createPluginBus(messenger: ProtocolMessenger): PluginBus {
 
       if (isPluginInvokeResponseHeader(response)) {
         if (response.error) {
+          // App-scoped codes (e.g. `app.photos/not-found`) ride the wire
+          // verbatim — never flattened to a canonical code.
           const typedError = new CoreError(
-            coerceErrorCode(response.error.code),
+            response.error.code,
             String(response.error.message ?? 'Plugin invoke failed'),
           );
           return [typedError, null];

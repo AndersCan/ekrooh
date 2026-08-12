@@ -12,10 +12,15 @@ type HeaderBase = {
   requestId?: string;
 };
 
-export class CoreError extends Error {
-  code: ErrorCode;
+/** Canonical wire codes plus any app-scoped code consumers define (e.g.
+ * `app.photos/not-found`). Framework plugins use the canonical union;
+ * arbitrary codes ride the wire verbatim and are never flattened. */
+export type ErrorCodeOrString = ErrorCode | (string & {});
 
-  constructor(code: ErrorCode, message: string) {
+export class CoreError extends Error {
+  code: ErrorCodeOrString;
+
+  constructor(code: ErrorCodeOrString, message: string) {
     super(message);
     this.name = 'CoreError';
     this.code = code;
