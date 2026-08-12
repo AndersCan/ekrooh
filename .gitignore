@@ -17,6 +17,10 @@ yarn-error.log*
 prebuilds/
 android/prebuilds/
 
+# Multi-instance harness dev dirs (see core/harness.core.ts)
+.harness-instances/
+core/harness.core.gen.js
+
 # Swift package build artifacts
 ios/.build/
 ios/.swiftpm/
