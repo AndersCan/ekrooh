@@ -5,6 +5,7 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import type { HashOptions } from 'node:crypto';
 import type { HTTPIncomingMessage } from 'bare-http1';
 import {
@@ -452,6 +453,35 @@ describe('loopback server HTTP', () => {
   it('always sends Referrer-Policy: no-referrer', async () => {
     const r = await request('/app.js', { headers: { cookie } });
     expect(r.headers['referrer-policy']).toBe('no-referrer');
+  });
+
+  it('handles a read-stream error without crashing the worklet (evicted file)', async () => {
+    const bareFs = (await import('bare-fs')) as unknown as {
+      default: typeof fs;
+    };
+    const erroring = new PassThrough();
+    const spy = vi
+      .spyOn(bareFs.default, 'createReadStream')
+      .mockImplementation(() => {
+        process.nextTick(() =>
+          erroring.destroy(
+            Object.assign(new Error('bad file descriptor'), { code: 'EBADF' }),
+          ),
+        );
+        return erroring as never;
+      });
+    try {
+      // Headers are flushed before the pipe, so the error aborts the response
+      // (the client sees a reset, never a hang or a crashed worklet). The
+      // request is fire-and-forget — it may settle as a reset or a hang.
+      void request('/app.js', { headers: { cookie } }).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      spy.mockRestore();
+    }
+    // The worklet is still alive: a normal request succeeds afterwards.
+    const ok = await request('/app.js', { headers: { cookie } });
+    expect(ok.status).toBe(200);
   });
 
   it('mount/unmount removes a file mount and re-serves after re-mount', async () => {

@@ -357,10 +357,7 @@ export function createLoopbackServer(
       // Flush the headers immediately so bare-http1 does not append its own
       // (zero) Content-Length when the piped stream ends.
       (res as unknown as { flushHeaders(): void }).flushHeaders();
-      fs.createReadStream(filePath, {
-        start: range.start,
-        end: range.end,
-      }).pipe(res);
+      pipeFile(res, filePath, range);
       return;
     }
     res.writeHead(200, {
@@ -372,7 +369,36 @@ export function createLoopbackServer(
       'Cache-Control': 'no-store',
     });
     (res as unknown as { flushHeaders(): void }).flushHeaders();
-    fs.createReadStream(filePath).pipe(res);
+    pipeFile(res, filePath);
+  }
+
+  /** Pipes a file's bytes to the response with an error handler. bare-fs opens
+   * its fd asynchronously, so a file evicted between `statSync` and the open
+   * (e.g. the spool LRU eviction in #8) emits `'error'` with no listeners —
+   * an unhandled error would crash the whole worklet. Headers are flushed
+   * before piping, so a mid-stream error aborts the response rather than
+   * writing a late status. */
+  function pipeFile(
+    res: HTTPServerResponse,
+    filePath: string,
+    range?: { start: number; end: number },
+  ) {
+    const stream = range
+      ? fs.createReadStream(filePath, {
+          start: range.start,
+          end: range.end,
+        })
+      : fs.createReadStream(filePath);
+    stream.on('error', (err) => {
+      if (!res.headersSent) {
+        const status =
+          (err as NodeJS.ErrnoException).code === 'ENOENT' ? 404 : 500;
+        writeError(res, status, 'Failed to read file');
+        return;
+      }
+      res.destroy();
+    });
+    stream.pipe(res);
   }
 
   const server = http.createServer((req, res) => {
