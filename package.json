@@ -78,6 +78,7 @@
     "vite-plus": "0.2.8"
   },
   "dependencies": {
+    "@mantaq/core": "^0.1.0",
     "bare-crypto": "^1.15.3",
     "bare-encoding": "^1.0.3",
     "bare-env": "^3.0.0",

@@ -6,6 +6,7 @@ import {
   MessageTypeValue,
   WireMessage,
 } from '../core/messages';
+import { createConnectionMachine } from './connection-machine';
 
 declare global {
   interface Window {
@@ -36,17 +37,6 @@ function defaultWsUrl(): string {
     return `ws://${window.location.host}`;
   }
   return 'ws://localhost:8080';
-}
-
-/**
- * Append the session token to the URL as a `?token=...` query param, keeping
- * any query the URL already carries. Fallback for clients that cannot complete
- * the `/login` cookie bootstrap (e.g. non-browser transports).
- */
-function withToken(url: string, token: string): string {
-  const parsed = new URL(url);
-  parsed.searchParams.set('token', token);
-  return parsed.toString();
 }
 
 type QueuedMessage = {
@@ -104,12 +94,15 @@ export function createWebSocketTransport(
   const listeners = new Set<(message: WireMessage) => void>();
   const queued: QueuedMessage[] = [];
   let socket: WebSocket | null = null;
-  let retries = 0;
-  let nextUrl = url;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Whether the query-token URL is already in play (from a failed `/login` or
-   * a rejected upgrade). Guards the fallback so it fires at most once. */
-  let tokenFallbackTried = false;
+  let openedThisAttempt = false;
+
+  const machine = createConnectionMachine({
+    url,
+    token: typeof token === 'string' ? token : undefined,
+    maxRetries,
+    initialBackoffMs: initialBackoff,
+    maxBackoffMs: MAX_BACKOFF_MS,
+  });
 
   const emitTransportError = (header: MessageHeader, message: string) => {
     if (header.type !== 'INVOKE_REQUEST') {
@@ -147,18 +140,16 @@ export function createWebSocketTransport(
     queued.length = 0;
   };
 
-  function open() {
-    if (reconnectTimer !== null) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-    socket = new WebSocket(nextUrl);
+  /** Opens a WebSocket for the machine's current URL and wires it to the
+   * machine's lifecycle events. */
+  function openSocket() {
+    socket = new WebSocket(machine.url());
     socket.binaryType = 'arraybuffer';
-    let opened = false;
+    openedThisAttempt = false;
 
     socket.onopen = () => {
-      opened = true;
-      retries = 0;
+      openedThisAttempt = true;
+      machine.sendOpen();
       flushQueued();
     };
 
@@ -174,41 +165,24 @@ export function createWebSocketTransport(
     };
 
     socket.onclose = () => {
-      // A close before ever opening means the upgrade was rejected — the
-      // `/login` cookie may not have ridden the handshake (WKWebView/WebView
-      // cookie-on-WS behavior varies). If a token is present and the query
-      // token URL isn't already in play, retry it immediately: this is a
-      // different connection, so it neither consumes a retry nor backs off.
-      if (
-        !opened &&
-        !tokenFallbackTried &&
-        typeof token === 'string' &&
-        token.length > 0
-      ) {
-        tokenFallbackTried = true;
-        nextUrl = withToken(url, token);
-        open();
-        return;
-      }
-      if (retries >= maxRetries) {
-        failQueuedMessages(WS_DISCONNECTED_MESSAGE);
-        console.warn(
-          `WebSocket disconnected after ${maxRetries} retries; giving up.`,
-        );
-        return;
-      }
-      retries += 1;
-      const delay = Math.min(
-        initialBackoff * 2 ** (retries - 1),
-        MAX_BACKOFF_MS,
-      );
-      reconnectTimer = setTimeout(open, delay);
+      machine.sendClose(openedThisAttempt);
     };
 
     socket.onerror = () => {
       // `close` always follows; reconnect/give-up is handled there.
     };
   }
+
+  // The machine drives the shell: entering `opening` means a socket should
+  // exist (first connect, a retry after backoff, or the immediate token-URL
+  // fallback after a rejected upgrade); `gaveUp` fails the queue.
+  machine.onChange((state) => {
+    if (state === 'opening') {
+      openSocket();
+    } else if (state === 'gaveUp') {
+      failQueuedMessages(WS_DISCONNECTED_MESSAGE);
+    }
+  });
 
   async function bootstrap() {
     if (shouldLogin) {
@@ -222,18 +196,19 @@ export function createWebSocketTransport(
           ),
           loginTimeout,
         ]);
-        if (outcome !== 'ok') {
-          // Login rejected or timed out; fall back to the query param (the
-          // server still accepts it for non-cookie clients).
-          nextUrl = withToken(url, token!);
-          tokenFallbackTried = true;
+        if (outcome === 'ok') {
+          machine.sendLoginOk();
+        } else {
+          // Login rejected or timed out; the machine switches to the query
+          // token URL (the server still accepts it for non-cookie clients).
+          machine.sendLoginFail();
         }
       } catch {
-        nextUrl = withToken(url, token!);
-        tokenFallbackTried = true;
+        machine.sendLoginFail();
       }
+    } else {
+      machine.sendLoginOk();
     }
-    open();
   }
 
   void bootstrap();
@@ -241,23 +216,20 @@ export function createWebSocketTransport(
   return {
     send(type, header, payload) {
       const encoded = protocol.encode(type, header, payload);
-      if (socket && socket.readyState === WebSocket.OPEN) {
+      if (
+        machine.isConnected() &&
+        socket &&
+        socket.readyState === WebSocket.OPEN
+      ) {
         socket.send(toArrayBuffer(encoded));
         return;
       }
-      // Queue while connecting, during the login window, while a reconnect is
-      // scheduled, or while a close is still being processed (CLOSING) — the
-      // onclose handler decides between reconnecting and failing.
-      const recovering =
-        socket === null ||
-        reconnectTimer !== null ||
-        socket.readyState === WebSocket.CONNECTING ||
-        socket.readyState === WebSocket.CLOSING;
-      if (recovering) {
-        queued.push({ bytes: encoded, header });
+      if (machine.isGaveUp()) {
+        emitTransportError(header, WS_DISCONNECTED_MESSAGE);
         return;
       }
-      emitTransportError(header, WS_DISCONNECTED_MESSAGE);
+      // Queue while connecting (first open, backoff, token fallback, login).
+      queued.push({ bytes: encoded, header });
     },
     subscribe(handler) {
       listeners.add(handler);

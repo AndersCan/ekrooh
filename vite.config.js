@@ -32,7 +32,12 @@ export default defineConfig({
     coverage: {
       all: false,
       include: ['core/**', 'plugins/**', 'web/**'],
-      exclude: ['core/main.core.ts', 'core/main.core.gen.js'],
+      exclude: [
+        'core/main.core.ts',
+        'core/main.core.gen.js',
+        'core/harness.core.ts',
+        'core/harness.core.gen.js',
+      ],
       reporter: ['text'],
       thresholds: {
         statements: 80,
