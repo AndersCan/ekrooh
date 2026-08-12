@@ -13,6 +13,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Built npm package (vp pack — see package.json build:pkg)
+dist/
+
 # Bare
 prebuilds/
 android/prebuilds/

@@ -21,6 +21,7 @@ cut a release by following this document with no human beyond the tag decision.
 
    ```bash
    vp install
+   npm run build:pkg
    vp check
    vp test
    npm run test:e2e:web
@@ -72,9 +73,9 @@ cut a release by following this document with no human beyond the tag decision.
 
    - **npm** (`@less/bare`): `npm publish --access public` from the repo root
      (`release.yml` does this with the `NPM_TOKEN` secret). The first publish
-     claims the reserved name. The package ships TypeScript source via its
-     `exports` map — consumers must bundle it (Vite, esbuild, or bare-pack);
-     plain-Node execution is not supported.
+     claims the reserved name. The package ships **compiled ESM JS + types**
+     (`dist/`); `prepack`/`prepublishOnly` run `npm run build:pkg` (`vp pack`),
+     so publishing always builds. Consumers never receive TypeScript source.
    - **Android AAR**: `:bare-host:publishMavenAarPublicationToGitHubPackagesRepository`
      publishes `io.less:bare-host` to GitHub Packages (`release.yml` does this
      with the automatic `GITHUB_TOKEN`). The AAR is self-contained: the Bare Kit
@@ -88,9 +89,9 @@ cut a release by following this document with no human beyond the tag decision.
      embed `BareKit.xcframework` from `prebuilds/ios/`.
 
 The `@less/bare` exports map is frozen at first publish (beta): `core`,
-`plugins`, `plugins/*/events`, and `transports` (WebSocket + mock only — the
-pre-1.0 bootstrap bridges were removed in Phase 2). The `./runtime` worklet
-bootstrap subpath lands with ticket #15 and is part of the beta freeze.
+`runtime`, `plugins`, `plugins/*/events`, and `transports` (WebSocket + mock
+only — the pre-1.0 bootstrap bridges were removed in Phase 2). Every entry
+points at the compiled `dist/` output (`build:pkg`), never TypeScript source.
 
 ### 4. Announce
 

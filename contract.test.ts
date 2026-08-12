@@ -187,4 +187,22 @@ describe('public API snapshot', () => {
   it('wire protocol VERSION is pinned at 1', () => {
     expect(VERSION).toBe(1);
   });
+
+  it('the built dist surface matches the source exports', async () => {
+    for (const [key, { entry }] of Object.entries(PUBLIC_SURFACES)) {
+      const distRel = (pkg.exports as Record<string, string>)[`./${key}`];
+      if (typeof distRel !== 'string' || !distRel.startsWith('./dist/')) {
+        continue;
+      }
+      const names = (m: unknown) =>
+        Object.keys(m as Record<string, unknown>)
+          .filter((k) => k !== 'default' && k !== '__esModule')
+          .sort();
+      const sourceMod = await import(entry);
+      const distMod = await import(distRel);
+      expect(names(distMod), `@less/bare/${key} dist === source`).toEqual(
+        names(sourceMod),
+      );
+    }
+  });
 });

@@ -45,9 +45,12 @@ top of this framework.
   one release note.
 - **Artifacts**:
   - JS framework → **npm** (`@less/bare`) — single package, subpath exports
-    (`@less/bare/core`, `@less/bare/plugins`, `@less/bare/transports`). The
-    package ships TypeScript source; consumers bundle it (Vite, esbuild,
-    bare-pack) — plain-Node execution is out of scope.
+    (`@less/bare/core`, `@less/bare/plugins`, `@less/bare/transports`,
+    `@less/bare/runtime`). The package ships **compiled ESM JavaScript plus
+    type declarations** (`dist/`, built with `vp pack` — tsdown) following the
+    mantaq release flow; consumers never receive TypeScript source. A
+    built-in runtime dependency on `@mantaq/core` powers the connection state
+    machine (internal-only — never part of the exported surface).
   - Android host → **AAR, GitHub Packages** (Maven format, `io.less:bare-host`).
     The AAR is self-contained: Bare Kit runtime classes and native libs are
     bundled into the artifact at build time, so consumers need no prebuilds

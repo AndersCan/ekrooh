@@ -57,9 +57,9 @@ the runtime that implements it.
 - `prebuilds/` — Bare Kit prebuilds (build output, gitignored).
 
 The framework's public surface is the `exports` map of the root `package.json`
-(`@less/bare/core`, `/plugins`, `/plugins/*/events`, `/transports`). The package
-ships TypeScript source and is consumed through a bundler (Vite, esbuild, or
-bare-pack).
+(`@less/bare/core`, `/runtime`, `/plugins`, `/plugins/*/events`, `/transports`).
+The package ships **compiled ESM JavaScript + type declarations** (`dist/`,
+built with `vp pack`) — consumers never see TypeScript source.
 
 ## Support matrix
 

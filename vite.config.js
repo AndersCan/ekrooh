@@ -46,4 +46,18 @@ export default defineConfig({
       },
     },
   },
+  pack: {
+    dts: true,
+    format: ['esm'],
+    entry: {
+      index: 'core/messages/index.ts',
+      runtime: 'core/runtime.ts',
+      plugins: 'plugins/index.ts',
+      'plugins-health-events': 'plugins/health/events.ts',
+      'plugins-discovery-events': 'plugins/discovery/events.ts',
+      'plugins-permissions-events': 'plugins/permissions/events.ts',
+      'plugins-media-events': 'plugins/media/events.ts',
+      transports: 'web/transports/index.ts',
+    },
+  },
 });

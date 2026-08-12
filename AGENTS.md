@@ -27,23 +27,26 @@ and is not, and it wins over any code-level decision.
 
 ## Canonical commands
 
-Run from the repo root. The gate for every change is `vp check` + `vp test`.
+Run from the repo root. The gate for every change is `npm run build:pkg` (compiles
+the package to `dist/`, which `vp check`, `vp test`, and the web build resolve
+through the `exports` map) followed by `vp check` + `vp test`.
 
-| Command                                         | Meaning                                                                 |
-| ----------------------------------------------- | ----------------------------------------------------------------------- |
-| `vp install`                                    | Install workspace dependencies                                          |
-| `vp check`                                      | Format (`oxfmt`) + lint (`oxlint`) + type-check (`tsc`)                 |
-| `npm run typecheck`                             | `tsc --noEmit` only                                                     |
-| `vp test`                                       | Unit tests (vitest, `**/*.test.ts`)                                     |
-| `npm run test:e2e:web`                          | Playwright e2e (needs `npm run playwright:install` first)               |
-| `npm run test`                                  | Unit + e2e                                                              |
-| `npm run build:core`                            | Bundle `core/main.core.ts` for the Bare worklet (esbuild)               |
-| `npm run build:web`                             | Build the reference web app into `examples/android-app/src/main/assets` |
-| `npm run dev`                                   | Vite dev server + Bare backend (watch + restart)                        |
-| `./gradlew :examples:android-app:assembleDebug` | Build the Android APK                                                   |
-| `npm run prebuilds`                             | Fetch Bare Kit prebuilds (Android + iOS) for the pinned release         |
-| `npm run build:ios`                             | Build iOS reference app inputs (`bare-link`, `bare-pack`, web assets)   |
-| `npm run test:ios`                              | Run the Swift host XCTest + UI tests on the iOS simulator               |
+| Command                                         | Meaning                                                                                                 |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `vp install`                                    | Install workspace dependencies                                                                          |
+| `npm run build:pkg`                             | Compile the npm package to `dist/` (`vp pack`); prerequisite for `vp check`, `vp test`, and `build:web` |
+| `vp check`                                      | Format (`oxfmt`) + lint (`oxlint`) + type-check (`tsc`)                                                 |
+| `npm run typecheck`                             | `tsc --noEmit` only                                                                                     |
+| `vp test`                                       | Unit tests (vitest, `**/*.test.ts`)                                                                     |
+| `npm run test:e2e:web`                          | Playwright e2e (needs `npm run playwright:install` first)                                               |
+| `npm run test`                                  | Unit + e2e                                                                                              |
+| `npm run build:core`                            | Bundle `core/main.core.ts` for the Bare worklet (esbuild)                                               |
+| `npm run build:web`                             | Build the reference web app into `examples/android-app/src/main/assets`                                 |
+| `npm run dev`                                   | Vite dev server + Bare backend (watch + restart)                                                        |
+| `./gradlew :examples:android-app:assembleDebug` | Build the Android APK                                                                                   |
+| `npm run prebuilds`                             | Fetch Bare Kit prebuilds (Android + iOS) for the pinned release                                         |
+| `npm run build:ios`                             | Build iOS reference app inputs (`bare-link`, `bare-pack`, web assets)                                   |
+| `npm run test:ios`                              | Run the Swift host XCTest + UI tests on the iOS simulator                                               |
 
 Notes:
 
@@ -56,27 +59,29 @@ Notes:
 
 ## Repo map (ownership)
 
-| Path                                                                                                            | Owner        | Contents                                                                                                       |
-| --------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------- |
-| `core/messages`                                                                                                 | framework    | Wire protocol: codec, plugin kernel, RPC messenger, host IPC, types                                            |
-| `core/server`, `core/lib`, `core/main.core.ts`                                                                  | framework    | Unified loopback HTTP+WS server (web app + media + protocol socket, cookie auth) + Bare worklet entry          |
-| `plugins`                                                                                                       | framework    | Canonical plugins (`core.health`, `core.discovery`, `core.permissions`, `vendor.media`) + typed event builders |
-| `web/transports`, `web/websocket-client.ts`                                                                     | framework    | `MessageTransport` + WebSocket (same-origin, cookie login, reconnect) / mock transports                        |
-| `android`                                                                                                       | framework    | Android host library (`:bare-host`): IPC coordinator, host plugin registry, WebView client                     |
-| `ios`                                                                                                           | framework    | iOS host Swift package (`BareHost`): IPC coordinator, host plugin registry                                     |
-| `examples/web`                                                                                                  | example      | Reference web UI (lit-html + nanostores + Tailwind)                                                            |
-| `examples/android-app`                                                                                          | example      | Reference Android app consuming `:bare-host` + web assets                                                      |
-| `examples/ios-app`                                                                                              | example      | Reference iOS app consuming `BareHost` + web assets (xcodegen project)                                         |
-| `e2e`                                                                                                           | tooling      | Playwright specs against the mock transport                                                                    |
-| `scripts`                                                                                                       | tooling      | Dev-bare runner, playwright browser wrapper, prebuild fetcher                                                  |
-| `prebuilds`                                                                                                     | build output | Bare Kit prebuilds (gitignored, fetched from a GitHub release)                                                 |
-| `vision.md`, `plan.md`, `CONTEXT.md`, `rendering.md`, `ios-handoff.md`, `RELEASING.md`, `CHANGELOG.md`, `docs/` | docs         | Decision + planning documents; ADRs live in `docs/adr/`                                                        |
+| Path                                                                                                            | Owner        | Contents                                                                                                                             |
+| --------------------------------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `core/messages`                                                                                                 | framework    | Wire protocol: codec, plugin kernel, RPC messenger, host IPC, types                                                                  |
+| `core/server`, `core/lib`, `core/main.core.ts`                                                                  | framework    | Unified loopback HTTP+WS server (web app + media + protocol socket, cookie auth) + Bare worklet entry                                |
+| `plugins`                                                                                                       | framework    | Canonical plugins (`core.health`, `core.discovery`, `core.permissions`, `vendor.media`) + typed event builders                       |
+| `web/transports`, `web/websocket-client.ts`, `web/connection-machine.ts`                                        | framework    | `MessageTransport` + WebSocket (same-origin, cookie login, reconnect — the connection lifecycle is a mantaq actor) / mock transports |
+| `android`                                                                                                       | framework    | Android host library (`:bare-host`): IPC coordinator, host plugin registry, WebView client                                           |
+| `ios`                                                                                                           | framework    | iOS host Swift package (`BareHost`): IPC coordinator, host plugin registry                                                           |
+| `examples/web`                                                                                                  | example      | Reference web UI (lit-html + nanostores + Tailwind)                                                                                  |
+| `examples/android-app`                                                                                          | example      | Reference Android app consuming `:bare-host` + web assets                                                                            |
+| `examples/ios-app`                                                                                              | example      | Reference iOS app consuming `BareHost` + web assets (xcodegen project)                                                               |
+| `e2e`                                                                                                           | tooling      | Playwright specs against the mock transport                                                                                          |
+| `scripts`                                                                                                       | tooling      | Dev-bare runner, playwright browser wrapper, prebuild fetcher                                                                        |
+| `prebuilds`                                                                                                     | build output | Bare Kit prebuilds (gitignored, fetched from a GitHub release)                                                                       |
+| `vision.md`, `plan.md`, `CONTEXT.md`, `rendering.md`, `ios-handoff.md`, `RELEASING.md`, `CHANGELOG.md`, `docs/` | docs         | Decision + planning documents; ADRs live in `docs/adr/`                                                                              |
 
 The framework's public API surface is the `exports` map in `package.json`
-(`@less/bare/core`, `/plugins`, `/plugins/*/events`, `/transports`). Per the
-stability contract in `vision.md`, breaking the wire protocol, plugin
-contracts, JS exports, or Kotlin host API is a **major-version event**.
-Everything else (layout, tooling, internals) can change freely.
+(`@less/bare/core`, `/runtime`, `/plugins`, `/plugins/*/events`,
+`/transports`) — every entry points at the **compiled `dist/` output**
+(`build:pkg`), never TypeScript source. Per the stability contract in
+`vision.md`, breaking the wire protocol, plugin contracts, JS exports, or
+Kotlin host API is a **major-version event**. Everything else (layout,
+tooling, internals) can change freely.
 
 ## Do / don't
 
@@ -86,8 +91,8 @@ Everything else (layout, tooling, internals) can change freely.
 - **Do** fetch Bare Kit prebuilds via the documented script before Android or
   iOS work (never commit them): `gh release download --repo holepunchto/bare-kit
 <version>` then unzip `android/*` and `ios/*` into `prebuilds/`.
-- **Don't** commit build output: `core/main.core.gen.js`, web assets under
-  `examples/android-app/src/main/assets/`, `prebuilds/`,
+- **Don't** commit build output: `core/main.core.gen.js`, `dist/`, web assets
+  under `examples/android-app/src/main/assets/`, `prebuilds/`,
   `examples/ios-app/addons/`, `examples/ios-app/Resources/`, `.playwright-browsers/`.
 - **Don't** touch the `<!--VITE PLUS START/END-->` block — Vite+ manages it.
 - **Don't** reference `npm run <script>` in docs when a `vp` built-in exists;
