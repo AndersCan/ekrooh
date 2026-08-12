@@ -20,19 +20,24 @@ cut a release by following this document with no human beyond the tag decision.
 2. Verify the gates locally:
 
    ```bash
-   npm ci
+   vp install
    vp check
-   npm run test
+   vp test
+   npm run test:e2e:web
    ```
 
-3. (Android) fetch prebuilds and build the APK:
+3. Confirm the four stability boundaries are unchanged since the beta freeze:
+   the wire `VERSION` (pinned by `contract.test.ts`), the JS exports map, the
+   plugin event contracts, and the Kotlin host API (reviewed manually — the
+   snapshot pins JS export names only).
+4. (Android) fetch prebuilds and build the APK:
 
    ```bash
    npm run prebuilds
    ./gradlew :examples:android-app:assembleDebug
    ```
 
-4. (iOS) verify the Swift host on a simulator (also covered by CI on the macOS
+5. (iOS) verify the Swift host on a simulator (also covered by CI on the macOS
    runner):
 
    ```bash
@@ -82,9 +87,10 @@ cut a release by following this document with no human beyond the tag decision.
      published until distribution is decided (see `vision.md`). Consumers
      embed `BareKit.xcframework` from `prebuilds/ios/`.
 
-The `@less/bare` exports map is frozen at first publish: `core`, `plugins`,
-`plugins/*/events`, and `transports` (WebSocket + mock only — the pre-1.0
-bootstrap bridges were removed in Phase 2).
+The `@less/bare` exports map is frozen at first publish (beta): `core`,
+`plugins`, `plugins/*/events`, and `transports` (WebSocket + mock only — the
+pre-1.0 bootstrap bridges were removed in Phase 2). The `./runtime` worklet
+bootstrap subpath lands with ticket #15 and is part of the beta freeze.
 
 ### 4. Announce
 

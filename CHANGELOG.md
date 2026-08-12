@@ -5,39 +5,11 @@ All notable changes to `@less/bare` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0-beta.1] - 2026-08-12
 
-### Changed (Phase 2 — unified loopback server + cookie auth)
-
-- **One loopback server** (`core/server/static-file-server.ts`) now serves the
-  web app at `/` (SPA fallback), the media files, and the framed-protocol
-  WebSocket socket; the standalone dev WS server is gone.
-- **Cookie auth** replaces the URL token: `POST /login` exchanges the injected
-  `window.__lessBareToken` for an `HttpOnly; SameSite=Lax` `bare_session`
-  cookie that rides media loads and the WS upgrade. `X-Bare-Token`/`?token=`
-  remain as a fallback for non-browser clients.
-- **Port/token handoff**: the worklet writes `handoff.json` into the sandbox
-  dir the host passes (also set as `Worklet.Configuration.assets`); hosts read
-  it and load `http://127.0.0.1:<port>/index.html`.
-- **Transports**: `createWebSocketTransport` defaults to the page origin,
-  bootstraps the cookie when a token is present, and reconnects with backoff
-  (250ms→2s, 5 tries). The Android bootstrap bridge and iOS WKWebView bridge
-  transports were **removed** (`@less/bare/transports` now exports WebSocket +
-  mock only).
-- **Hosts**: Android `MainActivity` copies APK web assets out (bare-fs cannot
-  read them), injects the token, and loads the loopback page; iOS `BareRuntime`
-  serves the bundled `WebAssets` and injects the token via a `WKUserScript`.
-  `BarePortMessenger`, `BareWebViewBridge`, `BareAssetSchemeHandler`, and the
-  WebView relays were deleted.
-- **Streaming**: the static server streams via `createReadStream` + `pipe`
-  with `Range`/206 support instead of whole-file reads.
-- **Server hardening**: origin check on WS upgrade, single-client policy, idle
-  timeout.
-
-## [0.0.1] - 2026-08-09
-
-First release of the `@less/bare` framework: the boring bootstrap for
-cross-platform apps on the Bare runtime.
+First tagged release of the `@less/bare` framework: the boring bootstrap for
+cross-platform apps on the Bare runtime. (An earlier `0.0.1` changelog draft
+was never tagged — this entry absorbs it.)
 
 ### Added
 
@@ -49,14 +21,42 @@ cross-platform apps on the Bare runtime.
   / `INVOKE_RESPONSE` routing, deterministic `ErrorCode`s, host delegation.
 - **Typed plugin authoring**: `EventSpec` + `definePlugin` — one spec per event
   drives the manifest, the handler table, and the typed `events.ts` builders.
-- **Transports** (`@less/bare/transports`): WebSocket (dev), deterministic mock
-  (tests), and the Android bootstrap bridge over a `WebMessagePort` carrying raw
-  frames.
+- **Unified loopback server** (`core/server/static-file-server.ts`) serves the
+  web app at `/` (SPA fallback), mounted media, and the framed-protocol
+  WebSocket socket; byte-range (206) streaming, WS origin check, single-client
+  policy, idle timeout.
+- **Cookie auth**: `POST /login` exchanges the injected `window.__lessBareToken`
+  for an `HttpOnly; SameSite=Lax` `bare_session` cookie; `X-Bare-Token`/`?token=`
+  remain as fallbacks for non-browser clients.
+- **Port/token handoff**: the worklet writes `handoff.json` into the host
+  sandbox dir; hosts read it and load `http://127.0.0.1:<port>/index.html`.
+- **Transports** (`@less/bare/transports`): WebSocket (same-origin default,
+  cookie bootstrap, reconnect with backoff, token fallback on rejected
+  upgrade) and a deterministic mock.
 - **Android host** (`io.less:bare-host` on GitHub Packages): `BareProtocol`,
-  `HostIpcCoordinator`, `HostPluginRegistry`, `BarePortMessenger`, and the
-  packaged Bare Kit runtime (classes + native libs) inside the AAR.
-- **Reference implementation**: `examples/web` (lit-html + nanostores) and
-  `examples/android-app` demonstrating every canonical plugin
-  (`core.health`, `core.discovery`, `core.permissions`).
-- **Testing contract**: unit tests (`vitest`, JUnit), Playwright e2e against
-  the mock transport, and CI (`test.yml`, `playwright.yml`, `release.yml`).
+  `HostIpcCoordinator`, `HostPluginRegistry`; the Bare Kit runtime is packaged
+  inside the self-contained AAR.
+- **iOS host**: Swift package `BareHost` (SPM, ships as source) — IPC
+  coordinator, plugin registry; the reference app injects the token via a
+  `WKUserScript` and loads the loopback page.
+- **Reference implementation**: `examples/web` (lit-html + nanostores),
+  `examples/android-app`, `examples/ios-app`.
+- **Testing contract**: vitest unit tests (with a coverage floor),
+  JUnit (Kotlin host), XCTest (Swift host), Playwright e2e against the mock
+  transport, and CI (`test.yml`, `playwright.yml`, `release.yml`).
+
+### Fixed
+
+- **WS auth fallback**: a WebSocket upgrade rejected despite a successful
+  `/login` now retries with `?token=` appended instead of retrying the same
+  URL five times and dead-ending.
+- **`/login` body decoding**: `Uint8Array` chunks (bare-http1) are decoded
+  byte-exact instead of being `String()`-ified (which joined bytes with commas).
+- **Single-client WS policy**: the refused second socket is rejected before the
+  handshake — no misleading 101-then-close.
+
+### Removed
+
+- Android bootstrap bridge and iOS WKWebView bridge transports; the
+  `BarePortMessenger`, `BareWebViewBridge`, and `BareAssetSchemeHandler`
+  relays were deleted.

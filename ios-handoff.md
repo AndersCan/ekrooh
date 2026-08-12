@@ -12,7 +12,7 @@ read it alongside `vision.md` (the contract), `AGENTS.md` (commands/ownership),
 and `core/messages/readme.md` (wire protocol). The **Kotlin host is the
 reference implementation** — mirror it in Swift, don't redesign it.
 
-Per `vision.md`, iOS is **contract-only today**: it must satisfy the same binary
+Per `vision.md`, iOS was **contract-only at the time**: it had to satisfy the same binary
 wire protocol and plugin contracts. Distribution is "decided then, on the same
 release tag." The runtime is `bare-ios` (`holepunchto/bare-ios`, cloned as a
 reference) + `bare-kit-swift`.

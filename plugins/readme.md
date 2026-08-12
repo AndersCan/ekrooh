@@ -19,8 +19,9 @@ the wire protocol or a WebView bridge**. The host picks/captures a file
 natively and returns its path (`HOST_INVOKE_REQUEST`); the worklet mounts the
 file on the loopback server (`core/server/static-file-server.ts`) and returns a
 plain URL. The web layer loads the URL directly — one serving implementation
-for iOS, Android, desktop and browser. The reference hosts stub the pick/capture
-with a bundled sample image (`examples/*-app`).
+for iOS, Android, desktop and browser. The Android reference host wires a real
+native picker/camera; the iOS reference host's real picker/camera is part of
+the iOS parity worklist.
 
 `vendor.media` stays a **default plugin** (so discovery lists 4): the loopback
 serving mechanism it exercises is framework plumbing, not a product feature.

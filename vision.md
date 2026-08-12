@@ -17,8 +17,9 @@ the plumbing — and only the plumbing:
 - **plugin contracts** (`plugins`): namespaced events, manifests, deterministic
   errors
 - **transports** (`web/transports`): WebSocket, mock
-- **native hosts**: Android (Kotlin) today, iOS by contract — host IPC, plugin
-  registry, loopback page load
+- **native hosts**: Android (Kotlin) and iOS (Swift) — host IPC, plugin
+  registry, loopback page load. iOS ships as source (`ios/`, SPM) at Android
+  reference parity
 - a **reference implementation** (`examples`): a runnable app demonstrating
   every plugin and doubling as the integration test harness
 
@@ -32,7 +33,7 @@ top of this framework.
 | ------------------------------------------------------ | ----------------------------------------------------------------------- |
 | A product app                                          | Consumers add product features as their own plugins                     |
 | A general-purpose Android framework or WebView wrapper | This framework is specific to the Bare runtime + its protocol           |
-| An iOS/desktop implementation                          | iOS is a contract for future shells; desktop is out of scope            |
+| A desktop implementation                               | Desktop is out of scope                                                 |
 | A Node.js application                                  | On device the runtime is Bare (worklet); Node only runs the dev backend |
 | A peer-to-peer framework                               | Bare is the runtime; this project is not Pears or a P2P layer           |
 | Owned by one app team                                  | It is a distributable framework with multiple consumers                 |
@@ -83,12 +84,12 @@ major version or be blocked by stability fears.
 
 ## Platforms and parity
 
-| Runtime        | Status        | Transport                            |
-| -------------- | ------------- | ------------------------------------ |
-| Browser (dev)  | first-class   | WebSocket                            |
-| Browser (test) | first-class   | Mock (deterministic Playwright runs) |
-| Android        | first-class   | WebSocket and/or bootstrap bridge    |
-| iOS            | contract-only | WebSocket (same-origin loopback)     | host ships as source (`ios/`, SPM) on the same release tag |
+| Runtime        | Status                         | Transport                                                                                                  |
+| -------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Browser (dev)  | first-class                    | WebSocket                                                                                                  |
+| Browser (test) | first-class                    | Mock (deterministic Playwright runs)                                                                       |
+| Android        | first-class                    | WebSocket (same-origin loopback + cookie auth)                                                             |
+| iOS            | first-class (reference parity) | WebSocket (same-origin loopback + cookie auth); host ships as source (`ios/`, SPM) on the same release tag |
 
 Parity policy:
 
@@ -97,6 +98,8 @@ Parity policy:
 - Plugins report unsupported behavior with deterministic errors.
 - Feature code calls plugin events, never raw platform APIs, from shared UI
   code.
+- iOS is at reference parity when the real native picker/camera and the Maestro
+  journey set land (before beta); the platform table's status is that target.
 
 ## Toolchain
 
@@ -113,8 +116,7 @@ manager, and toolchain in one place. The canonical commands are:
 
 These built-ins are the documented command surface — agent instructions and
 `RELEASING.md` reference them, never ad-hoc `npm run <script>` chains unless a
-`vp run` wrapper is defined. Migration onto Vite+ is in progress; prerequisite
-was upgrading Vite to 8+ and Vitest to 4.1+ before `vp migrate`.
+`vp run` wrapper is defined. The project is fully migrated onto Vite+.
 
 ## Repository structure
 
@@ -141,6 +143,32 @@ Nothing ships without a green test gate:
   real binary protocol.
 - **CI** — all of the above plus a Gradle build, green on every PR to `main`.
 
+The unit gate is enforced mechanically — the Invariants below are part of the
+test suite itself.
+
+## Invariants
+
+These are mechanically enforced by the test suite: `vp test --coverage` is red
+when any breaks, so an agent knows exactly which claims it must keep true. The
+presence manifest, public-API snapshot, and export-surface checks live in
+`contract.test.ts`; the coverage floor lives in `vite.config.js`.
+
+1. **Presence** — every framework-core module (`core/messages`, `core/lib`,
+   `core/server`, `plugins/*`, `web/transports`) ships a co-located
+   `*.test.ts`, barring an explicit exempt list (barrel `index.ts` files,
+   generated bundles, entry points).
+2. **Coverage floor** — no-regress statement/function/line thresholds over the
+   covered framework core (`all: false`, `core/**` + `plugins/**` + `web/**`);
+   branches are reported, not gated. Thresholds are anchored to day-one
+   measured values and only get stricter.
+3. **Public API snapshot** — the exported names of every `@less/bare` subpath
+   are frozen; changing them is a major-version event.
+4. **Export-surface integrity** — every `package.json` `exports` and `files`
+   entry resolves to a real path.
+
+Nothing else in this document is machine-checked; the Document set table is
+prose and must be kept honest by review.
+
 ## AI autonomy operating principles
 
 The repository is designed so that AI agents can carry out day-to-day
@@ -159,11 +187,14 @@ maintenance without a human in the loop:
 
 ## Document set
 
-| Document           | Purpose                                                |
-| ------------------ | ------------------------------------------------------ |
-| `vision.md`        | This file — what this project is and is not            |
-| `AGENTS.md`        | AI operating manual (commands, conventions, ownership) |
-| `CONTRIBUTING.md`  | How to contribute (human + agent)                      |
-| `RELEASING.md`     | The tag-driven release checklist                       |
-| `ios-handoff.md`   | Brief for building the iOS host (contract-only today)  |
-| per-module readmes | `core/`, `plugins/`, transports, Android host          |
+| Document           | Purpose                                                    |
+| ------------------ | ---------------------------------------------------------- |
+| `vision.md`        | This file — what this project is and is not                |
+| `AGENTS.md`        | AI operating manual (commands, conventions, ownership)     |
+| `CONTEXT.md`       | Domain glossary for the framework's own development        |
+| `docs/adr/`        | Architecture decision records                              |
+| `rendering.md`     | lit-html + nanostores rendering rules (RootPart lifecycle) |
+| `CONTRIBUTING.md`  | How to contribute (human + agent)                          |
+| `RELEASING.md`     | The tag-driven release checklist                           |
+| `ios-handoff.md`   | Historical brief for the superseded Phase 1 iOS design     |
+| per-module readmes | `core/`, `plugins/`, transports, Android host              |

@@ -1,5 +1,7 @@
 # @less/bare
 
+[![CI](https://github.com/AndersCan/less-bare-android/actions/workflows/test.yml/badge.svg)](https://github.com/AndersCan/less-bare-android/actions/workflows/test.yml)
+
 The **boring bootstrap** for cross-platform apps on the Bare runtime
 (holepunch): a binary wire protocol, plugin kernel, RPC messenger, transports,
 and native host bridges — plus a reference app that demonstrates all of it.
@@ -61,13 +63,13 @@ bare-pack).
 
 ## Support matrix
 
-| Runtime        | Status        | Transport | Notes                                                                                   |
-| -------------- | ------------- | --------- | --------------------------------------------------------------------------------------- |
-| Browser (dev)  | first-class   | WebSocket | Vite + local backend server (`VITE_BARE_WS_URL`)                                        |
-| Browser (test) | first-class   | Mock      | Deterministic Playwright runs                                                           |
-| Android        | first-class   | WebSocket | Same-origin loopback socket; cookie auth via the injected token                         |
-| iOS            | contract-only | WebSocket | Same-origin loopback socket; host ships as source (`ios/`, SPM) on the same release tag |
-| Desktop        | contract      | —         | Adapters follow the same plugin contracts                                               |
+| Runtime        | Status                         | Transport | Notes                                                                                                                                                           |
+| -------------- | ------------------------------ | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Browser (dev)  | first-class                    | WebSocket | Vite + local backend server (`VITE_BARE_WS_URL`)                                                                                                                |
+| Browser (test) | first-class                    | Mock      | Deterministic Playwright runs                                                                                                                                   |
+| Android        | first-class                    | WebSocket | Same-origin loopback socket; cookie auth via the injected token                                                                                                 |
+| iOS            | first-class (reference parity) | WebSocket | Same-origin loopback socket + cookie auth; host ships as source (`ios/`, SPM) on the same release tag; native picker/camera + Maestro journeys land before beta |
+| Desktop        | contract                       | —         | Adapters follow the same plugin contracts                                                                                                                       |
 
 ### Parity policy
 
@@ -147,8 +149,9 @@ Images/videos never cross the wire protocol (the frame cap is 16 MiB).
 `vendor.media` demonstrates the intended pattern: the host picks/captures a
 file natively and returns its path; the worklet mounts it on the loopback
 server and returns a URL. The web layer loads the URL directly (same-origin,
-cookie-authenticated) — one serving implementation for every runtime. Reference
-hosts stub the pick with a bundled sample image.
+cookie-authenticated) — one serving implementation for every runtime. The
+Android reference host wires a real native picker/camera; the iOS reference
+host's real picker/camera is part of the iOS parity worklist.
 
 ## Scripts
 
