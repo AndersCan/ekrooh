@@ -47,8 +47,10 @@ All invoke responses must echo `requestId`.
   - failure: `err(code, message)` → `[error, null]`
 - Use canonical `ErrorCode` values (`UNSUPPORTED_CAPABILITY`,
   `UNSUPPORTED_EVENT`, `HOST_ERROR`, `PLUGIN_ERROR`, `TRANSPORT_ERROR`,
-  `INVALID_RESPONSE`, `FRAME_TOO_LARGE`, ...). `CoreError.code` narrows on the
-  `ErrorCode` union; keep `android/.../ErrorCodes.kt` in sync.
+  `INVALID_RESPONSE`, `FRAME_TOO_LARGE`, ...) in the framework. Consumers may
+  also return **app-scoped codes** (e.g. `app.photos/not-found`) via `err()`;
+  they ride the wire verbatim and are never flattened. Keep
+  `android/.../ErrorCodes.kt` in sync with the canonical union.
 - The router synthesizes `UNSUPPORTED_EVENT` for events not declared in the
   plugin manifest, and wraps adapter exceptions as `PLUGIN_ERROR` — plugins do
   not need to hand-roll either.

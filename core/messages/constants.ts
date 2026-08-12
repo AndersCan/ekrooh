@@ -7,8 +7,9 @@ export const MessageType = {
 export type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];
 
 /** Canonical error codes. Everything the framework throws uses these; peers
- * may carry arbitrary codes over the wire, but `CoreError.code` narrows on
- * this union. Keep `android/src/main/.../ErrorCodes.kt` in sync. */
+ * may carry arbitrary codes over the wire, and consumers may return app-scoped
+ * codes (e.g. `app.photos/not-found`) which are preserved verbatim. Keep
+ * `android/src/main/.../ErrorCodes.kt` in sync with the canonical union. */
 export const ErrorCode = {
   UNSUPPORTED_CAPABILITY: 'UNSUPPORTED_CAPABILITY',
   UNSUPPORTED_EVENT: 'UNSUPPORTED_EVENT',
