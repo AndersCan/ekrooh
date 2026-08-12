@@ -71,8 +71,10 @@ SameSite=Lax; Path=/`.
 
 > Ratified during implementation: `Worklet.Configuration.assets` is only used
 > by bare-kit for bundle-asset unpacking and is invisible to worklet JS, so the
-> worklet receives the web-app dir + storage dir as `start(...)` arguments
-> (`Bare.argv[0..1]`) while hosts also set `assets` to the storage dir. The
+> worklet receives the web-app dir, durable storage dir, and cache dir as
+> `start(...)` arguments (`Bare.argv[0..2]`, per the storage-durability
+> decision) while hosts also set `assets` to the storage dir. A 2-arg host
+> falls back to using the storage dir as the cache dir with a warning. The
 > bundled web app is public content (a fresh WebView must load it before
 > `/login` runs); media file mounts and the WS upgrade stay token/cookie-gated.
 

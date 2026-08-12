@@ -1,8 +1,47 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { HashOptions } from 'node:crypto';
 import pkg from './package.json';
 import { VERSION } from './core/messages';
+
+// The `./runtime` public surface is a worklet module that imports bare-*;
+// map them to Node equivalents so the export-names snapshot can load it.
+vi.mock('bare-http1', async () => ({
+  default: (await import('node:http')).default,
+}));
+vi.mock('bare-fs', async () => ({
+  default: (await import('node:fs')).default,
+}));
+vi.mock('bare-path', async () => ({
+  default: (await import('node:path')).default,
+}));
+vi.mock('bare-crypto', async () => {
+  const crypto = await import('node:crypto');
+  return {
+    default: {
+      ...crypto,
+      createHash(algorithm: string, options?: HashOptions) {
+        if (algorithm === 'blake2b-256') algorithm = 'sha256';
+        return crypto.createHash(algorithm, options);
+      },
+    },
+  };
+});
+vi.mock('bare-ws', async () => ({
+  default: {
+    Server: {
+      handshake() {},
+    },
+    Socket: class {
+      on() {}
+      destroy() {}
+      write() {
+        return true;
+      }
+    },
+  },
+}));
 
 const FRAMEWORK_CORE_ROOTS = [
   'core/messages',
@@ -86,6 +125,16 @@ const PUBLIC_SURFACES: Record<string, { entry: string; exports: string[] }> = {
   transports: {
     entry: './web/transports/index.ts',
     exports: ['createMockTransport', 'createWebSocketTransport'],
+  },
+  runtime: {
+    entry: './core/runtime.ts',
+    exports: [
+      'attachWebSocketProtocol',
+      'createLoopbackServer',
+      'createWorkletRuntime',
+      'getIPC',
+      'resolveWorkletConfig',
+    ],
   },
 };
 

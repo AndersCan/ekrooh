@@ -15,6 +15,7 @@
   "exports": {
     ".": "./core/messages/index.ts",
     "./core": "./core/messages/index.ts",
+    "./runtime": "./core/runtime.ts",
     "./plugins": "./plugins/index.ts",
     "./plugins/health/events": "./plugins/health/events.ts",
     "./plugins/discovery/events": "./plugins/discovery/events.ts",
@@ -27,6 +28,7 @@
     "core/messages",
     "core/lib",
     "core/server",
+    "core/runtime.ts",
     "core/main.core.ts",
     "plugins",
     "web/transports",
@@ -75,10 +77,12 @@
     "vite-plus": "0.2.8"
   },
   "dependencies": {
+    "bare-crypto": "^1.15.3",
     "bare-encoding": "^1.0.3",
     "bare-env": "^3.0.0",
     "bare-fs": "^4.8.0",
     "bare-http1": "^4.5.7",
+    "bare-path": "^3.1.1",
     "bare-tcp": "^2.2.7",
     "bare-ws": "^3.0.0"
   },
