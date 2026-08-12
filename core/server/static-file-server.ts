@@ -8,6 +8,7 @@ import type {
 import ws from 'bare-ws';
 import crypto from 'bare-crypto';
 import path from 'bare-path';
+import { TextDecoder } from 'bare-encoding';
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   html: 'text/html',
@@ -30,13 +31,13 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   woff2: 'font/woff2',
 };
 
-function mimeTypeFor(filePath: string): string {
+export function mimeTypeFor(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
   return MIME_BY_EXTENSION[ext] ?? 'application/octet-stream';
 }
 
 /** Extracts the `token` query param from a raw query string (`a=1&token=x`). */
-function tokenFromQuery(query: string): string | null {
+export function tokenFromQuery(query: string): string | null {
   for (const pair of query.split('&')) {
     const eq = pair.indexOf('=');
     if (eq === -1) continue;
@@ -47,7 +48,7 @@ function tokenFromQuery(query: string): string | null {
 
 /** Reads the token from the `X-Bare-Token` request header (parser-lowercased).
  * `fetch`-based non-browser clients that cannot carry cookies use this. */
-function tokenFromHeaders(
+export function tokenFromHeaders(
   headers: Record<string, string | number>,
 ): string | null {
   const value = headers['x-bare-token'];
@@ -55,7 +56,7 @@ function tokenFromHeaders(
 }
 
 /** Reads the `bare_session` value from the `Cookie` request header. */
-function cookieSession(
+export function cookieSession(
   headers: Record<string, string | number>,
 ): string | null {
   const cookie = headers['cookie'];
@@ -72,13 +73,13 @@ function cookieSession(
 
 /** Derives the cookie value from the session token so the token itself is not
  * echoed into a request header a local attacker could read back. */
-function sessionNonce(token: string): string {
+export function sessionNonce(token: string): string {
   return crypto.createHash('blake2b-256').update(token).digest('hex');
 }
 
 /** Parses a `Range: bytes=<start>-<end>` header. Returns `null` when absent or
  * unsatisfiable (caller falls back to a 200 full response). */
-function parseRange(
+export function parseRange(
   value: string | number | undefined,
   size: number,
 ): { start: number; end: number } | null {
@@ -100,6 +101,24 @@ function parseRange(
   }
   if (start >= size || start > end) return null;
   return { start, end };
+}
+
+/** Accumulates an HTTP request body into a UTF-8 string. Node http emits
+ * Buffers, bare-http1 emits Uint8Arrays, and a setEncoding'd stream emits
+ * strings — `String(uint8array)` would join bytes with commas, so decode
+ * explicitly (the `/login` token body must match byte-for-byte). */
+export function collectRequestBody(req: HTTPIncomingMessage): Promise<string> {
+  return new Promise((resolve) => {
+    const decoder = new TextDecoder();
+    let body = '';
+    req.on('data', (chunk: unknown) => {
+      body +=
+        typeof chunk === 'string'
+          ? chunk
+          : decoder.decode(chunk as Uint8Array, { stream: true });
+    });
+    req.on('end', () => resolve(body + decoder.decode(new Uint8Array(0))));
+  });
 }
 
 export type WebSocketLike = {
@@ -215,11 +234,7 @@ export function createLoopbackServer(
   }
 
   function handleLogin(req: HTTPIncomingMessage, res: HTTPServerResponse) {
-    let body = '';
-    req.on('data', (chunk: unknown) => {
-      body += typeof chunk === 'string' ? chunk : String(chunk);
-    });
-    req.on('end', () => {
+    void collectRequestBody(req).then((body) => {
       const accepted =
         !authEnabled || (token !== null && body.trim() === token);
       if (!accepted) {
@@ -454,14 +469,17 @@ export function createLoopbackServer(
       return;
     }
 
+    // Single-client policy: reject before the handshake so a refused second
+    // socket never receives a 101 (a 101-then-close would look like an
+    // established connection to the client's reconnect logic).
+    if (activeSocket) {
+      socket.destroy();
+      return;
+    }
+
     ws.Server.handshake(req as never, socket, head, (err) => {
       if (err) {
         socket.destroy(err);
-        return;
-      }
-      // Single-client policy: one protocol socket at a time.
-      if (activeSocket) {
-        socket.destroy();
         return;
       }
       const client = new ws.Socket({
