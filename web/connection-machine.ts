@@ -40,7 +40,7 @@ const gaveUpState = state('gaveUp')().final();
 const loginOk = event('LOGIN_OK')();
 const loginFail = event('LOGIN_FAIL')();
 const socketOpen = event('SOCKET_OPEN')();
-const socketClose = event('SOCKET_CLOSE')<{ opened: boolean }>();
+const socketClose = event('SOCKET_CLOSE')();
 const retryTimer = event('RETRY_TIMER')();
 
 type ConnectionContext = {
@@ -70,7 +70,7 @@ export interface ConnectionMachine {
   sendLoginOk(): void;
   sendLoginFail(): void;
   sendOpen(): void;
-  sendClose(opened: boolean): void;
+  sendClose(): void;
   /** Fires on every state/context change with the current state name. */
   onChange(fn: (state: ConnectionStateName) => void): () => void;
 }
@@ -130,14 +130,13 @@ export function createConnectionMachine(
         opts!.context.set({ ...s, retries: 0 });
         return { state: connectedState };
       });
-      m.on(openingState, socketClose, (event, opts) => {
+      m.on(openingState, socketClose, (_event, opts) => {
         const s = opts!.context.get();
-        // A close before the socket ever opened means the upgrade was
-        // rejected — the `/login` cookie may not have ridden the handshake.
-        // If a token is available and the token URL isn't already in play,
-        // retry it immediately (consumes no retry).
+        // A close while the machine is still `opening` means the socket never
+        // opened — the upgrade was rejected and the `/login` cookie may not
+        // have ridden the handshake. If a token is available and the token URL
+        // isn't already in play, retry it immediately (consumes no retry).
         if (
-          !event.payload.opened &&
           !s.tokenTried &&
           typeof s.token === 'string' &&
           s.token.length > 0
@@ -178,7 +177,7 @@ export function createConnectionMachine(
     sendLoginOk: () => actor.send(loginOk.create()),
     sendLoginFail: () => actor.send(loginFail.create()),
     sendOpen: () => actor.send(socketOpen.create()),
-    sendClose: (opened) => actor.send(socketClose.create({ opened })),
+    sendClose: () => actor.send(socketClose.create()),
     onChange(fn) {
       return actor.on('change', (snapshot) => fn(name(snapshot)));
     },

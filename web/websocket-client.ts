@@ -94,7 +94,6 @@ export function createWebSocketTransport(
   const listeners = new Set<(message: WireMessage) => void>();
   const queued: QueuedMessage[] = [];
   let socket: WebSocket | null = null;
-  let openedThisAttempt = false;
 
   const machine = createConnectionMachine({
     url,
@@ -145,10 +144,8 @@ export function createWebSocketTransport(
   function openSocket() {
     socket = new WebSocket(machine.url());
     socket.binaryType = 'arraybuffer';
-    openedThisAttempt = false;
 
     socket.onopen = () => {
-      openedThisAttempt = true;
       machine.sendOpen();
       flushQueued();
     };
@@ -165,7 +162,8 @@ export function createWebSocketTransport(
     };
 
     socket.onclose = () => {
-      machine.sendClose(openedThisAttempt);
+      // No `opened` flag: the machine derives it from its own state.
+      machine.sendClose();
     };
 
     socket.onerror = () => {

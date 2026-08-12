@@ -38,12 +38,12 @@ describe('connection-machine', () => {
   it('close-before-open with a token retries the token URL immediately, consuming no retry', () => {
     const { m, clock } = machine({ token: 'secret-token' });
     m.sendLoginOk();
-    m.sendClose(false);
+    m.sendClose();
     expect(m.state()).toBe('opening');
     expect(m.url()).toBe('ws://test/?token=secret-token');
 
     // The token-URL attempt also fails → normal backoff (token tried once).
-    m.sendClose(false);
+    m.sendClose();
     expect(m.state()).toBe('backoff');
     clock.advance(250);
     expect(m.state()).toBe('opening');
@@ -52,7 +52,7 @@ describe('connection-machine', () => {
   it('backs off exponentially (virtual clock) and reopens', () => {
     const { m, clock } = machine();
     m.sendLoginOk();
-    m.sendClose(false);
+    m.sendClose();
     expect(m.state()).toBe('backoff');
 
     clock.advance(249);
@@ -61,7 +61,7 @@ describe('connection-machine', () => {
     expect(m.state()).toBe('opening');
 
     // Second failure backs off at 2x.
-    m.sendClose(false);
+    m.sendClose();
     expect(m.state()).toBe('backoff');
     clock.advance(499);
     expect(m.state()).toBe('backoff');
@@ -74,7 +74,7 @@ describe('connection-machine', () => {
     m.sendLoginOk();
     m.sendOpen();
     expect(m.state()).toBe('connected');
-    m.sendClose(true);
+    m.sendClose();
     expect(m.state()).toBe('backoff');
     clock.advance(250);
     expect(m.state()).toBe('opening');
@@ -85,10 +85,10 @@ describe('connection-machine', () => {
   it('gives up after the retry cap', () => {
     const { m, clock } = machine({ maxRetries: 1 });
     m.sendLoginOk();
-    m.sendClose(false);
+    m.sendClose();
     clock.advance(250);
     expect(m.state()).toBe('opening');
-    m.sendClose(false);
+    m.sendClose();
     expect(m.state()).toBe('gaveUp');
     expect(m.isGaveUp()).toBe(true);
   });
@@ -101,12 +101,12 @@ describe('connection-machine', () => {
     });
     m.sendLoginOk();
     for (let i = 0; i < 4; i++) {
-      m.sendClose(false);
+      m.sendClose();
       clock.advance(2000);
       expect(m.state()).toBe('opening');
     }
     // The 4th retry's backoff is capped at 1500ms (2^3=8000 → capped).
-    m.sendClose(false);
+    m.sendClose();
     expect(m.state()).toBe('backoff');
     clock.advance(1499);
     expect(m.state()).toBe('backoff');
@@ -120,8 +120,8 @@ describe('connection-machine', () => {
     m.onChange((s) => seen.push(s));
     m.sendLoginOk();
     m.sendOpen();
-    m.sendClose(true);
-    m.sendClose(true); // already in backoff: defensive no-op, no change
+    m.sendClose();
+    m.sendClose(); // already in backoff: defensive no-op, no change
     expect(seen).toEqual(['idle', 'opening', 'connected', 'backoff']);
   });
 });
