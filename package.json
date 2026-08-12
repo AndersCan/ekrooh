@@ -63,6 +63,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@vitest/coverage-v8": "^4.1.10",
     "bare": "^1.28.0",
     "bare-link": "^3.3.0",
     "bare-pack": "^2.2.1",

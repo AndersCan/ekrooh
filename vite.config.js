@@ -29,5 +29,16 @@ export default defineConfig({
   test: {
     root: '.',
     include: ['**/*.test.ts'],
+    coverage: {
+      all: false,
+      include: ['core/**', 'plugins/**', 'web/**'],
+      exclude: ['core/main.core.ts', 'core/main.core.gen.js'],
+      reporter: ['text'],
+      thresholds: {
+        statements: 80,
+        functions: 75,
+        lines: 80,
+      },
+    },
   },
 });

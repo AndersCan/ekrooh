@@ -30,8 +30,8 @@ jobs:
       - name: Format, lint and type-check
         run: npm run check
 
-      - name: Unit tests
-        run: npm run test:unit
+      - name: Unit tests (enforces the coverage floor)
+        run: npm run test:unit -- --coverage
 
   android:
     strategy:
