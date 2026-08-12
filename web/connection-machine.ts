@@ -161,8 +161,9 @@ export function createConnectionMachine(
       });
       m.on(backoffState, retryTimer, () => ({ state: openingState }));
       // Defensive: a stray close while backing off (no socket exists) is a
-      // no-op, not a dropped-event warning.
-      m.on(backoffState, socketClose, () => ({ state: backoffState }));
+      // true no-op — returning the same state would RE-ENTER backoff and
+      // reset the pending retry timer.
+      m.on(backoffState, socketClose, () => ({}));
     },
   });
 

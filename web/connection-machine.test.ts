@@ -121,7 +121,7 @@ describe('connection-machine', () => {
     m.sendLoginOk();
     m.sendOpen();
     m.sendClose(true);
-    m.sendClose(true); // already in backoff: no handler → no change
+    m.sendClose(true); // already in backoff: defensive no-op, no change
     expect(seen).toEqual(['idle', 'opening', 'connected', 'backoff']);
   });
 });

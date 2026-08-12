@@ -33,6 +33,7 @@
     "plugins",
     "web/transports",
     "web/websocket-client.ts",
+    "web/connection-machine.ts",
     "!**/*.test.ts",
     "README.md",
     "LICENSE",
