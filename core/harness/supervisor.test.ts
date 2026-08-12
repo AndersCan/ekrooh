@@ -111,16 +111,20 @@ describe('createHarnessSupervisor', () => {
 
     const allocated = await jsonRequest(`${mgmt}/instances`, 'POST');
     expect(allocated.status).toBe(201);
-    const { instanceId, origin } = allocated.body as {
+    const { instanceId, origin, token } = allocated.body as {
       instanceId: string;
       origin: string;
+      token: string;
     };
     expect(instanceId).toMatch(/^inst-\d+$/);
     expect(origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(typeof token).toBe('string');
+    expect(token.length).toBeGreaterThan(0);
 
     // The instance has its own per-instance storage/cache dirs.
-    expect(fs.existsSync(path.join(baseDir, instanceId, 'storage'))).toBe(true);
-    expect(fs.existsSync(path.join(baseDir, instanceId, 'cache'))).toBe(true);
+    const dir = path.join(baseDir, instanceId);
+    expect(fs.existsSync(path.join(dir, 'storage'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'cache'))).toBe(true);
 
     // The instance's loopback server serves the web app (public content).
     const page = await new Promise<number>((resolve, reject) => {
@@ -152,6 +156,37 @@ describe('createHarnessSupervisor', () => {
     expect(deleted.status).toBe(200);
     const after = await jsonRequest(`${mgmt}/instances`, 'GET');
     expect(after.body.instances).toEqual([]);
+
+    // Destroy tears down the runtime and removes the per-instance dirs.
+    expect(fs.existsSync(dir)).toBe(false);
+
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, 2000);
+      sup.close(() => {
+        clearTimeout(t);
+        resolve();
+      });
+    });
+  });
+
+  it('allocates isolated instances with distinct origins', async () => {
+    const sup = createHarnessSupervisor({
+      webAssets: webDir,
+      baseDir,
+      idleTimeoutMs: 600_000,
+    });
+    const mgmt = await sup.origin();
+
+    const a = await jsonRequest(`${mgmt}/instances`, 'POST');
+    const b = await jsonRequest(`${mgmt}/instances`, 'POST');
+    const originA = (a.body as { origin: string }).origin;
+    const originB = (b.body as { origin: string }).origin;
+    expect(originA).not.toBe(originB);
+
+    const listed = await jsonRequest(`${mgmt}/instances`, 'GET');
+    expect(
+      (listed.body.instances as Array<{ instanceId: string }>).length,
+    ).toBe(2);
 
     await new Promise<void>((resolve) => {
       const t = setTimeout(resolve, 2000);

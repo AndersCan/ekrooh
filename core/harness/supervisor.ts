@@ -82,12 +82,16 @@ export function createHarnessSupervisor(
     const cache = path.join(dir, 'cache');
     fs.mkdirSync(storage, { recursive: true });
     fs.mkdirSync(cache, { recursive: true });
-    return { storage, cache };
+    return { dir, storage, cache };
   }
 
-  async function allocate(): Promise<{ instanceId: string; origin: string }> {
+  async function allocate(): Promise<{
+    instanceId: string;
+    origin: string;
+    token: string;
+  }> {
     const id = `inst-${nextInstanceId++}`;
-    const { storage, cache } = instanceDirs(id);
+    const { dir, storage, cache } = instanceDirs(id);
     const runtime = createWorkletRuntime({
       webAssets: options.webAssets,
       storage,
@@ -97,15 +101,27 @@ export function createHarnessSupervisor(
       ...options.runtimeOptions,
     });
     const creds = await runtime.start();
+    // Touch on connection traffic AND close so active use postpones the reap
+    // (a tab actively used past the idle timeout is never reaped mid-journey).
+    runtime.server.onConnection((socket) => {
+      const touch = () => registry.touch(id, Date.now());
+      touch();
+      socket.on('data', touch);
+      socket.on('close', touch);
+    });
     registry.register({
       id,
       createdAt: Date.now(),
       lastActiveAt: Date.now(),
       runtime,
-      destroy: () => runtime.close(),
+      destroy: async () => {
+        origins.delete(id);
+        await new Promise<void>((resolve) => runtime.close(() => resolve()));
+        fs.rmSync(dir, { recursive: true, force: true });
+      },
     });
     origins.set(id, creds.origin);
-    return { instanceId: id, origin: creds.origin };
+    return { instanceId: id, origin: creds.origin, token: creds.token };
   }
 
   const server = http.createServer(
@@ -116,8 +132,8 @@ export function createHarnessSupervisor(
         const cleanPath = rawPath.replace(/\/+$/, '') || '/';
 
         if (req.method === 'POST' && cleanPath === '/instances') {
-          const { instanceId, origin } = await allocate();
-          writeJson(res, 201, { instanceId, origin });
+          const allocated = await allocate();
+          writeJson(res, 201, allocated);
           return;
         }
 
@@ -140,7 +156,6 @@ export function createHarnessSupervisor(
             return;
           }
           await registry.destroy(id);
-          origins.delete(id);
           writeJson(res, 200, { destroyed: id });
           return;
         }
