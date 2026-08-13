@@ -46,7 +46,11 @@ jobs:
         run: ./gradlew build
 
       - name: Publish @less/bare to npm
-        run: npm publish --access public
+        # npm refuses prerelease versions without an explicit dist-tag: derive
+        # it from the version (beta/alpha/rc → that identifier, stable → latest).
+        run: |
+          TAG=$(node -e "const v=require('./package.json').version; const m=v.match(/-([a-z]+)\./); process.stdout.write(m ? m[1] : 'latest')")
+          npm publish --access public --tag "$TAG"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

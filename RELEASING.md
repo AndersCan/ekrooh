@@ -72,10 +72,13 @@ cut a release by following this document with no human beyond the tag decision.
    tag:
 
    - **npm** (`@less/bare`): `npm publish --access public` from the repo root
-     (`release.yml` does this with the `NPM_TOKEN` secret). The first publish
-     claims the reserved name. The package ships **compiled ESM JS + types**
-     (`dist/`); `prepack`/`prepublishOnly` run `npm run build:pkg` (`vp pack`),
-     so publishing always builds. Consumers never receive TypeScript source.
+     (`release.yml` does this with the `NPM_TOKEN` secret). Prerelease versions
+     (e.g. `0.1.0-beta.1`) publish under a dist-tag derived from the
+     prerelease identifier (`beta`), stable versions under `latest`. The first
+     publish claims the reserved name. The package ships **compiled ESM JS +
+     types** (`dist/`); `prepack`/`prepublishOnly` run `npm run build:pkg`
+     (`vp pack`), so publishing always builds. Consumers never receive
+     TypeScript source.
    - **Android AAR**: `:bare-host:publishMavenAarPublicationToGitHubPackagesRepository`
      publishes `io.less:bare-host` to GitHub Packages (`release.yml` does this
      with the automatic `GITHUB_TOKEN`). The AAR is self-contained: the Bare Kit
