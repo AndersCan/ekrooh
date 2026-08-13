@@ -5,6 +5,21 @@ All notable changes to `@ekrooh/bare` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0] - 2026-08-13
+
+First stable release of the `@ekrooh/bare` framework (previously `@less/bare`),
+published under the new name. Same feature set as `0.1.0-beta.1`, plus:
+
+### Changed
+
+- **Rebrand**: npm package renamed `@less/bare` → `@ekrooh/bare`; workspaces
+  (`-e2e`, `-examples`, `-example-web`) and the Android AAR
+  (`io.less:bare-host` → `io.ekrooh:bare-host`) follow. GitHub repo moved to
+  `AndersCan/ekrooh`.
+- **Token seam**: the shell now injects `window.__ekrooh = { token }` (an
+  extensible bridge object) instead of `window.__lessBareToken`; the page
+  reads `window.__ekrooh.token` for the `/login` cookie exchange.
+
 ## [0.1.0-beta.1] - 2026-08-12
 
 First tagged release of the `@ekrooh/bare` framework: the boring bootstrap for

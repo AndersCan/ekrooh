@@ -1,6 +1,6 @@
 {
   "name": "@ekrooh/bare",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0",
   "type": "module",
   "description": "One soul, many platforms — the boring bootstrap for cross-platform apps on the Bare runtime: wire protocol, plugin kernel, RPC messenger, transports, and native host bridges.",
   "license": "MIT",
