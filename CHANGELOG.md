@@ -44,6 +44,31 @@ was never tagged — this entry absorbs it.)
 - **Testing contract**: vitest unit tests (with a coverage floor),
   JUnit (Kotlin host), XCTest (Swift host), Playwright e2e against the mock
   transport, and CI (`test.yml`, `playwright.yml`, `release.yml`).
+- **WS connection state machine**: the WebSocket transport models
+  idle/opening/connected/backoff/gaveUp as a mantaq `Actor` (exponential
+  backoff, retry cap, `?token=` fallback) — internal-only, never leaks into
+  the public surface.
+- **Multi-instance web test harness**: a dev harness (`harness.core`) hosting
+  N worklet instances behind a management server, with Playwright journeys
+  (one tab per instance) asserting per-instance isolation + lifecycle.
+- **iOS reference parity**: real `vendor.media` picker/camera
+  (`PHPickerViewController` + `UIImagePickerController`; simulator answers a
+  deterministic "camera unavailable") and a generic permissions plugin
+  (`permissions.request` / `permissions.status`) with real
+  `AVCaptureDevice.requestAccess` for camera.
+- **iOS p2p addons**: udx-native, rocksdb-native, sodium-native (+ hypercore's
+  quickbit/rabin/simdle and fs-native-extensions) linked via bare-link and
+  verified running on the iOS simulator (`P2PVerifyTest` boots a worklet that
+  exercises Corestore, Hyperdrive, and Hyperswarm).
+
+### Changed
+
+- **npm ships compiled JS**: `@less/bare` publishes `dist/` (compiled ESM +
+  type declarations via `vp pack`) — consumers never receive TypeScript source.
+- **Permissions plugin contract**: `permissions.requestStorage` is replaced by
+  `permissions.request(permission)` / `permissions.status(permission)`,
+  both returning `{ permission, status }`
+  (granted | denied | notDetermined | unsupported).
 
 ### Fixed
 
@@ -54,6 +79,9 @@ was never tagged — this entry absorbs it.)
   byte-exact instead of being `String()`-ified (which joined bytes with commas).
 - **Single-client WS policy**: the refused second socket is rejected before the
   handshake — no misleading 101-then-close.
+- **serveFile stream errors**: an evicted file (spool LRU) no longer crashes
+  the whole worklet — pre-flush ENOENT yields a clean 404 and a mid-stream
+  error resets the response instead of surfacing an unhandled stream error.
 
 ### Removed
 

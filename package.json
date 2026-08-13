@@ -1,6 +1,6 @@
 {
   "name": "@less/bare",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.1",
   "type": "module",
   "description": "The boring bootstrap for cross-platform apps on the Bare runtime: wire protocol, plugin kernel, RPC messenger, transports, and native host bridges.",
   "license": "MIT",
@@ -81,7 +81,6 @@
     "vite-plus": "0.2.8"
   },
   "dependencies": {
-    "//": "Native p2p addons are direct deps because bare-link only emits DIRECT dependencies (see scripts/build-ios-app.mjs + ticket #24) — moving them to devDependencies would silently stop build:ios emitting their xcframeworks. The p2p JS stack (hyperdrive/corestore/hyperswarm) stays devDependencies: verify-only.",
     "@mantaq/core": "^0.1.0",
     "@mantaq/sugar": "^0.1.0",
     "bare-crypto": "^1.15.3",

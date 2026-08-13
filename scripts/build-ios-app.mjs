@@ -48,6 +48,13 @@ run('node_modules/.bin/bare-link', [
   'examples/ios-app/addons',
 ]);
 
+// NOTE: bare-link emits xcframeworks only for DIRECT dependencies. The p2p
+// native addons (udx-native, rocksdb-native, sodium-native, quickbit-native,
+// rabin-native, simdle-native, fs-native-extensions) therefore live in the
+// root package.json `dependencies` — do NOT move them to devDependencies or
+// this step silently stops emitting their addons (ticket #24). The p2p JS
+// stack (hyperdrive/corestore/hyperswarm) is devDependencies: verify-only.
+
 console.log('Packing main.core.bundle for iOS...');
 mkdirSync(resourcesDir, { recursive: true });
 run('node_modules/.bin/bare-pack', [
