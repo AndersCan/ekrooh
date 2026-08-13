@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { Actor, VirtualClock, event, type AnyActor } from '@mantaq/core';
+import { Actor, VirtualClock, type AnyActor } from '@mantaq/core';
 import { ActorMap, states } from '@mantaq/sugar';
 import {
-  armE,
   createPendingCall,
   rejectedE,
   respondE,
   resolvedE,
+  startE,
 } from './pending-call';
 import type { MessageHeader } from './types';
 
@@ -26,7 +26,7 @@ function harness() {
   const clock = new VirtualClock();
   const received: Received[] = [];
   const { ready } = states('ready');
-  const parent = new Actor({
+  const invoke = new Actor({
     inputs: [resolvedE, rejectedE],
     states: [ready],
     initial: ready,
@@ -41,46 +41,40 @@ function harness() {
       });
     },
   });
-  const map = new ActorMap(parent);
-  const worker = (requestId: string): AnyActor =>
-    createPendingCall(requestId, 'INVOKE_REQUEST', 1000, clock);
-  return { clock, map, received, worker };
+  const start = () =>
+    startE.create({ requestType: 'INVOKE_REQUEST', timeoutMs: 1000 });
+  const worker = createPendingCall('r1', invoke as AnyActor, clock);
+  return { clock, invoke, received, start, worker };
 }
 
 describe('createPendingCall', () => {
-  it('arms into awaiting', () => {
-    const { clock, map, worker } = harness();
-    const w = worker('r1');
-    map.spawn('r1', () => w);
-    expect(w.snapshot().path[0]).toBe('idle');
+  it('arms into awaiting on START and registers the timeout timer', () => {
+    const { clock, start, worker } = harness();
+    expect(worker.snapshot().path[0]).toBe('idle');
 
-    map.send('r1', armE.create());
-    expect(w.snapshot().path[0]).toBe('awaiting');
+    worker.send(start());
+    expect(worker.snapshot().path[0]).toBe('awaiting');
     expect(clock.hasPending()).toBe(true);
   });
 
-  it('emits RESOLVED to the parent on response and cancels the timer', () => {
-    const { clock, map, received, worker } = harness();
-    const w = worker('r1');
-    map.spawn('r1', () => w);
-    map.send('r1', armE.create());
-    map.send('r1', respondE.create({ header: response('r1') }));
+  it('emits RESOLVED to the invoke actor on response and cancels the timer', () => {
+    const { clock, received, start, worker } = harness();
+    worker.send(start());
+    worker.send(respondE.create({ header: response('r1') }));
 
-    expect(w.snapshot().path[0]).toBe('resolved');
+    expect(worker.snapshot().path[0]).toBe('resolved');
     expect(clock.hasPending()).toBe(false);
     expect(received).toHaveLength(1);
     expect(received[0]?.type).toBe('RESOLVED');
     expect(received[0]?.payload?.requestId).toBe('r1');
   });
 
-  it('emits REJECTED to the parent on timeout with the Map-compatible error text', () => {
-    const { clock, map, received, worker } = harness();
-    const w = worker('r1');
-    map.spawn('r1', () => w);
-    map.send('r1', armE.create());
+  it('emits REJECTED with the Map-compatible error on timeout', () => {
+    const { clock, received, start, worker } = harness();
+    worker.send(start());
     clock.advance(1001);
 
-    expect(w.snapshot().path[0]).toBe('timedOut');
+    expect(worker.snapshot().path[0]).toBe('timedOut');
     expect(received).toHaveLength(1);
     expect(received[0]?.type).toBe('REJECTED');
     expect((received[0]?.payload?.error as Error).message).toBe(
@@ -89,14 +83,27 @@ describe('createPendingCall', () => {
   });
 
   it('ignores a response after timing out (final state blocks dispatch)', () => {
-    const { clock, map, received, worker } = harness();
-    const w = worker('r1');
-    map.spawn('r1', () => w);
-    map.send('r1', armE.create());
+    const { clock, received, start, worker } = harness();
+    worker.send(start());
     clock.advance(1001);
-    map.send('r1', respondE.create({ header: response('r1') }));
+    worker.send(respondE.create({ header: response('r1') }));
 
-    expect(w.snapshot().path[0]).toBe('timedOut');
+    expect(worker.snapshot().path[0]).toBe('timedOut');
     expect(received).toHaveLength(1);
+  });
+
+  it('is auto-reaped by an autoReap ActorMap once it reaches a final state', () => {
+    const { clock, invoke, start } = harness();
+    const map = new ActorMap(
+      (id) => createPendingCall(id, invoke as AnyActor, clock),
+      { autoReap: true },
+    );
+
+    map.ensure('r1');
+    expect(map.has('r1')).toBe(true);
+
+    map.send('r1', start());
+    map.send('r1', respondE.create({ header: response('r1') }));
+    expect(map.has('r1')).toBe(false);
   });
 });

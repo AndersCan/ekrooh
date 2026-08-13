@@ -1,11 +1,11 @@
 import { Actor, RealClock, event, type Clock } from '@mantaq/core';
 import { ActorMap, states } from '@mantaq/sugar';
 import {
-  armE,
   createPendingCall,
   rejectedE,
   respondE,
   resolvedE,
+  startE,
 } from './pending-call';
 import type {
   MessageHeader,
@@ -16,15 +16,18 @@ import type {
 /**
  * PROTOTYPE — side-by-side comparison against `rpc-messenger.ts`.
  *
- * One messenger machine owns one `ActorMap(messenger)`. Each in-flight
- * `invoke` is a worker child (see `pending-call.ts`) spawned into the map,
- * keyed by requestId. Workers EMIT `RESOLVED` / `REJECTED` outputs on their
- * terminal transitions; the ActorMap routes those to this machine (child
- * outputs → parent `internal`), which resolves / rejects the pending promise
- * and reaps the worker.
+ * One messenger machine owns one `ActorMap(factory, { autoReap })`. Each
+ * in-flight `invoke` is a worker child (see `pending-call.ts`) spawned into
+ * the map, keyed by requestId. The messenger passes itself into the map's
+ * factory, so every worker holds it in context and EMITS `RESOLVED` /
+ * `REJECTED` back to it; this machine listens (declared as inputs) and
+ * resolves / rejects the pending promise from its context. `autoReap` removes
+ * each worker the moment it reaches a final state — no manual `kill`, no
+ * `done` subscription. `ActorMap.send` to an unknown key is a no-op, matching
+ * the Map version.
  *
- * This file deliberately contains exactly one `new Actor` (the messenger) and
- * one `new ActorMap(invoke)`; per-request workers are the map's dynamic
+ * This file deliberately contains exactly one `new Actor` (the invoke
+ * machine) and one `new ActorMap`; per-request workers are the map's dynamic
  * children, created in `pending-call.ts`.
  */
 type DistributiveOmit<T, K extends keyof any> = T extends any
@@ -91,8 +94,7 @@ export function createProtocolMessenger(
 
   let pending: ActorMap;
   const invoke = new Actor({
-    inputs: [invokeE, respondE],
-    internal: [resolvedE, rejectedE],
+    inputs: [invokeE, respondE, resolvedE, rejectedE],
     states: [ready],
     initial: ready,
     clock,
@@ -106,10 +108,8 @@ export function createProtocolMessenger(
           ...s,
           pending: { ...s.pending, [requestId]: { resolve, reject } },
         });
-        pending.ensure(requestId, () =>
-          createPendingCall(requestId, requestType, timeoutMs, clock),
-        );
-        pending.send(requestId, armE.create());
+        pending.ensure(requestId);
+        pending.send(requestId, startE.create({ requestType, timeoutMs }));
         return {};
       });
       m.on(ready, respondE, (event) => {
@@ -125,7 +125,6 @@ export function createProtocolMessenger(
         const next = { ...s.pending };
         delete next[event.payload.requestId];
         opts.context.set({ ...s, pending: next });
-        pending.kill(event.payload.requestId);
         call.resolve(event.payload.header);
         return {};
       });
@@ -136,13 +135,15 @@ export function createProtocolMessenger(
         const next = { ...s.pending };
         delete next[event.payload.requestId];
         opts.context.set({ ...s, pending: next });
-        pending.kill(event.payload.requestId);
         call.reject(event.payload.error);
         return {};
       });
     },
   });
-  pending = new ActorMap(invoke);
+  pending = new ActorMap(
+    (requestId) => createPendingCall(requestId, invoke, clock),
+    { autoReap: true },
+  );
 
   return {
     dispatch(request, payload) {
