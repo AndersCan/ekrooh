@@ -14,6 +14,8 @@ import os from 'node:os';
 import path from 'node:path';
 import type { HashOptions } from 'node:crypto';
 import { createWorkletRuntime, resolveWorkletConfig } from './runtime';
+import { definePlugin, ok } from './messages';
+import type { EventSpec } from './messages';
 
 vi.mock('bare-http1', async () => ({
   default: (await import('node:http')).default,
@@ -178,6 +180,55 @@ describe('createWorkletRuntime', () => {
     // Auth is off in dev: a token-less upgrade succeeds.
     const upgrade = await wsUpgrade(creds.origin, { token: undefined });
     expect(upgrade.split('\r\n')[0]).toContain('101');
+
+    runtime.close();
+  });
+
+  it('dev mode with a storage dir writes no handoff.json (auth off)', async () => {
+    const devStorage = path.join(root, 'dev-storage');
+    fs.mkdirSync(devStorage, { recursive: true });
+    const runtime = createWorkletRuntime({
+      webAssets: webDir,
+      storage: devStorage,
+      auth: false,
+      port: 0,
+    });
+    expect(runtime.config.deviceMode).toBe(true);
+
+    await runtime.start();
+    // auth: false → no handoff file left for a host to misinterpret.
+    expect(fs.existsSync(path.join(devStorage, 'handoff.json'))).toBe(false);
+
+    runtime.close();
+  });
+
+  it('registers consumer plugins passed via the plugins option', async () => {
+    const photoSpecs = {
+      list: {
+        pluginId: 'app.photos',
+        name: 'photos.list',
+        args: {} as Record<string, never>,
+        result: {} as { photos: string[] },
+      },
+    } as const satisfies Record<string, EventSpec<any, any>>;
+
+    const runtime = createWorkletRuntime({
+      webAssets: webDir,
+      port: 0,
+      plugins: [
+        definePlugin('app.photos', photoSpecs, {
+          capabilities: ['photos'],
+          invoke: {
+            list: async () => ok({ photos: [] }),
+          },
+        }),
+      ],
+    });
+
+    const capabilities = runtime.pluginRegistry.listCapabilities();
+    expect(capabilities.some((c) => c.capabilities.includes('photos'))).toBe(
+      true,
+    );
 
     runtime.close();
   });

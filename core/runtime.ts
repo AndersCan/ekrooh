@@ -4,7 +4,7 @@ import { TextDecoder, TextEncoder } from 'bare-encoding';
 import { createDefaultPlugins } from '../plugins';
 import { getIPC } from './lib/get-ipc';
 import { createHostIpcBridge } from './messages/host-ipc';
-import { MessageType, MessageProtocol } from './messages';
+import { MessageType, MessageProtocol, type PluginManifest } from './messages';
 import { createPluginRegistry, createPluginRouter } from './messages/protocol';
 import {
   createLoopbackServer,
@@ -16,7 +16,15 @@ export {
   createLoopbackServer,
   type LoopbackServer,
 } from './server/static-file-server';
-export { attachWebSocketProtocol } from './server/websocket-server';
+export {
+  collectRequestBody,
+  type LoopbackRouteHandler,
+} from './server/static-file-server';
+export {
+  attachWebSocketProtocol,
+  createLoopbackPush,
+  type LoopbackPush,
+} from './server/websocket-server';
 export { getIPC } from './lib/get-ipc';
 
 /** Global provided by the Bare runtime (also present in bare-kit worklets). */
@@ -67,6 +75,9 @@ export type WorkletRuntimeOptions = {
   port?: number;
   /** Require the per-session token/cookie. Defaults to on in device mode. */
   auth?: boolean;
+  /** Additional plugin manifests to register after the canonical defaults
+   * (consumer product plugins, e.g. `app.photos`). */
+  plugins?: PluginManifest[];
   /** Idle timeout (ms) after which an authenticated WebSocket is dropped. */
   wsIdleTimeoutMs?: number;
 };
@@ -153,6 +164,9 @@ export function createWorkletRuntime(
   })) {
     pluginRegistry.register(plugin);
   }
+  for (const plugin of options.plugins ?? []) {
+    pluginRegistry.register(plugin);
+  }
 
   const pluginRouter = createPluginRouter(pluginRegistry, 'bare', {
     delegateToHost: (header, payload) =>
@@ -198,7 +212,10 @@ export function createWorkletRuntime(
     attachWebSocketProtocol(server, { protocol, pluginRegistry, pluginRouter });
 
     const credentials = await server.credentials();
-    if (deviceMode && options.storage) {
+    // handoff.json exists for the host to find origin/port/token; only device
+    // mode (auth on) writes it — a dev backend with `auth: false` and a
+    // storage dir for persistence must not leave a stale handoff behind.
+    if (auth && options.storage) {
       try {
         fs.writeFileSync(
           path.join(options.storage, 'handoff.json'),

@@ -129,6 +129,12 @@ export type WebSocketLike = {
   destroy(): void;
 };
 
+/** Handler for a registered HTTP route on the loopback server. */
+export type LoopbackRouteHandler = (
+  req: HTTPIncomingMessage,
+  res: HTTPServerResponse,
+) => void;
+
 /** Minimal shape of the HTTP request object handed to WS upgrade handlers. */
 export type LoopbackRequest = {
   url?: string;
@@ -178,6 +184,17 @@ export interface LoopbackServer {
   /** Registers a handler for authenticated, handshaken WebSocket connections
    * (the protocol socket). */
   onConnection(handler: LoopbackConnectionHandler): void;
+  /** Registers an HTTP route. `handler` runs before mount resolution, after
+   * the auth gate (device mode requires the session cookie/token). The route
+   * body is read with `collectRequestBody`. */
+  registerRoute(
+    method: string,
+    path: string,
+    handler: LoopbackRouteHandler,
+  ): void;
+  /** Writes a raw frame to the connected protocol socket (if any) — the
+   * server-initiated push seam (e.g. a `photos.changed` dispatch). */
+  push(frame: Uint8Array): boolean;
   /** Stops accepting connections and closes the server. */
   close(cb?: (err?: Error | null) => void): void;
 }
@@ -204,6 +221,7 @@ export function createLoopbackServer(
 
   const fileMounts = new Map<string, string>();
   const dirMounts = new Map<string, string>();
+  const routeHandlers = new Map<string, LoopbackRouteHandler>();
   const connectionHandlers: LoopbackConnectionHandler[] = [];
   let token: string | null = options.token ?? null;
   let boundOrigin = '';
@@ -422,6 +440,23 @@ export function createLoopbackServer(
         return;
       }
 
+      // Registered routes run before mount resolution, after the auth gate:
+      // device mode requires the session cookie/token (dev mode is open).
+      const route = routeHandlers.get(`${req.method} ${cleanPath}`);
+      if (route) {
+        if (!isAuthorized(headers, query)) {
+          writeError(res, 401, 'Unauthorized');
+          return;
+        }
+        try {
+          route(req, res);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          writeError(res, 500, message);
+        }
+        return;
+      }
+
       const mount = resolveMount(cleanPath);
       // The bundled web app (directory mounts, e.g. `/`) is public content —
       // a fresh WebView must be able to load the page before `/login` runs.
@@ -561,6 +596,18 @@ export function createLoopbackServer(
     },
     onConnection(handler) {
       connectionHandlers.push(handler);
+    },
+    registerRoute(method, path, handler) {
+      routeHandlers.set(`${method.toUpperCase()} ${path}`, handler);
+    },
+    push(frame) {
+      if (!activeSocket) return false;
+      try {
+        activeSocket.write(frame);
+        return true;
+      } catch {
+        return false;
+      }
     },
     close(cb) {
       if (activeSocket) {

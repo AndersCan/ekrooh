@@ -24,19 +24,25 @@ What you get and what to watch for:
 - `deviceMode` is derived from `options.storage !== undefined` — passing
   `storage` flips you into device mode. `auth: false` keeps the dev backend
   open; `port: 8080` pins it like dev mode.
-- With `storage` set, `start()` **also writes `handoff.json`** into it
-  (device-mode behavior) — harmless under the CLI, but a host polling that dir
-  in the same tree could react to it. Keep dev stores outside any host sandbox
-  dirs.
-- Plugins are **hardcoded to the default set** by `createWorkletRuntime`; add
-  your own by mutating `pluginRegistry` after creation:
+- With `auth: false`, **no `handoff.json` is written** even though `storage`
+  is set — the handoff file is a host artifact, and a dev backend must not
+  leave a stale one behind.
+- The canonical default plugin set is registered automatically. Add **your
+  own** plugins with the `plugins` option instead of mutating the registry
+  after creation:
 
 ```ts
-runtime.pluginRegistry.register(myPlugin);
+const runtime = createWorkletRuntime({
+  storage: './.justus-store',
+  cache: './.justus-cache',
+  auth: false,
+  port: 8080,
+  plugins: [photosPlugin], // your app.photos manifest
+});
 ```
 
-This is the documented extension point — there is no
-`plugins`-array option yet.
+`pluginRegistry` remains reachable on the runtime if you need to register
+dynamically.
 
 ## Persisted dev data
 

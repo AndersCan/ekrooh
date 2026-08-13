@@ -30,10 +30,6 @@ function fail(message) {
   console.error(`  ✗ ${message}`);
 }
 
-function ok(message) {
-  console.log(`  ✓ ${message}`);
-}
-
 function walkFiles(dir) {
   const out = [];
   for (const entry of readdirSync(dir)) {

@@ -1,11 +1,32 @@
 import { MessageType } from '../messages';
 import { BareRuntimeContext } from '../messages/create-bare-runtime-context';
+import type { MessageHeader, MessageProtocol } from '../messages';
 import type { LoopbackServer } from './static-file-server';
 
 function toUint8Array(data: unknown): Uint8Array {
   if (data instanceof Uint8Array) return data;
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   throw new Error('Expected Uint8Array or ArrayBuffer from socket data');
+}
+
+/** Envelope encoder bound to a loopback server's connected protocol socket —
+ * the server-initiated (backend → web) push seam. */
+export type LoopbackPush = (
+  header: MessageHeader,
+  payload?: Uint8Array | ArrayBuffer | null,
+) => boolean;
+
+/** Builds the push seam for the server's connected protocol socket: encodes a
+ * `DISPATCH`-style envelope and writes it, mirroring how `attachWebSocketProtocol`
+ * writes responses. Returns false when no socket is connected. */
+export function createLoopbackPush(
+  server: LoopbackServer,
+  protocol: MessageProtocol,
+): LoopbackPush {
+  return (header, payload = null) => {
+    const frame = protocol.encode(MessageType.ENVELOPE, header, payload);
+    return server.push(frame);
+  };
 }
 
 /**

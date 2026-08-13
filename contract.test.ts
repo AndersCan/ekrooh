@@ -130,6 +130,8 @@ const PUBLIC_SURFACES: Record<string, { entry: string; exports: string[] }> = {
     entry: './core/runtime.ts',
     exports: [
       'attachWebSocketProtocol',
+      'collectRequestBody',
+      'createLoopbackPush',
       'createLoopbackServer',
       'createWorkletRuntime',
       'getIPC',

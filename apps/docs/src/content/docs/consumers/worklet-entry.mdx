@@ -17,10 +17,11 @@ import {
 } from '@ekrooh/bare/runtime';
 
 export function createAppRuntime(): WorkletRuntime {
-  const runtime = createWorkletRuntime(resolveWorkletConfig());
-
-  // 1. Register your plugins (optional — defaults are already registered).
-  // runtime.pluginRegistry.register(myPlugin);
+  const runtime = createWorkletRuntime({
+    ...resolveWorkletConfig(),
+    // 1. Register your plugins (defaults are registered automatically).
+    plugins: [photosPlugin],
+  });
 
   // 2. Wire your own modules that need the loopback server, storage, or the
   //    protocol socket. See "Backend → Web Push" for the socket.

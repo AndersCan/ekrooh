@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { TextDecoder, TextEncoder } from 'node:util';
-import { attachWebSocketProtocol } from './websocket-server';
+import {
+  attachWebSocketProtocol,
+  createLoopbackPush,
+} from './websocket-server';
 import {
   MessageType,
   MessageProtocol,
@@ -41,11 +44,13 @@ function fakeSocket() {
 
 function serverHarness() {
   let handler: ((socket: unknown, request: unknown) => void) | null = null;
+  const push = vi.fn((_frame: Uint8Array) => true);
   return {
     server: {
       onConnection(h: (socket: unknown, request: unknown) => void) {
         handler = h;
       },
+      push,
     },
     get handler() {
       return handler;
@@ -134,5 +139,45 @@ describe('attachWebSocketProtocol', () => {
     expect(socket.write).not.toHaveBeenCalled();
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+describe('createLoopbackPush', () => {
+  it('encodes and pushes a dispatch envelope to the connected socket', () => {
+    const harness = serverHarness();
+    const push = createLoopbackPush(harness.server as never, protocol as never);
+
+    const result = push(
+      {
+        type: 'DISPATCH',
+        pluginId: 'app.photos',
+        event: 'photos.changed',
+      } as Parameters<typeof push>[0],
+      null,
+    );
+
+    expect(harness.server.push).toHaveBeenCalledTimes(1);
+    expect(result).toBe(true);
+
+    const frame = harness.server.push.mock.calls[0][0] as Uint8Array;
+    const decoded = protocol.decode(frame);
+    expect(decoded.header).toMatchObject({
+      type: 'DISPATCH',
+      pluginId: 'app.photos',
+      event: 'photos.changed',
+    });
+  });
+
+  it('reports false when no socket is connected', () => {
+    const harness = serverHarness();
+    harness.server.push.mockReturnValue(false);
+    const push = createLoopbackPush(harness.server as never, protocol as never);
+
+    expect(
+      push(
+        { type: 'DISPATCH', pluginId: 'core.health', event: 'health.ping' },
+        null,
+      ),
+    ).toBe(false);
   });
 });

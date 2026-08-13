@@ -5,6 +5,29 @@ All notable changes to `@ekrooh/bare` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- **Backend → web push** (`@ekrooh/bare/runtime`): `createLoopbackPush(server,
+protocol)` + `LoopbackServer.push(frame)` — server-initiated dispatch to the
+  connected web layer (live galleries, sync status).
+- **Custom HTTP routes** (`@ekrooh/bare/runtime`): `LoopbackServer
+.registerRoute(method, path, handler)` runs before mount resolution, behind
+  the auth gate; `collectRequestBody` is re-exported for POST handlers.
+- **Consumer plugins**: `createWorkletRuntime({ plugins: [...] })` registers
+  consumer plugin manifests after the canonical defaults (no more post-hoc
+  registry mutation).
+
+### Fixed
+
+- **`getIPC()` in plain Node**: no longer throws a `ReferenceError` when
+  neither `BareKit` nor `Bare` is defined — returns `undefined`, so
+  `createWorkletRuntime` runs host-less in tests/desktop contexts.
+- **Dev mode with a storage dir** (`auth: false`): `handoff.json` is no longer
+  written (previously a stale handoff appeared whenever `storage` was set,
+  even with auth off).
+
 ## [0.1.0] - 2026-08-13
 
 First stable release of the `@ekrooh/bare` framework (previously `@less/bare`),

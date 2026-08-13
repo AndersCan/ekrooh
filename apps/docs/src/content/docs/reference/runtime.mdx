@@ -10,19 +10,26 @@ backend, the unified loopback server, and IPC helpers.
 
 - `createWorkletRuntime(options)` — creates one worklet runtime: a
   per-instance, stateless factory that wires the loopback server, cookie auth,
-  plugin registry, and host IPC bridge.
+  plugin registry, and host IPC bridge. `options.plugins` registers consumer
+  plugins after the canonical defaults.
 - `resolveWorkletConfig()` — reads the host-provided worklet configuration
   from `Bare.argv`; a missing config means dev mode (auth off, fixed port, no
   handoff file).
 - `createLoopbackServer(...)` / `LoopbackServer` — the unified HTTP+WS server
-  (web app at `/`, media mounts, protocol socket).
+  (web app at `/`, media mounts, protocol socket) plus `registerRoute` and
+  `push` for custom endpoints and server-initiated dispatch.
 - `attachWebSocketProtocol(server, ...)` — wires the framed WS protocol onto
   the server.
-- `getIPC()` — access the worklet's IPC stream to the host.
+- `createLoopbackPush(server, protocol)` — the backend → web push seam.
+- `getIPC()` — access the worklet's IPC stream to the host (`undefined` when
+  no host is present).
+- `collectRequestBody(req)` — accumulate an HTTP request body into a UTF-8
+  string (for `registerRoute` handlers).
 
 ## Types
 
-- `WorkletRuntimeOptions`, `WorkletRuntimeConfig`, `WorkletRuntime`.
+- `WorkletRuntimeOptions`, `WorkletRuntimeConfig`, `WorkletRuntime`,
+  `LoopbackRouteHandler`, `LoopbackPush`.
 
 ```ts
 import { createWorkletRuntime } from '@ekrooh/bare/runtime';

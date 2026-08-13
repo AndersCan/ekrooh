@@ -26,9 +26,17 @@ declare const Bare: BareGlobal;
  * In Bare (Sidecar), it uses Bare.IPC.
  */
 export function getIPC(): BareIPC {
-  const IPC = typeof BareKit !== 'undefined' ? BareKit.IPC : Bare.IPC;
+  // `typeof BareKit !== 'undefined'` guards BareKit (Android); when neither
+  // exists (plain Node / bare CLI without a host) `Bare.IPC` must not throw —
+  // the runtime treats a missing IPC as "no host" (dev mode).
+  const IPC =
+    typeof BareKit !== 'undefined'
+      ? BareKit.IPC
+      : typeof Bare !== 'undefined'
+        ? Bare.IPC
+        : undefined;
   if (IPC && typeof IPC.resume === 'function') {
     IPC.resume();
   }
-  return IPC;
+  return IPC as BareIPC;
 }

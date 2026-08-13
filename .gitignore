@@ -91,3 +91,6 @@ examples/android-app/src/main/assets/assets/main-*.css
 
 # Bundled smoke test (scripts/smoke-loopback.mjs, run under the bare runtime)
 scripts/smoke-loopback.gen.mjs
+
+# Astro build cache (apps/docs)
+apps/docs/.astro/

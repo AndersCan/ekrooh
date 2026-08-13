@@ -77,12 +77,21 @@ vi.mock('bare-ws', async () => {
           // mirror that so the server's `client.on('close')` (activeSocket
           // cleanup) actually fires when a test destroys its connection.
           this.socket?.on('close', () => this.emit('close'));
+          // A client reset (destroy) surfaces an ECONNRESET read error on the
+          // server-side socket; swallow it here rather than leaking an uncaught
+          // error into the test runner.
+          this.socket?.on('error', () => {});
         }
         destroy() {
           this.socket?.destroy();
           this.emit('close');
         }
-        write() {
+        write(data: unknown) {
+          // Forward to the underlying TCP socket so a server `push` reaches the
+          // test client (the real ws.Socket writes through to the TCP socket).
+          if (this.socket) {
+            return this.socket.write(data as Buffer);
+          }
           return true;
         }
       },
@@ -590,6 +599,85 @@ describe('loopback server WebSocket upgrade', () => {
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 2000);
       idleServer.close(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  });
+
+  it('registerRoute serves a custom endpoint behind the auth gate', async () => {
+    const sc = createLoopbackServer({ auth: true, token: TOKEN });
+    sc.registerRoute('POST', '/upload', async (req, res) => {
+      const body = await collectRequestBody(req);
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ received: body }));
+    });
+    const creds = await sc.credentials();
+
+    const post = (urlPath: string, body: string, token?: string) =>
+      new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const headers: Record<string, string> = {
+          'Content-Type': 'text/plain',
+        };
+        if (token) headers['X-Bare-Token'] = token;
+        const req = http.request(
+          `${creds.origin}${urlPath}`,
+          { method: 'POST', headers, agent: false },
+          (res) => {
+            let data = '';
+            res.on('data', (c) => (data += c));
+            res.on('end', () =>
+              resolve({ status: res.statusCode ?? 0, body: data }),
+            );
+          },
+        );
+        req.on('error', reject);
+        req.end(body);
+      });
+
+    // Authenticated → 201 with the echoed body.
+    const authed = await post('/upload', 'hello-worklet', TOKEN);
+    expect(authed.status).toBe(201);
+    expect(authed.body).toBe(JSON.stringify({ received: 'hello-worklet' }));
+
+    // No credentials → 401 (device mode gates custom routes too).
+    const denied = await post('/upload', 'hello-worklet');
+    expect(denied.status).toBe(401);
+
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 2000);
+      sc.close(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  });
+
+  it('push writes a raw frame to the connected protocol socket', async () => {
+    const sc = createLoopbackServer({ auth: true, token: TOKEN });
+    sc.mountDir('/', dir);
+    const creds = await sc.credentials();
+    const scPort = Number(
+      creds.origin.slice(creds.origin.lastIndexOf(':') + 1),
+    );
+    const base = { token: TOKEN, origin: creds.origin, port: scPort };
+
+    const conn = await openUpgrade(base);
+    expect(conn.response.split('\r\n')[0]).toContain('101');
+
+    const frame = new TextEncoder().encode('{"push":true}');
+    expect(sc.push(frame)).toBe(true);
+
+    // No socket → push reports false (nothing connected).
+    conn.socket.removeAllListeners('data');
+    conn.socket.on('error', () => {});
+    conn.socket.destroy();
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    expect(sc.push(frame)).toBe(false);
+
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 2000);
+      sc.close(() => {
         clearTimeout(timer);
         resolve();
       });

@@ -1,43 +1,50 @@
 ---
 title: Custom HTTP Routes
-description: Mounting bytes on the loopback server — and the route-registration gap.
+description: Register arbitrary endpoints on the loopback server.
 ---
 
-The `LoopbackServer` surface is `mount` / `mountDir` / `unmount` plus the
-hardcoded `POST /login`. There is **no arbitrary route-registration API** yet
-(a dev-only upload endpoint, a status page, etc.). Two supported ways to get
-bytes served:
+The `LoopbackServer` surface is `mount` / `mountDir` / `unmount` for file
+mounts, plus `registerRoute` for **arbitrary HTTP endpoints** — a dev-only
+upload route, a status page, or any custom API.
 
-## mount — one exact path
+## registerRoute
+
+```ts
+import { createLoopbackPush, collectRequestBody } from '@ekrooh/bare/runtime';
+```
+
+`registerRoute(method, path, handler)` registers an exact
+`METHOD path` route. The handler receives the raw `(req, res)`; read a POST
+body with `collectRequestBody(req)`:
+
+```ts
+runtime.server.registerRoute('POST', '/upload', async (req, res) => {
+  const body = await collectRequestBody(req);
+  res.writeHead(201, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ received: body }));
+});
+```
+
+Routes run **before** mount resolution, **after** the auth gate: in device
+mode the request must carry the session cookie/token (401 otherwise); dev mode
+is open. The method and path are matched exactly.
+
+## File mounts
+
+For serving static bytes, the mount API still applies:
 
 ```ts
 runtime.server.mount('/photos/1.jpg', '/absolute/path/to/photo.jpg');
-const url = await runtime.server.url('/photos/1.jpg');
-```
-
-## mountDir — a whole directory, with SPA fallback
-
-```ts
 runtime.server.mountDir('/photos', '/absolute/path/to/photos');
 ```
 
-Serves every file below the prefix, longest-prefix match, with an SPA fallback
-to `index.html` for unknown GET paths. This is how the web app itself is
-mounted (`mountDir('/', webAssets)`).
+`mountDir` serves every file below the prefix (longest-prefix match) with an
+SPA fallback to `index.html` for unknown GET navigations.
 
 ## Bytes from the browser → worklet
 
-There is no custom route for the reverse direction (browser → worklet HTTP
-POST). The wire protocol's `DISPATCH`/`INVOKE` envelopes are the supported
-channel for browser→backend bytes. If you need chunked uploads outside the
-frame cap, the reference approach is a **watched inbox folder**: the web layer
-writes a file through a plugin event, the worklet polls/mounts it, and the
-gallery reads it from the loopback server — see the media plugin pattern
-(`plugins/media/plugin.ts`).
-
-## The gap
-
-A `registerRoute(method, path, handler)` API on `LoopbackServer` would let a
-consumer add e.g. a dev-only upload route without the wire protocol. It is
-tracked as a framework seam; until it lands, `mount`/`mountDir` + the watched
-inbox pattern cover the cases the reference app needs.
+For chunked uploads of large files (photos), the wire protocol's
+`DISPATCH`/`INVOKE` envelopes remain the supported channel. A `registerRoute`
+endpoint gives you a second path (e.g. dev-only) when you need browser →
+worklet bytes without the protocol — pair it with `mount`/`mountDir` to serve
+what was uploaded.

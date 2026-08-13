@@ -24,6 +24,8 @@ function stubServer(): LoopbackServer {
     unmount: vi.fn(),
     mountDir: vi.fn(),
     onConnection: vi.fn(),
+    registerRoute: vi.fn(),
+    push: vi.fn(() => true),
     close: vi.fn(),
   };
 }
