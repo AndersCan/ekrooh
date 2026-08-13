@@ -1,5 +1,12 @@
 import { Actor, RealClock, event, type Clock } from '@mantaq/core';
 import { ActorMap, states } from '@mantaq/sugar';
+import {
+  armE,
+  createPendingCall,
+  rejectedE,
+  respondE,
+  resolvedE,
+} from './pending-call';
 import type {
   MessageHeader,
   PluginDispatchHeader,
@@ -9,22 +16,16 @@ import type {
 /**
  * PROTOTYPE — side-by-side comparison against `rpc-messenger.ts`.
  *
- * The Map-backed pending-call table is modeled with mantaq instead: each
- * in-flight `invoke` spawns one worker child in an `ActorMap`, keyed by
- * requestId. The worker is the request lifecycle — `idle` → `awaiting` →
- * `resolved` | `timedOut` (both final). The timeout is the worker's `awaiting`
- * effect (a `clock.setTimeout` on the injected clock, auto-cancelled by the
- * abort signal on resolution), so VirtualClock tests advance time instead of
- * `vi.useFakeTimers()`. `handleIncoming` routes a response to the matching
- * worker via `ActorMap.send` — a no-op for unknown ids, matching the Map
- * version. A worker's `done` (final state entry) reaps it from the map.
+ * One messenger machine owns one `ActorMap(messenger)`. Each in-flight
+ * `invoke` is a worker child (see `pending-call.ts`) spawned into the map,
+ * keyed by requestId. Workers EMIT `RESOLVED` / `REJECTED` outputs on their
+ * terminal transitions; the ActorMap routes those to this machine (child
+ * outputs → parent `internal`), which resolves / rejects the pending promise
+ * and reaps the worker.
  *
- * The worker starts `idle` and the messenger sends `arm` after spawning:
- * mantaq runs effects on state ENTRY only — the initial state's effect never
- * runs — so the timeout timer is armed by the transition into `awaiting`, not
- * by construction. The promise bridge (`resolve`/`reject`) rides in worker
- * context and is invoked from the transitions themselves; effects would be
- * the wrong home because mantaq never runs effects on final states.
+ * This file deliberately contains exactly one `new Actor` (the messenger) and
+ * one `new ActorMap(invoke)`; per-request workers are the map's dynamic
+ * children, created in `pending-call.ts`.
  */
 type DistributiveOmit<T, K extends keyof any> = T extends any
   ? Omit<T, K>
@@ -60,59 +61,24 @@ export interface MessengerOptions {
   clock?: Clock;
 }
 
-const { idle, awaiting, resolved, timedOut } = states(
-  'idle',
-  'awaiting',
-  'resolved',
-  'timedOut',
-);
-const resolvedFinal = resolved.final();
-const timedOutFinal = timedOut.final();
+const { ready } = states('ready');
 
-const arm = event('ARM')();
-const respond = event('RESPOND')<{ header: MessageHeader }>();
-const timedOutEvent = event('TIMED_OUT')();
-
-type PendingContext = {
+const invokeE = event('INVOKE')<{
+  requestId: string;
   requestType: string;
+  timeoutMs: number;
+  resolve: (header: MessageHeader) => void;
+  reject: (reason?: unknown) => void;
+}>();
+
+type Pending = {
   resolve: (header: MessageHeader) => void;
   reject: (reason?: unknown) => void;
 };
 
-function createPendingCall(
-  requestId: string,
-  timeoutMs: number,
-  clock: Clock,
-  context: PendingContext,
-) {
-  return new Actor({
-    inputs: [arm, respond],
-    internal: [timedOutEvent],
-    states: [idle, awaiting, resolvedFinal, timedOutFinal],
-    initial: idle,
-    clock,
-    context,
-    setup: (m) => {
-      m.on(idle, arm, () => ({ state: awaiting }));
-      m.effect(awaiting, ({ signal, clock, emit }) => {
-        clock.setTimeout(timeoutMs, () => emit(timedOutEvent.create()), {
-          signal,
-        });
-      });
-      m.on(awaiting, respond, (event, opts) => {
-        opts!.context.get().resolve(event.payload.header);
-        return { state: resolvedFinal };
-      });
-      m.on(awaiting, timedOutEvent, (_event, opts) => {
-        const s = opts!.context.get();
-        s.reject(
-          new Error(`invoke timeout for ${s.requestType} (${requestId})`),
-        );
-        return { state: timedOutFinal };
-      });
-    },
-  });
-}
+type MessengerContext = {
+  pending: Record<string, Pending>;
+};
 
 export function createProtocolMessenger(
   send: (
@@ -122,7 +88,61 @@ export function createProtocolMessenger(
   options: MessengerOptions = {},
 ): ProtocolMessenger {
   const clock = options.clock ?? new RealClock();
-  const pending = new ActorMap();
+
+  let pending: ActorMap;
+  const invoke = new Actor({
+    inputs: [invokeE, respondE],
+    internal: [resolvedE, rejectedE],
+    states: [ready],
+    initial: ready,
+    clock,
+    context: { pending: {} } as MessengerContext,
+    setup: (m) => {
+      m.on(ready, invokeE, (event, opts) => {
+        const { requestId, requestType, timeoutMs, resolve, reject } =
+          event.payload;
+        const s = opts.context.get();
+        opts.context.set({
+          ...s,
+          pending: { ...s.pending, [requestId]: { resolve, reject } },
+        });
+        pending.ensure(requestId, () =>
+          createPendingCall(requestId, requestType, timeoutMs, clock),
+        );
+        pending.send(requestId, armE.create());
+        return {};
+      });
+      m.on(ready, respondE, (event) => {
+        const requestId = event.payload.header.requestId;
+        if (!requestId) return {};
+        pending.send(requestId, respondE.create(event.payload));
+        return {};
+      });
+      m.on(ready, resolvedE, (event, opts) => {
+        const s = opts.context.get();
+        const call = s.pending[event.payload.requestId];
+        if (!call) return {};
+        const next = { ...s.pending };
+        delete next[event.payload.requestId];
+        opts.context.set({ ...s, pending: next });
+        pending.kill(event.payload.requestId);
+        call.resolve(event.payload.header);
+        return {};
+      });
+      m.on(ready, rejectedE, (event, opts) => {
+        const s = opts.context.get();
+        const call = s.pending[event.payload.requestId];
+        if (!call) return {};
+        const next = { ...s.pending };
+        delete next[event.payload.requestId];
+        opts.context.set({ ...s, pending: next });
+        pending.kill(event.payload.requestId);
+        call.reject(event.payload.error);
+        return {};
+      });
+    },
+  });
+  pending = new ActorMap(invoke);
 
   return {
     dispatch(request, payload) {
@@ -132,23 +152,23 @@ export function createProtocolMessenger(
     },
     invoke(request, payload, timeoutMs = 5000) {
       const requestWithId = withRequestId(request);
-      const { requestId } = requestWithId;
 
-      return new Promise<MessageHeader>((resolvePromise, rejectPromise) => {
-        const worker = createPendingCall(requestId, timeoutMs, clock, {
-          requestType: request.type,
-          resolve: resolvePromise,
-          reject: rejectPromise,
-        });
-        pending.spawn(requestId, () => worker);
-        worker.on('done', () => pending.kill(requestId));
-        pending.send(requestId, arm.create());
+      return new Promise<MessageHeader>((resolve, reject) => {
+        invoke.send(
+          invokeE.create({
+            requestId: requestWithId.requestId,
+            requestType: request.type,
+            timeoutMs,
+            resolve,
+            reject,
+          }),
+        );
         send(requestWithId, payload);
       });
     },
     handleIncoming(header) {
       if (!header.requestId) return;
-      pending.send(header.requestId, respond.create({ header }));
+      invoke.send(respondE.create({ header }));
     },
   };
 }
