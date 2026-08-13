@@ -113,15 +113,15 @@ worklet.terminate(); ipc.close()
 
 ## 4. Architecture — mirror the Kotlin host
 
-| Kotlin (`android/src/main/.../bare/android/`) | Swift equivalent                | Notes                                                                             |
-| --------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------- |
-| `BareProtocol.kt`                             | `BareProtocol.swift`            | envelope encode/decode + `buildErrorResponse`                                     |
-| `ErrorCodes.kt`                               | `ErrorCodes.swift`              | + parity XCTest                                                                   |
-| `HostIpcCoordinator.kt`                       | `HostIpcCoordinator.swift`      | read loop; handle host messages; **relay other envelopes as the original bytes**  |
-| `HostPluginRegistry.kt`                       | `HostPluginRegistry.swift`      | keyed handlers, `UNSUPPORTED_CAPABILITY` on miss, capability rows                 |
-| `DefaultHostPlugins.kt`                       | `DefaultHostPlugins.swift`      | register `core.permissions.permissions.requestStorage` stub → `{ granted: true }` |
-| `BarePortMessenger.kt`                        | `BareWebViewBridge.swift`       | **iOS-specific**, see §5                                                          |
-| `MainActivity.kt`                             | app entry (`AppDelegate`/scene) | Worklet lifecycle, bridge wiring, WKWebView hosting                               |
+| Kotlin (`android/src/main/.../bare/android/`) | Swift equivalent                | Notes                                                                            |
+| --------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------- |
+| `BareProtocol.kt`                             | `BareProtocol.swift`            | envelope encode/decode + `buildErrorResponse`                                    |
+| `ErrorCodes.kt`                               | `ErrorCodes.swift`              | + parity XCTest                                                                  |
+| `HostIpcCoordinator.kt`                       | `HostIpcCoordinator.swift`      | read loop; handle host messages; **relay other envelopes as the original bytes** |
+| `HostPluginRegistry.kt`                       | `HostPluginRegistry.swift`      | keyed handlers, `UNSUPPORTED_CAPABILITY` on miss, capability rows                |
+| `DefaultHostPlugins.kt`                       | `DefaultHostPlugins.swift`      | register `core.permissions.permissions.request` / `permissions.status` handlers  |
+| `BarePortMessenger.kt`                        | `BareWebViewBridge.swift`       | **iOS-specific**, see §5                                                         |
+| `MainActivity.kt`                             | app entry (`AppDelegate`/scene) | Worklet lifecycle, bridge wiring, WKWebView hosting                              |
 
 Key behavior to copy from `HostIpcCoordinator.kt`:
 

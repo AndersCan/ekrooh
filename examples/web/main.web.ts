@@ -224,12 +224,12 @@ async function runRoundtrip() {
 
 async function runStoragePermission() {
   const [err, r] = await bus.invoke(
-    permissionEvents.permissions.requestStorage(),
+    permissionEvents.permissions.request('storage'),
   );
   $lastResult.set(
     err
       ? `Storage permission failed: ${err.message}`
-      : `Storage permission: granted=${String(r?.granted)}`,
+      : `Storage permission: ${String(r?.permission)}=${String(r?.status)}`,
   );
 }
 

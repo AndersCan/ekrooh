@@ -3,8 +3,16 @@ package to.holepunch.bare.android
 import org.json.JSONObject
 
 fun registerDefaultHostPlugins(registry: HostPluginRegistry) {
-    registry.register("core.permissions", "permissions.requestStorage") { _, _, respond ->
-        // Stub: integrate with ActivityCompat.requestPermissions for production.
-        respond(HostPluginRegistry.HostInvokeOutcome.Ok(JSONObject().put("granted", true)))
+    fun grant(permission: String): HostPluginRegistry.HostInvokeOutcome =
+        HostPluginRegistry.HostInvokeOutcome.Ok(
+            JSONObject().put("permission", permission).put("status", "granted"),
+        )
+
+    // Storage and camera trivially grant on Android for the reference app.
+    registry.register("core.permissions", "permissions.request") { args, _, respond ->
+        respond(grant(args?.optString("permission") ?: "storage"))
+    }
+    registry.register("core.permissions", "permissions.status") { args, _, respond ->
+        respond(grant(args?.optString("permission") ?: "storage"))
     }
 }

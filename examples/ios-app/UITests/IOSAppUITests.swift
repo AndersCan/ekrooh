@@ -50,18 +50,17 @@ final class IOSAppUITests: XCTestCase {
 
     app.buttons["Storage permission"].tap()
     XCTAssertTrue(
-      waitForResult(app, containing: "Storage permission: granted=true"),
+      waitForResult(app, containing: "Storage permission: storage=granted"),
       "Storage permission did not complete"
     )
 
-    app.buttons["Pick image"].tap()
+    // Capture on the simulator is deterministic: no camera, so the handler
+    // answers "camera unavailable" without presenting a picker. The real
+    // picker/camera success paths are physical-device verification only (#6).
+    app.buttons["Capture image"].tap()
     XCTAssertTrue(
-      waitForResult(app, containing: "Media pick ok:"),
-      "Media pick did not complete"
-    )
-    XCTAssertTrue(
-      app.images.firstMatch.waitForExistence(timeout: 20),
-      "Picked image did not render (worklet HTTP server unreachable)"
+      waitForResult(app, containing: "Media capture failed: camera unavailable"),
+      "Camera-unavailable error did not appear"
     )
   }
 

@@ -26,7 +26,11 @@ describe('createDiscoveryPlugin', () => {
         row('core.permissions', []),
       ],
       queryHostCapabilities: async () => [
-        row('core.permissions', ['permissions.requestStorage'], ['android']),
+        row(
+          'core.permissions',
+          ['permissions.request', 'permissions.status'],
+          ['android'],
+        ),
       ],
     });
     const invoke = plugin.runtimes.bare?.invoke;
@@ -43,7 +47,8 @@ describe('createDiscoveryPlugin', () => {
       'health.roundtrip',
     ]);
     const permissions = byId.get('core.permissions');
-    expect(permissions?.events).toContain('permissions.requestStorage');
+    expect(permissions?.events).toContain('permissions.request');
+    expect(permissions?.events).toContain('permissions.status');
     expect(permissions?.runtimes).toEqual(['bare', 'android']);
   });
 

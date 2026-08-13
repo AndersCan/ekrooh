@@ -7,7 +7,7 @@ implementation (`plugin.ts`) and typed event builders (`events.ts`).
 | -------------- | ------------------ | ------------------------------------------------------- | --------------------------------- |
 | `health/`      | `core.health`      | `health.ping`, `health.payloadEcho`, `health.roundtrip` | `bare`                            |
 | `discovery/`   | `core.discovery`   | `discovery.list`                                        | `bare` (merges host capabilities) |
-| `permissions/` | `core.permissions` | `permissions.requestStorage`                            | host-delegated stub               |
+| `permissions/` | `core.permissions` | `permissions.request`, `permissions.status`             | host-delegated stub               |
 | `media/`       | `vendor.media`     | `media.pick`, `media.capture`                           | `bare` (host-delegated pick)      |
 
 `index.ts` exports `createDefaultPlugins(deps)` used by the worklet entry.

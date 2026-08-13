@@ -21,6 +21,6 @@ test('health plugin checks pass in mock runtime', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Storage permission' }).click();
   await expect(
-    page.getByText(/Storage permission: granted=true/),
+    page.getByText(/Storage permission: storage=granted/),
   ).toBeVisible();
 });
