@@ -1,0 +1,47 @@
+---
+title: Transports
+description: MessageTransport — WebSocket and mock.
+---
+
+A `MessageTransport` is the UI-facing boundary. It has `send(type, header,
+payload?)` and `subscribe(handler)`, and it does not know about worklets, Bare,
+or host IPC.
+
+```ts
+import { createWebSocketTransport } from '@ekrooh/bare/transports';
+
+const transport = createWebSocketTransport();
+
+transport.subscribe((message) => {
+  if (message.header.type === 'INVOKE_RESPONSE') {
+    console.log(message.header.pluginId, message.header.result);
+  }
+});
+
+transport.send('INVOKE_REQUEST', {
+  type: 'INVOKE_REQUEST',
+  pluginId: 'core.health',
+  event: 'health.ping',
+  requestId: 'req-1',
+});
+```
+
+## WebSocket transport
+
+- **Same-origin default**: on-device the page is served by the loopback server,
+  so it connects to `ws://<location.host>` — no mixed content, no custom scheme.
+- **Cookie bootstrap**: when the shell injected `window.__ekrooh = { token }`,
+  the transport exchanges the token for a `bare_session` cookie via `POST
+/login` before opening the socket.
+- **Reconnect**: exponential backoff (250ms → 2s), 5 tries, plus a `?token=`
+  upgrade-rejection fallback.
+- Browser dev is cross-origin — pass an explicit URL (`VITE_BARE_WS_URL`).
+
+The connection lifecycle is modeled as a mantaq `Actor` (see
+[State Machines](../core-concepts/state-machines)) — internal-only, never part
+of the public surface.
+
+## Mock transport
+
+`createMockTransport` is deterministic and in-process, used by unit and e2e
+tests. `VITE_TRANSPORT_MODE=mock` selects it at runtime.

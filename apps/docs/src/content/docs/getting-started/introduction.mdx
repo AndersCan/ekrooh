@@ -1,0 +1,66 @@
+---
+title: Introduction
+description: What @ekrooh/bare is, and what it isn't.
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+
+**One soul, many platforms.** `@ekrooh/bare` is a framework that provides the
+**boring bootstrap** for cross-platform apps on the [Bare runtime]
+(https://github.com/holepunchto/bare): a binary wire protocol, plugin kernel,
+RPC messenger, transports, and native host bridges — plus a reference app that
+demonstrates all of it.
+
+## The model
+
+The **frontend** (browser or WebView) is written as if there is only a
+**backend** reachable over a **WebSocket** (binary framed messages). It picks a
+transport automatically:
+
+- **WebSocket** everywhere on-device: the worklet runs **one loopback HTTP+WS
+  server** that serves the web app, the media files, and the protocol socket,
+  so the page connects to the same origin it was served from
+  (`ws://location.host`).
+- **Mock transport** when `VITE_TRANSPORT_MODE=mock` (tests).
+- Browser dev points the WebSocket at the dev backend explicitly
+  (`VITE_BARE_WS_URL`).
+
+The UI does **not** branch on worklets, Bare, or host IPC. Shared types and
+helpers (`@ekrooh/bare/core`) describe the **wire protocol** to the backend,
+not the runtime that implements it.
+
+## Glossary
+
+| Term         | Meaning                                                                     |
+| ------------ | --------------------------------------------------------------------------- |
+| **Frontend** | Web UI: Vite bundle in the browser; same bundle in the Android/iOS WebView. |
+| **Backend**  | Logic that runs the core bundle and speaks the framed message protocol.     |
+| **Host**     | Native shell (Android/iOS): starts the backend, owns system APIs.           |
+
+## Repository layout
+
+<FileTree>
+
+- core/ — wire protocol codec, plugin router, RPC messenger, host IPC, the
+  unified loopback server, Bare worklet entry
+- plugins/ — canonical plugins (`core.health`, `core.discovery`,
+  `core.permissions`, `vendor.media`) and typed event builders
+- web/transports/ — `MessageTransport` plus WebSocket and mock transports
+- android/ — Android host **library** (`:bare-host`)
+- ios/ — iOS host **Swift package** (`BareHost`)
+- examples/ — reference app: web/, android-app/, ios-app/
+
+</FileTree>
+
+The framework's public surface is the `exports` map of the root
+`package.json` (`@ekrooh/bare/core`, `/runtime`, `/plugins`,
+`/plugins/*/events`, `/transports`). The package ships **compiled ESM
+JavaScript + type declarations** (`dist/`) — consumers never see TypeScript
+source.
+
+## What this is not
+
+- Not a UI framework.
+- Not a bundler or build system — it plugs into your existing Vite app.
+- Not a mobile runtime — it runs on the Bare runtime, which you embed via the
+  native hosts.

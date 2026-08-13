@@ -1,0 +1,40 @@
+---
+title: Loopback Server & Auth
+description: One HTTP+WS server serves the app, media, and protocol socket.
+---
+
+One loopback HTTP+WS server (`core/server/static-file-server.ts`) serves the
+web app at `/`, the media files mounted by plugins, and the framed-protocol
+WebSocket socket. On device it binds `127.0.0.1` on an ephemeral port, and
+every request is gated by a per-session token:
+
+1. The shell injects `window.__ekrooh = { token }` (plus `window.BareShell` as
+   a presence marker) before the page loads.
+2. The page exchanges it for a `bare_session` cookie via `POST /login`
+   (`HttpOnly; SameSite=Lax; Path=/`).
+3. The cookie then authorizes `<img>`/`<video>`/`fetch` and the WebSocket
+   upgrade. `X-Bare-Token`/`?token=` remain as a fallback for non-browser
+   clients.
+4. The worklet writes `{ origin, port, token }` to `handoff.json` in the
+   sandbox dir the host passed; the host reads it, injects the token, and
+   loads `http://127.0.0.1:<port>/index.html`.
+
+The dev backend runs the same bundle with auth off on a fixed port
+(`ws://localhost:8080`), so browser dev needs no token.
+
+## Security notes
+
+- `Referrer-Policy: no-referrer` on all responses.
+- WS upgrade origin check, single-client policy, idle timeout.
+- Media mounts are per-session URLs — the mount id is unguessable.
+
+```ts
+import { createLoopbackServer } from '@ekrooh/bare/runtime';
+
+const server = await createLoopbackServer();
+server.mount('/media/photo-1', '/path/to/photo.jpg');
+const url = await server.url('/media/photo-1');
+```
+
+> `createLoopbackServer` resolves through the `@ekrooh/bare/runtime` export;
+> see the [runtime reference](../reference/runtime) for the exact surface.

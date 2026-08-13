@@ -1,0 +1,31 @@
+---
+title: '@ekrooh/bare/transports'
+description: WebSocket and mock MessageTransports.
+---
+
+The transports subpath exports the UI-facing transport surface.
+
+## Exports
+
+- `MessageTransport` (type) — `send(type, header, payload?)` + `subscribe(handler)`.
+- `createWebSocketTransport(urlOrOptions?)` — same-origin default, cookie
+  bootstrap, reconnect with backoff, `?token=` fallback.
+- `createMockTransport(handlers?)` — deterministic, in-process responses for
+  tests.
+
+## Options
+
+`createWebSocketTransport` accepts a URL string or options:
+
+- `url?` — default `ws://<location.host>`; browser dev passes
+  `VITE_BARE_WS_URL` explicitly.
+- `login?` — default `true`: bootstrap the `bare_session` cookie via
+  `POST /login` when `window.__ekrooh.token` is present.
+- `maxRetries?` — default 5.
+- `backoffMs?` — default 250, doubling to a 2s cap.
+
+```ts
+import { createWebSocketTransport } from '@ekrooh/bare/transports';
+
+const transport = createWebSocketTransport();
+```

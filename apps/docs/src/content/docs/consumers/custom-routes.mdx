@@ -1,0 +1,43 @@
+---
+title: Custom HTTP Routes
+description: Mounting bytes on the loopback server — and the route-registration gap.
+---
+
+The `LoopbackServer` surface is `mount` / `mountDir` / `unmount` plus the
+hardcoded `POST /login`. There is **no arbitrary route-registration API** yet
+(a dev-only upload endpoint, a status page, etc.). Two supported ways to get
+bytes served:
+
+## mount — one exact path
+
+```ts
+runtime.server.mount('/photos/1.jpg', '/absolute/path/to/photo.jpg');
+const url = await runtime.server.url('/photos/1.jpg');
+```
+
+## mountDir — a whole directory, with SPA fallback
+
+```ts
+runtime.server.mountDir('/photos', '/absolute/path/to/photos');
+```
+
+Serves every file below the prefix, longest-prefix match, with an SPA fallback
+to `index.html` for unknown GET paths. This is how the web app itself is
+mounted (`mountDir('/', webAssets)`).
+
+## Bytes from the browser → worklet
+
+There is no custom route for the reverse direction (browser → worklet HTTP
+POST). The wire protocol's `DISPATCH`/`INVOKE` envelopes are the supported
+channel for browser→backend bytes. If you need chunked uploads outside the
+frame cap, the reference approach is a **watched inbox folder**: the web layer
+writes a file through a plugin event, the worklet polls/mounts it, and the
+gallery reads it from the loopback server — see the media plugin pattern
+(`plugins/media/plugin.ts`).
+
+## The gap
+
+A `registerRoute(method, path, handler)` API on `LoopbackServer` would let a
+consumer add e.g. a dev-only upload route without the wire protocol. It is
+tracked as a framework seam; until it lands, `mount`/`mountDir` + the watched
+inbox pattern cover the cases the reference app needs.

@@ -1,0 +1,31 @@
+---
+title: Desktop
+description: Desktop is contract-only — no adapter ships yet.
+---
+
+The support matrix lists Desktop as **contract** — meaning the plugin
+contracts and wire protocol are runtime-agnostic, but **no desktop host
+adapter ships** with the framework.
+
+## What exists
+
+- A consumer can run the **worklet backend** on desktop: the Bare runtime is
+  cross-platform (`bare` npm package + prebuilds), and `createWorkletRuntime`
+  runs identically under the CLI. Dev mode (`npm run dev`) already demonstrates
+  a desktop-capable loopback server + web UI in the browser.
+- The **frontend** is just a Vite page — it runs in any desktop webview or
+  browser.
+
+## What's missing
+
+- A desktop **host**: an app shell that starts the worklet, injects the token,
+  and loads the loopback page — the desktop analog of the Android/iOS hosts.
+- Native capability adapters (pickers, permissions) as desktop plugins.
+
+## Intent
+
+Per `vision.md`, desktop is out of scope for the framework; desktop hosts are
+expected to be **consumer/third-party work** following the same plugin
+contracts. If you need desktop for Justus, the pragmatic path is a thin host
+that reuses the loopback server + cookie auth from `core/runtime.ts` — the
+exact surface a `createWorkletRuntime` consumer already has.

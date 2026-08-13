@@ -1,0 +1,68 @@
+---
+title: Worklet Entry
+description: Build your own worklet entry — the consumer replacement for core/main.core.ts.
+---
+
+The only worklet entry in the framework repo is `core/main.core.ts`. It exists
+to keep the bundle a single import of `createWorkletRuntime`. As a consumer you
+write your own — typically a thin file plus a p2p wiring module.
+
+## Anatomy of an entry
+
+```ts
+import {
+  createWorkletRuntime,
+  resolveWorkletConfig,
+  type WorkletRuntime,
+} from '@ekrooh/bare/runtime';
+
+export function createAppRuntime(): WorkletRuntime {
+  const runtime = createWorkletRuntime(resolveWorkletConfig());
+
+  // 1. Register your plugins (optional — defaults are already registered).
+  // runtime.pluginRegistry.register(myPlugin);
+
+  // 2. Wire your own modules that need the loopback server, storage, or the
+  //    protocol socket. See "Backend → Web Push" for the socket.
+  return runtime;
+}
+```
+
+## What `createWorkletRuntime` gives you
+
+`WorkletRuntime` exposes:
+
+- `server` — the loopback HTTP+WS server (`mount`, `mountDir`, `onConnection`,
+  `credentials`, ...).
+- `pluginRegistry` / `pluginRouter` — the plugin surface; register your own
+  manifests and route envelopes through them.
+- `hostBridge` — the host IPC bridge (null in dev, where there is no host).
+- `config` — `{ webAssets, storage, cache, deviceMode }`.
+- `start()` / `close()` — bind, mount the web app, attach the protocol socket,
+  write the handoff file, and (on `close`) shut down.
+
+## Device vs dev mode
+
+`deviceMode` is derived from `options.storage !== undefined`:
+
+|                | Device                               | Dev (`bare` CLI)        |
+| -------------- | ------------------------------------ | ----------------------- |
+| Config source  | `resolveWorkletConfig()` (Bare.argv) | `{}` (no storage → dev) |
+| Port           | ephemeral (`0`)                      | fixed `8080`            |
+| Auth           | on (cookie/token)                    | off (no token)          |
+| `handoff.json` | written to `storage`                 | not written             |
+
+See [Dev Mode & Storage](./dev-mode-storage) for running a stateful consumer
+backend under the CLI.
+
+## Bundling
+
+Bundle with esbuild, externalizing packages, node platform, ESM output:
+
+```bash
+esbuild worklet/index.ts --bundle --packages=external \
+  --platform=node --format=esm --outfile=worklet/app.core.js
+```
+
+The host runs this bundle inside Bare. `core/main.core.ts` is the reference;
+your entry is "just register plugins + wire p2p + start".

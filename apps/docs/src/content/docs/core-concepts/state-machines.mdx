@@ -1,0 +1,44 @@
+---
+title: State Machines
+description: mantaq actors model connection lifecycles and protocol flows.
+---
+
+Complex lifecycle state (WebSocket connection, RPC request tracking) is
+modeled with [mantaq](https://github.com/AndersCan/mantaq) `Actor`s — not ad
+hoc boolean flags. The framework keeps these machines **internal-only**: they
+never leak into the public `@ekrooh/bare` surface.
+
+## Connection machine
+
+`web/connection-machine.ts` owns the WebSocket lifecycle:
+
+```
+idle → opening → connected
+           ↘ backoff ⇄ opening → gaveUp (final)
+```
+
+- `LOGIN_OK` / `LOGIN_FAIL` drive the token→cookie bootstrap.
+- `SOCKET_OPEN` / `SOCKET_CLOSE` track socket state.
+- `RETRY_TIMER` schedules exponential backoff, capped by `maxRetries`.
+
+The transport shell drives socket I/O against the machine and reacts to state
+changes; `gaveUp` fails the queued messages with a deterministic transport
+error. The machine uses an injected `Clock`, so tests run on a `VirtualClock`
+without real timers.
+
+## Why actors
+
+- Every state's **effects** run on ENTRY, auto-cancelled by the abort signal on
+  transition — timeouts and timers can't leak.
+- Terminal states emit outputs (`RESOLVED`/`REJECTED`) that a parent routes —
+  no dangling promises.
+- Deterministic, testable, and readable in one glance.
+
+```ts
+import { Actor, RealClock, state, event } from '@mantaq/core';
+
+const idle = state('idle')();
+const open = state('open')();
+const openEvent = event('OPEN')();
+// ...wire transitions with .on(openEvent, { target: open })
+```

@@ -1,0 +1,48 @@
+---
+title: Wire Protocol
+description: The binary frame format shared by every runtime.
+---
+
+Every message over the socket is a binary frame:
+
+- `version` (1 byte)
+- `type` (1 byte)
+- `headerLen` (2 bytes, big-endian)
+- `header` (UTF-8 JSON)
+- `payload` (optional)
+
+`MessageProtocol` in `core/messages` implements encode/decode with validation:
+headers are capped at `MAX_HEADER_BYTES` (0xffff) and frames at
+`MAX_FRAME_BYTES` (16 MiB). `VERSION` is pinned at `1` by the contract test —
+changing it is a **major-version event**.
+
+## Message types
+
+- `DISPATCH` — fire-and-forget.
+- `INVOKE_REQUEST` — request/response; echoes `requestId`.
+- `INVOKE_RESPONSE` — the reply to an `INVOKE_REQUEST`, carrying the same
+  `requestId` plus a result or a deterministic `ErrorCode`.
+
+## Minimal example
+
+```ts
+import {
+  MessageProtocol,
+  MessageType,
+  type MessageHeader,
+} from '@ekrooh/bare/core';
+
+const protocol = new MessageProtocol();
+
+const header: MessageHeader = {
+  type: 'DISPATCH',
+  pluginId: 'core.health',
+  event: 'health.ping',
+};
+
+const frame = protocol.encode(MessageType.ENVELOPE, header);
+const message = protocol.decode(frame);
+```
+
+The codec pools buffers, so callers slice a standalone copy before handing a
+frame to the socket.

@@ -1,0 +1,40 @@
+---
+title: iOS
+description: The iOS host Swift package — BareHost.
+---
+
+The iOS host is a Swift package (`BareHost`, source in `ios/`, SPM), mirroring
+the Kotlin host. It ships as **source on the release tag** — no separate
+CocoaPods/XCFramework artifact yet (distribution is revisited once a real
+consumer appears).
+
+## Public surface
+
+- `BareProtocol` — Swift mirror of the binary wire protocol.
+- `HostIpcCoordinator` — IPC frames; delegates host plugins.
+- `HostPluginRegistry` — plugin ID → handler map.
+- `BareHostLogger` — unified logger (`subsystem: "to.holepunch.bare.ios"`).
+
+## Dependencies
+
+- `bare-kit-swift` (pinned revision) for the `Worklet`/`IPC` bindings.
+- `BareKit.xcframework` (from the prebuilds) embedded by the consuming app —
+  the SPM package provides typed wrappers and the `.linkedFramework("BareKit")`
+  instruction.
+- P2P addons (udx-native, rocksdb-native, sodium-native, + hypercore's
+  native deps) linked via `bare-link` and verified on the simulator.
+
+## Reference app
+
+`examples/ios-app` runs the same web assets; the reference host wires a real
+picker/camera (`PHPickerViewController` + `UIImagePickerController`) and real
+permissions (`AVCaptureDevice.requestAccess`).
+
+```bash
+npm run prebuilds   # prebuilds/ios/BareKit.xcframework
+npm run build:ios   # addons/, Resources/, ios-app.xcodeproj
+npm run test:ios    # XCTest + UI test on the simulator
+```
+
+Tests: `Tests/BareHostTests/` (XCTest mirroring the JUnit suite) + a UI test
+against the reference app.

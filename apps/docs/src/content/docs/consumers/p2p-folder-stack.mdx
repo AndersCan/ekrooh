@@ -1,0 +1,57 @@
+---
+title: P2P Folder Stack
+description: Hyperdrive on one Corestore per app, synced over Hyperswarm.
+---
+
+The p2p stack is **already decided** — see `research/p2p-folder-stack.md` in
+the framework repo for the full analysis. Summary:
+
+- **Hyperdrive on one Corestore per app.** A folder _is_ a hyperdrive:
+  `drive.key` is the share key, `drive.discoveryKey` is the Hyperswarm topic,
+  and the single-worklet-per-app model maps 1:1 onto "one Corestore per
+  application".
+- **Incremental sync.** Hyperdrive splits blobs into 64 KB blocks; sparse
+  replication pulls only requested ranges (`drive.createReadStream(start,
+end)`); `drive.watch` / `drive.diff` for incremental metadata;
+  `mirror-drive` for whole-folder diffing.
+- **v1 is single-writer.** The folder's **creator** owns the writer keypair
+  and the write keys; invited members are readers who also seed. "Everyone can
+  add" later uses the documented group pattern: each member has their own drive
+  and the creator mounts it into the folder drive (`my-group/userA/docs`).
+- **Storage layout.** One Corestore dir per app — metadata bee core + content
+  blobs core, all in RocksDB-backed storage.
+
+## Wiring it into a worklet entry
+
+```ts
+import {
+  createWorkletRuntime,
+  resolveWorkletConfig,
+} from '@ekrooh/bare/runtime';
+import Corestore from 'corestore';
+import Hyperdrive from 'hyperdrive';
+import Hyperswarm from 'hyperswarm';
+
+const runtime = createWorkletRuntime(resolveWorkletConfig());
+const { storage } = runtime.config;
+
+if (storage) {
+  const store = new Corestore(storage);
+  const drive = new Hyperdrive(store); // creator: keys from drive.key
+  const swarm = new Hyperswarm();
+  swarm.join(drive.discoveryKey);
+  swarm.on('connection', (conn) => store.replicate(conn));
+}
+```
+
+## Known gaps (from the research doc)
+
+- **RocksDB weight** on mobile; **Android backgrounding** (the worklet pauses
+  when the app does); **iOS sockets** for Hyperswarm. These are flagged in
+  `research/p2p-folder-stack.md` — no duplicate findings here.
+
+## Verify the stack on a target
+
+The framework repo ships `core/p2p-verify.core.ts` — a worklet that boots and
+exercises Corestore, Hyperdrive, and Hyperswarm (run on the iOS simulator via
+`P2PVerifyTest`, or locally via `npm run smoke:p2p`).

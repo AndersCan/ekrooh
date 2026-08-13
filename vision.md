@@ -62,8 +62,8 @@ top of this framework.
   - bare-kit prebuilds → **GitHub Release artifacts** (the pattern upstream
     `bare-kit` already uses), fetched by a documented script run by CI and on
     consumer setup. Prebuilds are never committed to this repository.
-- The npm name `@ekrooh/bare` is approved but **not yet registered**. The first
-  publish claims it; until then treat it as reserved in all docs and scripts.
+- The npm name `@ekrooh/bare` is **registered and published** (`0.1.0` on
+  npm); treat it as claimed in all docs and scripts.
 - Release process is documented in `RELEASING.md` and executable by an AI agent
   with no human intervention beyond the tag decision.
 

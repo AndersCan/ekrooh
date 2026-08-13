@@ -1,0 +1,46 @@
+---
+title: Plugin Kernel
+description: Namespaced plugins, events, and host delegation.
+---
+
+Core does not ship product features (camera, permissions, BLE, etc.). Teams
+add **plugins** with namespaced events and per-runtime handlers.
+
+## Conventions
+
+- Plugin IDs are `vendor.plugin`; events are plugin-local (`health.ping`).
+- `DISPATCH` is fire-and-forget; `INVOKE_REQUEST`/`INVOKE_RESPONSE` are
+  request/response and timeout-bound, echoing `requestId`.
+- Runtime adapters: `web`, `android`, `ios`, `bare`.
+- Canonical plugins: `core.health`, `core.discovery`, `core.permissions`, and
+  `vendor.media` (the reference for out-of-band binary transfer).
+
+## Typed authoring
+
+`EventSpec` + `definePlugin` drive the manifest, the handler table, and the
+typed `events.ts` builders from **one spec per event** — no drift between the
+wire contract and the client-side helpers.
+
+```ts
+import { definePlugin } from '@ekrooh/bare/core';
+
+const manifest = definePlugin('core.health', healthSpecs, {
+  capabilities: ['health'],
+  invoke: {
+    ping: async () => ok({ pong: true }),
+  },
+});
+```
+
+## Routing
+
+`createPluginRouter` dispatches envelopes to registered handlers;
+`createPluginBus` binds a router to a messenger. Deterministic `ErrorCode`s
+report unsupported or failed behavior — plugins never surface raw platform
+exceptions across the wire.
+
+## Host delegation
+
+A plugin may delegate to the host via `HOST_INVOKE_REQUEST`: the worklet asks
+the native shell to run a handler (pick a file, request a permission) and the
+host answers with the same `pluginId`/`event` the frontend invoked.

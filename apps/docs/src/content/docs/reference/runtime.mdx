@@ -1,0 +1,38 @@
+---
+title: '@ekrooh/bare/runtime'
+description: Worklet runtime factory, loopback server, and IPC helpers.
+---
+
+The runtime subpath is the **worklet-side** surface: the factory that boots the
+backend, the unified loopback server, and IPC helpers.
+
+## Exports
+
+- `createWorkletRuntime(options)` — creates one worklet runtime: a
+  per-instance, stateless factory that wires the loopback server, cookie auth,
+  plugin registry, and host IPC bridge.
+- `resolveWorkletConfig()` — reads the host-provided worklet configuration
+  from `Bare.argv`; a missing config means dev mode (auth off, fixed port, no
+  handoff file).
+- `createLoopbackServer(...)` / `LoopbackServer` — the unified HTTP+WS server
+  (web app at `/`, media mounts, protocol socket).
+- `attachWebSocketProtocol(server, ...)` — wires the framed WS protocol onto
+  the server.
+- `getIPC()` — access the worklet's IPC stream to the host.
+
+## Types
+
+- `WorkletRuntimeOptions`, `WorkletRuntimeConfig`, `WorkletRuntime`.
+
+```ts
+import { createWorkletRuntime } from '@ekrooh/bare/runtime';
+
+const runtime = await createWorkletRuntime(resolveWorkletConfig());
+// runtime owns the loopback server, plugins, and the protocol socket.
+```
+
+## Bare worklet entry
+
+`core/main.core.ts` is the canonical entry — it exists to keep the bundle a
+single import of `createWorkletRuntime`. `core/main.core.gen.js` (built with
+esbuild) is the file the host runs.

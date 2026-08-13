@@ -1,0 +1,68 @@
+---
+title: Android AAR Setup
+description: Consume io.ekrooh:bare-host from GitHub Packages Maven.
+---
+
+The Android host publishes as a **self-contained AAR** to GitHub Packages:
+`io.ekrooh:bare-host`. "Self-contained" means the Bare Kit runtime jar ships in
+the AAR's `libs/` and its native libs in `jni/` — consumers need **no
+prebuilds download and no `bare-link` addons** for the core runtime.
+
+## settings.gradle
+
+```gradle
+dependencyResolutionManagement {
+  repositories {
+    google()
+    mavenCentral()
+    maven {
+      name = "GitHubPackages"
+      url = uri("https://maven.pkg.github.com/AndersCan/ekrooh")
+      credentials {
+        username = project.findProperty("gpr.user") ?: System.getenv("GITHUB_ACTOR")
+        password = project.findProperty("gpr.key") ?: System.getenv("GITHUB_TOKEN")
+      }
+    }
+  }
+}
+```
+
+## Credentials
+
+GitHub Packages requires authentication even for public packages:
+
+- Locally, add to `~/.gradle/gradle.properties`:
+  `gpr.user=<your-github-username>` and `gpr.key=<a PAT with read:packages>`.
+- In CI, `GITHUB_ACTOR` + `GITHUB_TOKEN` are automatic.
+
+## Version
+
+```gradle
+dependencies {
+  implementation "io.ekrooh:bare-host:0.1.0"
+}
+```
+
+The version is the same single `vX.Y.Z` as the npm package — bump both
+together. Check [GitHub Packages](https://github.com/AndersCan/ekrooh/packages)
+for published versions.
+
+## What you get
+
+The host library surfaces:
+
+- `BareProtocol` — Kotlin mirror of the wire protocol.
+- `HostIpcCoordinator` — frames to/from the worklet.
+- `HostPluginRegistry` — host-side plugin handlers.
+- `BareWebViewClient` — WebView wiring.
+
+Your `MainActivity` starts the worklet, waits for the handoff file, injects
+`window.__ekrooh = { token }`, and loads the loopback page — see
+[Host Handoff Flow](./host-handoff) for the sequence, and the framework's
+`examples/android-app` for a working shell.
+
+## Related framework repo commands
+
+If you are developing the host itself (not consuming it): `npm run prebuilds`
+then `./gradlew :examples:android-app:assembleDebug`; host JUnit tests via
+`./gradlew build`.

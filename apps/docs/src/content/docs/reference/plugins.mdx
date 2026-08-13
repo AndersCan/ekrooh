@@ -1,0 +1,52 @@
+---
+title: '@ekrooh/bare/plugins'
+description: Canonical plugin factories and typed event builders.
+---
+
+The plugins subpath exports the canonical plugin factories; the
+`/plugins/*/events` subpaths export the typed event builders for the
+frontend.
+
+## Factories
+
+- `createDefaultPlugins(deps)` — wires `core.health`, `core.discovery`,
+  `core.permissions`, and `vendor.media` with the runtime's loopback server and
+  host IPC bridge.
+- Types: `DefaultPluginsDeps`, `DiscoveryPluginDeps`, `MediaPluginDeps`.
+
+## Canonical plugins
+
+| Plugin             | Events                                       | Purpose                               |
+| ------------------ | -------------------------------------------- | ------------------------------------- |
+| `core.health`      | `health.ping`                                | liveness for the web layer            |
+| `core.discovery`   | `discovery.summary`                          | runtime/capability discovery          |
+| `core.permissions` | `permissions.request` / `permissions.status` | storage/camera permission abstraction |
+| `vendor.media`     | `media.pick` / `media.capture`               | out-of-band binary (photos/video)     |
+
+## Typed event builders
+
+Each plugin's `events.ts` exports the same structure:
+
+- `*Specs` — the `EventSpec`s that drive `definePlugin`.
+- `*Events` — typed builders for `dispatch`/`invoke` calls, so the frontend
+  never hand-builds headers:
+
+```ts
+import { healthEvents } from '@ekrooh/bare/plugins/health/events';
+import { mediaEvents } from '@ekrooh/bare/plugins/media/events';
+import { permissionEvents } from '@ekrooh/bare/plugins/permissions/events';
+import { discoveryEvents } from '@ekrooh/bare/plugins/discovery/events';
+```
+
+```ts
+const res = await transport.invoke(mediaEvents.pick({ kind: 'image' }));
+const summary = await transport.invoke(discoveryEvents.summary());
+const granted = await transport.invoke(permissionEvents.request('camera'));
+```
+
+## Result types
+
+- `MediaResult` — `{ url, path }`.
+- `PermissionResult` — `{ permission, status }` with
+  `granted | denied | notDetermined | unsupported`.
+- `DiscoveryListResult` — runtime/capability summary.

@@ -1,0 +1,35 @@
+---
+title: '@ekrooh/bare/core'
+description: Wire protocol, plugin kernel, RPC messenger, types.
+---
+
+The core subpath (`core/messages`) is the wire protocol surface: codec, plugin
+kernel, RPC messenger, host IPC types, and typed plugin authoring.
+
+## Constants
+
+- `VERSION` — wire protocol version, pinned at `1` (contract-tested).
+- `MessageType` — `ENVELOPE` (+ the value union `MessageTypeValue`).
+- `ErrorCode` — deterministic error codes (+ the value union `ErrorCode`).
+- `MAX_HEADER_BYTES` — `0xffff`.
+- `MAX_FRAME_BYTES` — `16 * 1024 * 1024`.
+
+## Classes & factories
+
+- `MessageProtocol` — `encode(type, header, payload?)` / `decode(bytes)`.
+- `createPluginRegistry()`, `createPluginRouter(options)`,
+  `createPluginBus(messenger)`.
+- `definePlugin(id, specs, manifest)` — typed plugin authoring.
+- `ok(result)` / `err(code, message)` — result envelope helpers.
+
+## Types
+
+- `MessageHeader`, `WireMessage`, header unions (`DISPATCH`,
+  `INVOKE_REQUEST`, `INVOKE_RESPONSE`, `HOST_CAPABILITIES_*`,
+  `HOST_INVOKE_REQUEST`).
+- `PluginManifest`, `PluginInvokeRequestHeader`,
+  `PluginInvokeResponseHeader`, `CoreErrorWire`.
+- `BareRuntimeContext`, `createBareRuntimeContext()`.
+
+The exact export names are frozen by `contract.test.ts` — treat any change as a
+breaking change.

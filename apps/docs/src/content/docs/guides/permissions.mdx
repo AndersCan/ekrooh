@@ -1,0 +1,29 @@
+---
+title: Permissions
+description: Request and query permissions through a plugin, not platform APIs.
+---
+
+Feature code calls plugin events instead of raw platform APIs. The canonical
+`core.permissions` plugin exposes two invokes:
+
+- `permissions.request(permission)` → `{ permission, status }`
+- `permissions.status(permission)` → `{ permission, status }`
+
+where `permission` is `'storage' | 'camera'` and `status` is
+`granted | denied | notDetermined | unsupported`.
+
+```ts
+import { permissionEvents } from '@ekrooh/bare/plugins/permissions/events';
+
+const { status } = await transport.invoke(permissionEvents.request('camera'));
+if (status === 'granted') {
+  await transport.invoke(mediaEvents.capture({ kind: 'image' }));
+}
+```
+
+## Why a plugin
+
+- The web runtime can answer `unsupported` deterministically.
+- The native hosts answer with real system permissions
+  (e.g. `AVCaptureDevice.requestAccess` on iOS).
+- Shared UI code never branches on the runtime — it reads the plugin result.

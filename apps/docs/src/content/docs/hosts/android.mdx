@@ -1,0 +1,38 @@
+---
+title: Android
+description: The Android host library — :bare-host.
+---
+
+The Android host is a library module (`:bare-host`) published as a
+**self-contained AAR** (`io.ekrooh:bare-host` on GitHub Packages): the Bare Kit
+runtime jar ships in the AAR's `libs/` and its native libs in `jni/`, so
+consumers need no separate prebuilds download.
+
+## Public surface
+
+- `BareProtocol` — Kotlin mirror of the binary wire protocol.
+- `HostIpcCoordinator` — frames in/out of the worklet's IPC.
+- `HostPluginRegistry` — maps host plugin IDs to handlers.
+- `BareWebViewClient` — WebView wiring; logs resource errors.
+
+## Reference app
+
+`examples/android-app` is the shell that embeds the backend and WebView:
+
+- The shell starts the worklet with the web assets dir, reads `handoff.json`,
+  injects `window.__ekrooh = { token }` (plus `window.BareShell`), and loads
+  `http://127.0.0.1:<port>/index.html`.
+- A real native photo picker/camera feeds `vendor.media`.
+
+## Consuming
+
+```gradle
+implementation "io.ekrooh:bare-host:<version>"
+```
+
+```bash
+npm run prebuilds      # fetch Bare Kit prebuilds (prebuilds/)
+./gradlew :examples:android-app:assembleDebug
+```
+
+Tests: JUnit in `src/test/` (`./gradlew :bare-host:testDebugUnitTest`).

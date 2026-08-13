@@ -1,0 +1,99 @@
+---
+title: End-to-End Quickstart
+description: From npm package + AAR to a running app on @ekrooh/bare.
+---
+
+This guide is the consumer path: you have the npm package and the Android AAR,
+and you want an app running. The framework repo's own docs describe its
+internal structure; this is the "make it mine" path.
+
+## What you end up with
+
+```
+your-app/
+├── web/            # Vite app (frontend) — imports @ekrooh/bare/transports
+├── worklet/        # Bare worklet entry — imports @ekrooh/bare/runtime
+└── android/        # Android app — consumes io.ekrooh:bare-host
+```
+
+The frontend is a normal Vite page. The backend is a Bare worklet that runs
+your entry. The host (Android shell) starts the worklet, injects the token,
+and loads the loopback-served page.
+
+## 1. Install the package
+
+```bash
+npm install @ekrooh/bare
+```
+
+The package ships compiled ESM + types through its `exports` map. No build
+step, no TypeScript source.
+
+## 2. Write a worklet entry
+
+Your entry is "register plugins + wire p2p + start". It can be one file:
+
+```ts
+import {
+  createWorkletRuntime,
+  resolveWorkletConfig,
+} from '@ekrooh/bare/runtime';
+
+const runtime = createWorkletRuntime(resolveWorkletConfig());
+
+// Register your own plugins (see "Authoring a Plugin").
+// runtime.pluginRegistry.register(myPlugin);
+
+const { origin, port, token } = await runtime.start();
+```
+
+`resolveWorkletConfig()` reads the host-provided config from `Bare.argv`
+(`[webAssets, storage, cache]`). Under the bare CLI it returns `{}` → dev mode.
+
+Bundle it for the Bare runtime:
+
+```bash
+esbuild worklet/index.ts --bundle --packages=external \
+  --platform=node --format=esm --outfile=worklet/app.core.js
+```
+
+## 3. Point the frontend at the protocol socket
+
+```ts
+import { createWebSocketTransport } from '@ekrooh/bare/transports';
+
+const transport = createWebSocketTransport();
+```
+
+On device the page is served by the loopback server, so the WebSocket defaults
+to the page's own origin (`ws://<location.host>`) and the injected
+`window.__ekrooh = { token }` boots the `bare_session` cookie automatically.
+In browser dev, pass the backend URL explicitly:
+
+```ts
+const transport = createWebSocketTransport({ url: 'ws://localhost:8080' });
+```
+
+## 4. Talk to plugins
+
+```ts
+import { healthEvents } from '@ekrooh/bare/plugins/health/events';
+
+const result = await transport.invoke(healthEvents.ping());
+```
+
+## 5. Native side
+
+- Android: see [Android AAR Setup](./android-aar) + [Host Handoff](./host-handoff).
+- iOS: see [iOS Embedding](./ios-embedding).
+- Everything in between: [P2P Folder Stack](./p2p-folder-stack) for storage +
+  sync, [Backend → Web Push](./backend-push) for server-initiated events.
+
+## Where things live in the framework repo
+
+| Piece                     | Source                                                 |
+| ------------------------- | ------------------------------------------------------ |
+| Runtime + loopback server | `core/runtime.ts`, `core/server/static-file-server.ts` |
+| Protocol + plugin kernel  | `core/messages/`                                       |
+| Reference worklet entry   | `core/main.core.ts`                                    |
+| Reference web app         | `examples/web/`                                        |

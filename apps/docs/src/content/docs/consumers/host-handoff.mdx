@@ -1,0 +1,50 @@
+---
+title: Host Handoff Flow
+description: How a consumer MainActivity boots the worklet and loads the page.
+---
+
+The loopback/cookie/handoff sequence is what a consumer host shell implements.
+Both reference shells (`examples/android-app` and `examples/ios-app`) do it;
+here is the exact flow.
+
+## Sequence
+
+1. The host starts the worklet with three sandbox dirs:
+   `[<webAssets>, <storage>, <cache>]`. `webAssets` is your built web app;
+   `storage` is durable (photos, p2p corestore); `cache` is ephemeral.
+2. The worklet binds `127.0.0.1` on an **ephemeral** port and writes
+   `handoff.json` (`{ origin, port, token }`) into `storage`.
+3. The host polls for `handoff.json`, then injects the token into the page
+   **before** any page script runs:
+
+   ```js
+   window.__ekrooh = { token: '<token>' };
+   window.BareShell = true;
+   ```
+
+4. The host loads `http://127.0.0.1:<port>/index.html`.
+5. The page's WebSocket transport reads `window.__ekrooh.token`, calls
+   `POST /login`, gets the `bare_session` cookie, and connects to
+   `ws://127.0.0.1:<port>` — same origin, so cookie-authenticated.
+6. Media URLs returned by plugins are same-origin too — `<img>`/`fetch` ride
+   the cookie, no token in the URL.
+
+## Android (reference)
+
+`examples/android-app/src/main/java/to/holepunch/bare/android/MainActivity.kt`
+shows the full wiring. Key bits: start the worklet with the asset dir, wait
+for the handoff file, `loadUrl("http://127.0.0.1:<port>/index.html")` after
+injecting the token via `evaluateJavascript`.
+
+## iOS (reference)
+
+`examples/ios-app/app/BareRuntime.swift` does the same with a `WKUserScript`
+injected at `.atDocumentStart`.
+
+## Security notes
+
+- `handoff.json` must be written to the **host-provided** sandbox dir, never a
+  shared location.
+- The token is per-session and random; `HttpOnly; SameSite=Lax` cookie for the
+  browser; `X-Bare-Token`/`?token=` fallbacks for non-browser clients.
+- All loopback responses send `Referrer-Policy: no-referrer`.

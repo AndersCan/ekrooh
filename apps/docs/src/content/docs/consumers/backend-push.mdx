@@ -1,0 +1,59 @@
+---
+title: Backend → Web Push
+description: Server-initiated events to the web layer (photos.changed, sync status).
+---
+
+The wire protocol routes **web → backend** requests and writes replies. For
+live updates (a `photos.changed` event, sync progress), the worklet needs a
+**server-initiated dispatch** path to the connected web layer.
+
+## The seam today
+
+`LoopbackServer.onConnection(handler)` is the documented surface for
+authenticated, handshaken protocol sockets. It gives you the raw `WebSocketLike`
+socket (`on('data')`, `write(frame)`). To push, capture the socket(s) in
+`onConnection` and write a framed `DISPATCH` envelope from anywhere in your
+worklet:
+
+```ts
+import { MessageType, MessageProtocol } from '@ekrooh/bare/core';
+
+// In your worklet entry, after createWorkletRuntime:
+const sockets: WebSocketLike[] = [];
+
+runtime.server.onConnection((socket) => {
+  sockets.push(socket);
+  socket.on('close', () => {
+    const i = sockets.indexOf(socket);
+    if (i !== -1) sockets.splice(i, 1);
+  });
+});
+
+function push(
+  protocol: MessageProtocol,
+  pluginId: string,
+  event: string,
+  args: unknown,
+) {
+  const header = { type: 'DISPATCH', pluginId, event, args } as const;
+  for (const socket of sockets) {
+    socket.write(protocol.encode(MessageType.ENVELOPE, header, null));
+  }
+}
+```
+
+The web layer receives it as any other envelope through `transport.subscribe`
+— no transport change needed.
+
+## The envelope helper
+
+There is **no exported envelope helper** for server dispatch yet (the
+`createPluginBus`/connection machine treat server-initiated dispatch as
+nothing). The pattern above — keep the `MessageProtocol` instance, hand-write
+the `DISPATCH` header, write the encoded frame — is the supported seam. Live
+galleries and sync indicators can be built on it today.
+
+> Known limitation: this is a broadcast to all connected sockets; there is no
+> per-client addressing or "dispatch to specific instance" helper yet. The
+> multi-instance harness (dev) keeps one socket per tab, so broadcast is per
+> runtime instance — acceptable for the reference use cases.

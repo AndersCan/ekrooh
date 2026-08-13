@@ -1,0 +1,52 @@
+---
+title: iOS Embedding
+description: Embed the BareHost SPM source + prebuilds + web assets in a consumer app.
+---
+
+The iOS host ships as **source** — no CocoaPods/XCFramework artifact yet.
+`ios/` in the framework repo is an SPM package (`BareHost`) published on every
+release tag. Consumers embed it plus the Bare Kit prebuilds and their own web
+assets.
+
+## What you need
+
+1. The `BareHost` SPM package source (from the framework repo, at the version
+   you depend on).
+2. `BareKit.xcframework` (from the prebuilds; the SPM package provides the
+   typed `Worklet`/`IPC` wrappers and the `.linkedFramework("BareKit")` link
+   instruction, but the binary itself must be embedded by the app).
+3. The linked addons (udx-native, rocksdb-native, sodium-native, and
+   hypercore's native deps) for p2p work — the reference app links them via
+   `bare-link` and verifies them on the simulator (`P2PVerifyTest`).
+
+## project.yml (xcodegen)
+
+```yaml
+packages:
+  BareHost:
+    path: ./path/to/ios
+targets:
+  MyApp:
+    dependencies:
+      - package: BareHost
+```
+
+## Build inputs
+
+From the framework repo's release tag you generate the app inputs:
+
+```bash
+npm run prebuilds   # prebuilds/ios/BareKit.xcframework
+npm run build:ios   # addons/, Resources/, web assets, ios-app.xcodeproj
+```
+
+The reference `examples/ios-app` shows the full consumer shell: it runs the
+same web assets, injects `window.__ekrooh = { token }` via a `WKUserScript`,
+and loads `http://127.0.0.1:<port>/index.html` from the worklet's
+`handoff.json`.
+
+## Parity status
+
+The iOS host has first-class reference parity with Android — protocol, cookie
+auth, permissions, and a real picker/camera. Distribution as a binary artifact
+is revisited when a consumer needs it; until then, source + SPM is the path.

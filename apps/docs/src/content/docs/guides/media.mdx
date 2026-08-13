@@ -1,0 +1,45 @@
+---
+title: Media (Out-of-Band Bytes)
+description: Photos and video never cross the wire protocol.
+---
+
+Images/videos never cross the wire protocol (the frame cap is 16 MiB).
+`vendor.media` demonstrates the intended pattern:
+
+1. The host picks/captures a file natively and returns its path.
+2. The worklet mounts it on the loopback server and returns a URL.
+3. The web layer loads the URL directly — same-origin, cookie-authenticated.
+
+One serving implementation for every runtime.
+
+## Web side
+
+```ts
+import { mediaEvents } from '@ekrooh/bare/plugins/media/events';
+
+const { url } = await transport.invoke(mediaEvents.pick({ kind: 'image' }));
+img.src = url;
+```
+
+## Plugin side
+
+`createMediaPlugin` delegates the pick/capture to the host via
+`HOST_INVOKE_REQUEST`, then mounts the returned path:
+
+```ts
+const id = `image-${Date.now().toString(36)}`;
+deps.staticServer.mount(`/media/${id}`, path);
+const url = await deps.staticServer.url(`/media/${id}`);
+return ok({ url, path });
+```
+
+## Host side
+
+The Android reference host wires a real native picker/camera; the iOS host
+uses `PHPickerViewController` + `UIImagePickerController`. The host returns
+`{ path }` — bytes stay in the sandbox, served by the worklet.
+
+## Events
+
+`media.pick` and `media.capture`, each taking `{ kind?: 'image' | 'video' }`
+and returning `{ url, path }`.

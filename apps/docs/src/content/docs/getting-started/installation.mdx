@@ -1,0 +1,38 @@
+---
+title: Installation
+description: Install @ekrooh/bare and its native hosts.
+---
+
+`@ekrooh/bare` is published to npm. Install it from the root of your
+frontend package:
+
+```bash
+npm install @ekrooh/bare
+```
+
+The package ships **compiled ESM JavaScript + type declarations** (`dist/`) via
+the `exports` map — no build step on your side, no TypeScript source shipped.
+
+## Subpath exports
+
+| Import path                     | Contents                                            |
+| ------------------------------- | --------------------------------------------------- |
+| `@ekrooh/bare/core`             | Wire protocol, plugin kernel, RPC messenger, types  |
+| `@ekrooh/bare/runtime`          | Worklet runtime factory + loopback server wiring    |
+| `@ekrooh/bare/plugins`          | Canonical plugin factories (`createDefaultPlugins`) |
+| `@ekrooh/bare/plugins/*/events` | Typed event builders per plugin                     |
+| `@ekrooh/bare/transports`       | WebSocket + mock `MessageTransport`s                |
+
+## Native hosts
+
+- **Android**: `io.ekrooh:bare-host` on GitHub Packages (self-contained AAR —
+  the Bare Kit runtime ships inside it).
+- **iOS**: the host ships as **source** (`ios/`, Swift package `BareHost`) on
+  the same release tag; consumers embed `BareKit.xcframework` from the
+  prebuilds.
+
+## Versioning
+
+One semver `vX.Y.Z` covers the whole framework — JS package, Android AAR, and
+every artifact. Breaking the wire protocol, plugin contracts, JS exports, or
+the Kotlin host API is a **major-version event**.

@@ -1,0 +1,32 @@
+---
+title: Testing
+description: Unit, type, integration, and native end-to-end tests.
+---
+
+- **Unit** — vitest (`vp test`) for the protocol codec, plugin router, RPC
+  messenger, and transports; JUnit for the Kotlin host; XCTest for the Swift
+  host.
+- **Type check** — `tsc --noEmit` (part of `vp check`).
+- **Integration** — Playwright e2e against the mock transport exercising the
+  real binary protocol (`npm run test:e2e:web`).
+- **Multi-instance harness** — a dev harness hosting N worklet instances behind
+  a management server, asserting per-instance isolation + lifecycle
+  (`npm run test:e2e:harness`).
+- **Native end-to-end** — `npm run test:ios` runs the Swift host's XCTest suite
+  plus a UI test on the iOS simulator (discovery summary, Ping / Payload Echo /
+  Roundtrip / Storage permission).
+
+## Contract test
+
+`contract.test.ts` freezes the exact exported names of each `@ekrooh/bare`
+subpath, so an accidental break of a stability boundary fails CI as a test, not
+a review note.
+
+## Gates
+
+```bash
+npm run build:pkg   # compile dist/ — prerequisite
+vp check            # format + lint + type-check
+vp test             # unit tests
+npm run test:e2e:web
+```

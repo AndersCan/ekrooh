@@ -1,0 +1,47 @@
+---
+title: Dev Mode & Storage
+description: Run a stateful consumer backend under the bare CLI.
+---
+
+Under the `bare` CLI, `resolveWorkletConfig()` returns `{}`: no storage dir, so
+`deviceMode` is off, auth is off, and the port is fixed at `8080`. For a
+**stateful** consumer app (photos persisted across restarts) you need to
+hand-roll the config:
+
+```ts
+import { createWorkletRuntime } from '@ekrooh/bare/runtime';
+
+const runtime = createWorkletRuntime({
+  storage: './.justus-store', // durable app-sandbox dir
+  cache: './.justus-cache', // ephemeral
+  auth: false, // dev backend has no token
+  port: 8080,
+});
+```
+
+What you get and what to watch for:
+
+- `deviceMode` is derived from `options.storage !== undefined` — passing
+  `storage` flips you into device mode. `auth: false` keeps the dev backend
+  open; `port: 8080` pins it like dev mode.
+- With `storage` set, `start()` **also writes `handoff.json`** into it
+  (device-mode behavior) — harmless under the CLI, but a host polling that dir
+  in the same tree could react to it. Keep dev stores outside any host sandbox
+  dirs.
+- Plugins are **hardcoded to the default set** by `createWorkletRuntime`; add
+  your own by mutating `pluginRegistry` after creation:
+
+```ts
+runtime.pluginRegistry.register(myPlugin);
+```
+
+This is the documented extension point — there is no
+`plugins`-array option yet.
+
+## Persisted dev data
+
+Anything your backend writes under `storage` (hyperdrive cores, photo
+metadata) survives restarts because you passed a real directory. `cache` is
+for spool/temp. The same dirs map 1:1 to the `[webAssets, storage, cache]`
+Bare.argv triple the host passes on device — so dev and device stay
+config-identical.

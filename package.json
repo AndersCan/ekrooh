@@ -10,7 +10,8 @@
   },
   "workspaces": [
     "examples/*",
-    "e2e"
+    "e2e",
+    "apps/*"
   ],
   "exports": {
     ".": "./dist/index.mjs",
@@ -30,6 +31,10 @@
   "scripts": {
     "check": "vp check",
     "lint": "vp fmt . --fix",
+    "docs:dev": "vp run docs#dev",
+    "docs:build": "vp run docs#build",
+    "docs:preview": "vp run docs#preview",
+    "docs:check": "node scripts/docs-check.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vp test && npm run test:e2e:web && npm run test:e2e:harness",
     "test:unit": "vp test",

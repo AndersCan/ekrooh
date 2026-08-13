@@ -1,0 +1,95 @@
+---
+title: Authoring a Plugin
+description: Write your own plugin with EventSpec + definePlugin.
+---
+
+Product features are consumer plugins — the framework does not ship camera,
+photos, BLE, or sync logic. A plugin is a `PluginManifest`: a namespaced ID, a
+list of events, optional handlers, and capabilities. One `EventSpec` per event
+drives the manifest, the handler table, and the typed builders, so the wire
+contract and client-side helpers can never drift apart.
+
+## 1. Define the event spec (shared)
+
+An `EventSpec` carries the event identity and phantom `args`/`result` types:
+
+```ts
+import { EventSpec, invokeEvent } from '@ekrooh/bare/core';
+
+export type CaptureResult = {
+  url: string;
+  path: string;
+};
+
+export const photoSpecs = {
+  capture: {
+    pluginId: 'app.photos',
+    name: 'photos.capture',
+    args: {} as Record<string, never>,
+    result: {} as CaptureResult,
+  },
+} as const satisfies Record<string, EventSpec<any, any>>;
+
+export const photoEvents = {
+  capture() {
+    return invokeEvent(photoSpecs.capture, {});
+  },
+};
+```
+
+The spec's `pluginId` must match the manifest id — `definePlugin` throws
+otherwise.
+
+## 2. Implement the plugin
+
+```ts
+import { definePlugin, err, ErrorCode, ok } from '@ekrooh/bare/core';
+
+export const photosPlugin = definePlugin('app.photos', photoSpecs, {
+  capabilities: ['photos'],
+  invoke: {
+    async capture() {
+      const path = await someHostDelegate(); // or local logic
+      if (!path) return err(ErrorCode.HOST_ERROR, 'no capture');
+      return ok({ url, path });
+    },
+  },
+});
+```
+
+- **`invoke`** handlers return `Either<CoreError, TResult>` (use `ok`/`err`).
+- **`dispatch`** handlers are fire-and-forget.
+- A plugin with no local handlers (e.g. a host-delegated permission plugin)
+  passes neither — it declares events only and the host answers them.
+
+## 3. Register it
+
+In your worklet entry:
+
+```ts
+runtime.pluginRegistry.register(photosPlugin);
+```
+
+## 4. Call it from the web layer
+
+```ts
+import { photoEvents } from './shared/photo-events';
+
+const { url } = await transport.invoke(photoEvents.capture());
+```
+
+## Host-delegated plugins
+
+For capabilities the host owns (camera, permissions), the worklet plugin
+forwards via `HOST_INVOKE_REQUEST` and returns the host's answer — see
+`plugins/media/plugin.ts` and `plugins/permissions/plugin.ts` in the framework
+repo for the reference pattern.
+
+## Conventions
+
+- Plugin IDs are `vendor.plugin` (e.g. `app.photos`); events are plugin-local
+  (`photos.capture`).
+- Errors use the deterministic `ErrorCode` set — never raw platform exceptions
+  across the wire.
+- The exact exported names of every `@ekrooh/bare/*` subpath are frozen by
+  the contract test; new plugins are additive, so they don't break it.
