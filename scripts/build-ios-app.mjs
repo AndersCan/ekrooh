@@ -58,6 +58,23 @@ run('node_modules/.bin/bare-pack', [
   'core/main.core.gen.js',
 ]);
 
+console.log('Building + packing the p2p verify worklet (ticket #24)...');
+run('node_modules/.bin/esbuild', [
+  'core/p2p-verify.core.ts',
+  '--bundle',
+  '--packages=external',
+  '--platform=node',
+  '--format=esm',
+  '--outfile=core/p2p-verify.core.gen.js',
+]);
+run('node_modules/.bin/bare-pack', [
+  '--preset',
+  'ios',
+  '--out',
+  'examples/ios-app/Resources/p2p-verify.bundle',
+  'core/p2p-verify.core.gen.js',
+]);
+
 console.log('Building web assets...');
 run('npm', ['run', 'build:web']);
 

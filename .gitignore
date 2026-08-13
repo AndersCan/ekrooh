@@ -24,6 +24,10 @@ android/prebuilds/
 .harness-instances/
 core/harness.core.gen.js
 
+# p2p verify worklet bundle (ticket #24; built by build:ios)
+core/p2p-verify.core.gen.js
+.p2p-smoke/
+
 # Swift package build artifacts
 ios/.build/
 ios/.swiftpm/

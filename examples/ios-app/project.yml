@@ -19,6 +19,8 @@ targets:
       - path: app
       - path: Resources/main.core.bundle
         buildPhase: resources
+      - path: Resources/p2p-verify.bundle
+        buildPhase: resources
       - path: Resources/WebAssets
         type: folder
         buildPhase: resources
@@ -53,6 +55,23 @@ targets:
         embed: true
       - framework: addons/bare-url.2.5.1.xcframework
         embed: true
+      # p2p addons (ticket #24): rocksdb (corestore), sodium (hypercore),
+      # udx (hyperswarm DHT), plus hypercore's bitfield/hash/chunking and the
+      # random-access fs layer. Emitted by the same bare-link step.
+      - framework: addons/rocksdb-native.3.17.4.xcframework
+        embed: true
+      - framework: addons/sodium-native.5.1.0.xcframework
+        embed: true
+      - framework: addons/udx-native.1.21.0.xcframework
+        embed: true
+      - framework: addons/fs-native-extensions.1.5.0.xcframework
+        embed: true
+      - framework: addons/quickbit-native.2.4.8.xcframework
+        embed: true
+      - framework: addons/rabin-native.2.0.0.xcframework
+        embed: true
+      - framework: addons/simdle-native.1.3.9.xcframework
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: to.holepunch.bare.ios
@@ -67,6 +86,7 @@ targets:
     dependencies:
       - target: ios-app
       - package: BareHost
+      - package: BareKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: to.holepunch.bare.ios.tests
