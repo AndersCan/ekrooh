@@ -34,7 +34,9 @@ async function listInstances(): Promise<string[]> {
 async function openTab(browser: Browser, instance: Instance): Promise<Page> {
   const page = await browser.newPage();
   await page.addInitScript((token) => {
-    (window as unknown as { __lessBareToken?: string }).__lessBareToken = token;
+    (window as unknown as { __ekrooh: { token?: string } }).__ekrooh = {
+      token,
+    };
   }, instance.token);
   await page.goto(instance.origin);
   return page;

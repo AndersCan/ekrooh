@@ -6,7 +6,7 @@ cut a release by following this document with no human beyond the tag decision.
 
 ## Rules
 
-- One version across JS (`@less/bare`), the Android AAR, and every artifact.
+- One version across JS (`@ekrooh/bare`), the Android AAR, and every artifact.
 - Breaking changes (wire protocol, plugin contracts, JS exports, Kotlin host
   API — see `vision.md`) require a **major** bump.
 - Releases are created from `main`. Everything merged to `main` must already
@@ -71,7 +71,7 @@ cut a release by following this document with no human beyond the tag decision.
    entry). A release workflow (`release.yml`) publishes all artifacts on the
    tag:
 
-   - **npm** (`@less/bare`): `npm publish --access public` from the repo root
+   - **npm** (`@ekrooh/bare`): `npm publish --access public` from the repo root
      (`release.yml` does this with the `NPM_TOKEN` secret). Prerelease versions
      (e.g. `0.1.0-beta.1`) publish under a dist-tag derived from the
      prerelease identifier (`beta`), stable versions under `latest`. The first
@@ -80,7 +80,7 @@ cut a release by following this document with no human beyond the tag decision.
      (`vp pack`), so publishing always builds. Consumers never receive
      TypeScript source.
    - **Android AAR**: `:bare-host:publishMavenAarPublicationToGitHubPackagesRepository`
-     publishes `io.less:bare-host` to GitHub Packages (`release.yml` does this
+     publishes `io.ekrooh:bare-host` to GitHub Packages (`release.yml` does this
      with the automatic `GITHUB_TOKEN`). The AAR is self-contained: the Bare Kit
      runtime jar ships in the AAR's `libs/` and its native libs in `jni/`, so
      consumers need no prebuilds download.
@@ -91,7 +91,7 @@ cut a release by following this document with no human beyond the tag decision.
      published until distribution is decided (see `vision.md`). Consumers
      embed `BareKit.xcframework` from `prebuilds/ios/`.
 
-The `@less/bare` exports map is frozen at first publish (beta): `core`,
+The `@ekrooh/bare` exports map is frozen at first publish (beta): `core`,
 `runtime`, `plugins`, `plugins/*/events`, and `transports` (WebSocket + mock
 only — the pre-1.0 bootstrap bridges were removed in Phase 2). Every entry
 points at the compiled `dist/` output (`build:pkg`), never TypeScript source.

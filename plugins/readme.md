@@ -37,10 +37,10 @@ Authoring rules (also in `core/messages/readme.md`):
   over the same spec. No hand-written if-chains.
 - Use `dispatch` for side effects, `invoke` for request/response.
 - Build results with the shared `ok()` / `err()` helpers and canonical
-  `ErrorCode` values from `@less/bare/core`.
+  `ErrorCode` values from `@ekrooh/bare/core`.
 - The router synthesizes `UNSUPPORTED_EVENT` for events not declared in the
   manifest and wraps adapter throws as `PLUGIN_ERROR` — don't hand-roll those.
 - Event builders live in `events.ts` and are part of the public JS surface
-  (`@less/bare/plugins/*/events`).
+  (`@ekrooh/bare/plugins/*/events`).
 
 This is **not** where product features live — consumers add their own plugins.

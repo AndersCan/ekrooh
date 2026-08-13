@@ -1,6 +1,10 @@
-# @less/bare
+# @ekrooh/bare
 
-[![CI](https://github.com/AndersCan/less-bare-android/actions/workflows/test.yml/badge.svg)](https://github.com/AndersCan/less-bare-android/actions/workflows/test.yml)
+**One soul, many platforms.** A single codebase and identity that lives
+across every platform at once — the same app, state, and soul on Android, iOS,
+web, and desktop.
+
+[![CI](https://github.com/AndersCan/ekrooh/actions/workflows/test.yml/badge.svg)](https://github.com/AndersCan/ekrooh/actions/workflows/test.yml)
 
 The **boring bootstrap** for cross-platform apps on the Bare runtime
 (holepunch): a binary wire protocol, plugin kernel, RPC messenger, transports,
@@ -24,7 +28,7 @@ transport automatically:
   (`VITE_BARE_WS_URL`).
 
 The UI does **not** branch on worklets, Bare, or host IPC. Shared types and
-helpers (`@less/bare/core`) describe the **wire protocol** to the backend, not
+helpers (`@ekrooh/bare/core`) describe the **wire protocol** to the backend, not
 the runtime that implements it.
 
 ## Glossary
@@ -57,7 +61,7 @@ the runtime that implements it.
 - `prebuilds/` — Bare Kit prebuilds (build output, gitignored).
 
 The framework's public surface is the `exports` map of the root `package.json`
-(`@less/bare/core`, `/runtime`, `/plugins`, `/plugins/*/events`, `/transports`).
+(`@ekrooh/bare/core`, `/runtime`, `/plugins`, `/plugins/*/events`, `/transports`).
 The package ships **compiled ESM JavaScript + type declarations** (`dist/`,
 built with `vp pack`) — consumers never see TypeScript source.
 
@@ -129,8 +133,8 @@ web app at `/`, the media files mounted by plugins, and the framed-protocol
 WebSocket socket. On device it binds `127.0.0.1` on an ephemeral port and every
 request is gated by a per-session token:
 
-- The shell injects `window.__lessBareToken` (plus `window.BareShell` as a
-  presence marker) before the page loads.
+- The shell injects `window.__ekrooh = { token }` (plus `window.BareShell` as
+  a presence marker) before the page loads.
 - The page exchanges it for a `bare_session` cookie via `POST /login`
   (`HttpOnly; SameSite=Lax; Path=/`).
 - The cookie then authorizes `<img>`/`<video>`/`fetch` and the WebSocket

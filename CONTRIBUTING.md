@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to **`@less/bare`**. This document is for humans and
+Thanks for contributing to **`@ekrooh/bare`**. This document is for humans and
 agents alike. If you are an agent, `AGENTS.md` is your operating manual and
 `vision.md` defines what this project is and is not — read both first.
 

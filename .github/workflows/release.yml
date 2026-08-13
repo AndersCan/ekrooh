@@ -45,7 +45,7 @@ jobs:
       - name: Run all gates (JS + Gradle, includes host JUnit)
         run: ./gradlew build
 
-      - name: Publish @less/bare to npm
+      - name: Publish @ekrooh/bare to npm
         # npm refuses prerelease versions without an explicit dist-tag: derive
         # it from the version (beta/alpha/rc → that identifier, stable → latest).
         run: |

@@ -1,11 +1,11 @@
 {
-  "name": "@less/bare-example-web",
+  "name": "@ekrooh/bare-example-web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Reference web UI for @less/bare (Vite + lit-html + nanostores + Tailwind).",
+  "description": "Reference web UI for @ekrooh/bare (Vite + lit-html + nanostores + Tailwind).",
   "dependencies": {
-    "@less/bare": "file:../..",
+    "@ekrooh/bare": "file:../..",
     "@nanostores/router": "^1.0.0",
     "lit-html": "^3.3.2",
     "nanostores": "^1.2.0",

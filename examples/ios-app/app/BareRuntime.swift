@@ -95,7 +95,7 @@ final class BareRuntime {
       }
       webView.configuration.userContentController.addUserScript(
         WKUserScript(
-          source: "window.__lessBareToken='\(token)';window.BareShell=true;",
+          source: "window.__ekrooh={token:'\(token)'};window.BareShell=true;",
           injectionTime: .atDocumentStart,
           forMainFrameOnly: true
         )

@@ -1,6 +1,6 @@
 # ios/ — host library (`BareHost`)
 
-The iOS host for `@less/bare`, mirroring the Kotlin host
+The iOS host for `@ekrooh/bare`, mirroring the Kotlin host
 (`android/.../to/holepunch/bare/android`). Distributed as a Swift package
 depending on `bare-kit-swift`; the runtime binary (`BareKit.xcframework`) is
 embedded by the consuming app.

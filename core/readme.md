@@ -9,7 +9,7 @@ The Bare worklet side of the framework.
 | `lib/`         | `get-ipc.ts` — resolves the active IPC channel (BareKit / Sidecar).                                                                                       |
 | `main.core.ts` | Worklet entry: wires plugins, host bridge, IPC, and the dev server. Bundled by `npm run build:core` into `core/main.core.gen.js` (build output).          |
 
-Stability note: `messages/` is exported as `@less/bare/core` and is part of the
+Stability note: `messages/` is exported as `@ekrooh/bare/core` and is part of the
 public API contract (see `vision.md`). The rest is implementation.
 
 Tests: co-located `*.test.ts` (run via `vp test`).

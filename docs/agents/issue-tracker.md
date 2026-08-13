@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues on `AndersCan/less-bare-android`. Use the `gh` CLI for all operations.
+Issues and specs for this repo live as GitHub issues on `AndersCan/ekrooh`. Use the `gh` CLI for all operations.
 
 ## Conventions
 

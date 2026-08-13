@@ -123,7 +123,7 @@ class MainActivity : AppCompatActivity() {
                     val token = json.getString("token")
                     WebViewCompat.addDocumentStartJavaScript(
                         webView,
-                        "window.__lessBareToken='$token';window.BareShell=true;",
+                        "window.__ekrooh={token:'$token'};window.BareShell=true;",
                         // allowedOriginRules cannot wildcard the port; the
                         // handoff already knows the exact ephemeral port.
                         setOf("http://127.0.0.1:$port"),

@@ -260,12 +260,12 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		8C8A7C7E1078544F500C3B49 /* less-bare-android */ = {
+		8C8A7C7E1078544F500C3B49 /* ekrooh */ = {
 			isa = PBXGroup;
 			children = (
 				3166738E3FB6874A3FF8087C /* ios */,
 			);
-			name = "less-bare-android";
+			name = "ekrooh";
 			path = ../..;
 			sourceTree = "<group>";
 		};
@@ -307,7 +307,7 @@
 			isa = PBXGroup;
 			children = (
 				918AD4D0A9922747EAD8CF95 /* app */,
-				8C8A7C7E1078544F500C3B49 /* less-bare-android */,
+				8C8A7C7E1078544F500C3B49 /* ekrooh */,
 				F9A6D78FE1A44E617DB6AB3D /* Packages */,
 				DB76B8BFB04ACA79099923CC /* Resources */,
 				5C5877DB842C650D1BDFA7D8 /* UITests */,

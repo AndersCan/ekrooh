@@ -1,19 +1,19 @@
 # Changelog
 
-All notable changes to `@less/bare` are documented in this file.
+All notable changes to `@ekrooh/bare` are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.1.0-beta.1] - 2026-08-12
 
-First tagged release of the `@less/bare` framework: the boring bootstrap for
+First tagged release of the `@ekrooh/bare` framework: the boring bootstrap for
 cross-platform apps on the Bare runtime. (An earlier `0.0.1` changelog draft
 was never tagged — this entry absorbs it.)
 
 ### Added
 
-- **Binary wire protocol** (`@less/bare/core`): framed envelopes
+- **Binary wire protocol** (`@ekrooh/bare/core`): framed envelopes
   (`version`, `type`, `headerLen`, JSON header, raw payload) with a canonical
   `MessageProtocol` codec, frame-size validation, and forward-compatible
   headers.
@@ -25,15 +25,15 @@ was never tagged — this entry absorbs it.)
   web app at `/` (SPA fallback), mounted media, and the framed-protocol
   WebSocket socket; byte-range (206) streaming, WS origin check, single-client
   policy, idle timeout.
-- **Cookie auth**: `POST /login` exchanges the injected `window.__lessBareToken`
+- **Cookie auth**: `POST /login` exchanges the injected `window.__ekrooh.token`
   for an `HttpOnly; SameSite=Lax` `bare_session` cookie; `X-Bare-Token`/`?token=`
   remain as fallbacks for non-browser clients.
 - **Port/token handoff**: the worklet writes `handoff.json` into the host
   sandbox dir; hosts read it and load `http://127.0.0.1:<port>/index.html`.
-- **Transports** (`@less/bare/transports`): WebSocket (same-origin default,
+- **Transports** (`@ekrooh/bare/transports`): WebSocket (same-origin default,
   cookie bootstrap, reconnect with backoff, token fallback on rejected
   upgrade) and a deterministic mock.
-- **Android host** (`io.less:bare-host` on GitHub Packages): `BareProtocol`,
+- **Android host** (`io.ekrooh:bare-host` on GitHub Packages): `BareProtocol`,
   `HostIpcCoordinator`, `HostPluginRegistry`; the Bare Kit runtime is packaged
   inside the self-contained AAR.
 - **iOS host**: Swift package `BareHost` (SPM, ships as source) — IPC
@@ -63,7 +63,7 @@ was never tagged — this entry absorbs it.)
 
 ### Changed
 
-- **npm ships compiled JS**: `@less/bare` publishes `dist/` (compiled ESM +
+- **npm ships compiled JS**: `@ekrooh/bare` publishes `dist/` (compiled ESM +
   type declarations via `vp pack`) — consumers never receive TypeScript source.
 - **Permissions plugin contract**: `permissions.requestStorage` is replaced by
   `permissions.request(permission)` / `permissions.status(permission)`,

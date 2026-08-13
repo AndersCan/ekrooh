@@ -6,7 +6,7 @@ import { createWorkletRuntime, resolveWorkletConfig } from './runtime';
  * "<cache>"]`), landing at `Bare.argv[0..2]`; the Bare CLI (dev) passes the
  * binary and script path instead, which resolves to dev mode (auth off, fixed
  * port, no handoff file). Consumers building their own worklet entry use
- * `createWorkletRuntime` from `@less/bare/runtime` — this file exists to keep
+ * `createWorkletRuntime` from `@ekrooh/bare/runtime` — this file exists to keep
  * the framework's own reference running.
  */
 const runtime = createWorkletRuntime(resolveWorkletConfig());

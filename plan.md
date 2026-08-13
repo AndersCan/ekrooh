@@ -1,6 +1,6 @@
 # Execution Plan — Loopback transport unification & auth
 
-Status of the `@less/bare` host/transport work. Each phase has concrete tasks,
+Status of the `@ekrooh/bare` host/transport work. Each phase has concrete tasks,
 file paths, and gates. Run the gates from the repo root; the gate for any
 change is `vp check` + `vp test` (+ `./gradlew build`, `npm run test:ios`).
 
@@ -28,7 +28,7 @@ Delivered and verified (see commit history / previous milestones):
 - **Loopback security**: per-session 32-byte token on the media server
   (`?token=` or `X-Bare-Token` header; 401 otherwise), `Referrer-Policy:
 no-referrer` on all responses; optional WS gate (`BARE_WS_TOKEN`);
-  `window.__lessBareToken` transport seam (`web/websocket-client.ts`).
+  `window.__ekrooh.token` transport seam (`web/websocket-client.ts`).
 - **BareWebViewClient** logs resource errors.
 
 Gates green: `vp check` 0 errors, `vp test` 79, e2e 8, `./gradlew build`,
@@ -52,7 +52,7 @@ One server, one origin, one auth mechanism.
 - The page connects to `ws://<location.host>` (same-origin → no mixed content,
   no ATS/cleartext carve-outs beyond local networking, no custom scheme).
 - **Cookie auth** (replaces the URL token — see design note at bottom):
-  - Native shell injects `window.__lessBareToken` (already the seam) +
+  - Native shell injects `window.__ekrooh = { token }` (already the seam) +
     a shell marker.
   - Page calls `fetch('/login', { method: 'POST', body: token })`.
   - Server validates and sets `Set-Cookie: bare_session=<nonce>; HttpOnly;
@@ -100,7 +100,7 @@ SameSite=Lax; Path=/`.
        `android/.../BarePortMessenger.kt`, `ios/.../BareWebViewBridge.swift`,
        `examples/ios-app/app/BareAssetSchemeHandler.swift`, `BareShellMarker`.
        Trim `examples/web/transport.ts` to mock → WS.
-7. [x] Hosts: register the `/login`/cookie flow; inject `__lessBareToken` +
+7. [x] Hosts: register the `/login`/cookie flow; inject `__ekrooh.token` +
        shell marker. iOS `BareRuntime`, Android `MainActivity`.
 8. [x] Server hardening: origin check on WS upgrade, single-client policy,
        idle timeout.
@@ -127,9 +127,9 @@ build:ios && npm run test:ios`; decide whether the release workflow
        `release.yml` stays npm + AAR. The macOS CI job keeps the host green.
 2. [x] **Streaming**: replace whole-file reads in the static server with
        `bare-fs.createReadStream` + `pipe` (range support) for large video.
-3. [x] **Surface freeze**: confirm the `@less/bare` exports map (add/remove
+3. [x] **Surface freeze**: confirm the `@ekrooh/bare` exports map (add/remove
        the WKWebView/bridge transports per Phase 2) before the first publish.
-       — `@less/bare/transports` now exports WebSocket + mock only; the map is
+       — `@ekrooh/bare/transports` now exports WebSocket + mock only; the map is
        frozen at first publish (see `RELEASING.md`).
 4. [x] **`vendor.media` placement**: ratify whether it stays a default plugin
        (discovery shows 4) or moves to an example-only worklet entry (keeps the
@@ -147,7 +147,7 @@ build:ios && npm run test:ios`; decide whether the release workflow
 - **Never** change the wire protocol, plugin contracts, JS `exports` map
   contracts, or the Kotlin host API without the human (major-version events).
   Phase 2 deletes _internal_ transports/bridges — allowed pre-1.0, but the
-  `@less/bare/transports` export shape must be ratified before publish.
+  `@ekrooh/bare/transports` export shape must be ratified before publish.
 - Never commit build output (`prebuilds/`, `*.gen.js`, bundled web assets,
   `examples/ios-app/addons/`, `examples/ios-app/Resources/`).
 - Cookie design note: cookies are per-origin + SameSite-gated, so they only

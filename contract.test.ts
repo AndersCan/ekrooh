@@ -175,7 +175,7 @@ describe('export-surface integrity', () => {
 
 describe('public API snapshot', () => {
   for (const [key, { entry, exports }] of Object.entries(PUBLIC_SURFACES)) {
-    it(`@less/bare/${key} exports are frozen`, async () => {
+    it(`@ekrooh/bare/${key} exports are frozen`, async () => {
       const mod = await import(entry);
       const actual = Object.keys(mod)
         .filter((k) => k !== 'default' && k !== '__esModule')
@@ -200,7 +200,7 @@ describe('public API snapshot', () => {
           .sort();
       const sourceMod = await import(entry);
       const distMod = await import(distRel);
-      expect(names(distMod), `@less/bare/${key} dist === source`).toEqual(
+      expect(names(distMod), `@ekrooh/bare/${key} dist === source`).toEqual(
         names(sourceMod),
       );
     }

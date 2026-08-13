@@ -2,12 +2,12 @@
 
 > **Status: superseded.** This brief describes the Phase 1 design (WKWebView
 > bridge over `WKScriptMessageHandler`). Phase 2 replaced it with the unified
-> loopback server + cookie auth: the host injects `window.__lessBareToken`,
+> loopback server + cookie auth: the host injects `window.__ekrooh.token`,
 > reads the worklet's `handoff.json`, and loads `http://127.0.0.1:<port>/index.html`.
 > The implemented host is `examples/ios-app/app/BareRuntime.swift` + `ios/`.
 > Keep this file as the historical brief only.
 
-Build the **iOS shell/host for `@less/bare`**. This doc is the operating brief;
+Build the **iOS shell/host for `@ekrooh/bare`**. This doc is the operating brief;
 read it alongside `vision.md` (the contract), `AGENTS.md` (commands/ownership),
 and `core/messages/readme.md` (wire protocol). The **Kotlin host is the
 reference implementation** — mirror it in Swift, don't redesign it.

@@ -1,6 +1,6 @@
 # web/transports/
 
-Transports for the binary message protocol. Exported as `@less/bare/transports`.
+Transports for the binary message protocol. Exported as `@ekrooh/bare/transports`.
 
 | File                  | Contents                                                                                                               |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -15,7 +15,7 @@ worklets, Bare, or host IPC.
 
 On device the page is served by the worklet's loopback server, so the
 WebSocket transport defaults to the page origin (`ws://location.host`); when a
-per-session token is injected (`window.__lessBareToken`) it is exchanged for a
+per-session token is injected (`window.__ekrooh.token`) it is exchanged for a
 `bare_session` cookie via `POST /login` before the socket opens, and
 reconnects with backoff (250ms → 2s, 5 tries). Browser dev is cross-origin, so
 pass an explicit URL (`VITE_BARE_WS_URL` in `examples/web`).

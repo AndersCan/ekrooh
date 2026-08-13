@@ -1,6 +1,6 @@
 {
-  "name": "@less/bare-examples",
+  "name": "@ekrooh/bare-examples",
   "private": true,
   "version": "0.0.0",
-  "description": "Reference app consuming @less/bare (web UI + Android shell)."
+  "description": "Reference app consuming @ekrooh/bare (web UI + Android shell)."
 }

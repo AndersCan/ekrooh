@@ -1,6 +1,6 @@
 # android/ — host library (`:bare-host`)
 
-The Android host for `@less/bare`, published as an AAR. Package
+The Android host for `@ekrooh/bare`, published as an AAR. Package
 `to.holepunch.bare.android`.
 
 | Class                | Responsibility                                                                                                          |
@@ -28,6 +28,6 @@ AGP packages the local jar into the AAR's `libs/` and the native libs from
 `prebuilds/android/bare-kit/jni` into `jni/`, so consumers need no prebuilds
 download.
 
-Publishing: `io.less:bare-host` to GitHub Packages via
+Publishing: `io.ekrooh:bare-host` to GitHub Packages via
 `./gradlew :bare-host:publishMavenAarPublicationToGitHubPackagesRepository`
 (`release.yml` does this on tags).

@@ -8,7 +8,7 @@
 
 ## What this is
 
-**`@less/bare`** is a framework that provides the **boring bootstrap** for
+**`@ekrooh/bare`** is a framework that provides the **boring bootstrap** for
 cross-platform apps built on the Bare runtime (the holepunch platform). It is
 the plumbing — and only the plumbing:
 
@@ -44,14 +44,14 @@ top of this framework.
   CI builds and publishes every artifact for that tag together. One changelog,
   one release note.
 - **Artifacts**:
-  - JS framework → **npm** (`@less/bare`) — single package, subpath exports
-    (`@less/bare/core`, `@less/bare/plugins`, `@less/bare/transports`,
-    `@less/bare/runtime`). The package ships **compiled ESM JavaScript plus
+  - JS framework → **npm** (`@ekrooh/bare`) — single package, subpath exports
+    (`@ekrooh/bare/core`, `@ekrooh/bare/plugins`, `@ekrooh/bare/transports`,
+    `@ekrooh/bare/runtime`). The package ships **compiled ESM JavaScript plus
     type declarations** (`dist/`, built with `vp pack` — tsdown) following the
     mantaq release flow; consumers never receive TypeScript source. A
     built-in runtime dependency on `@mantaq/core` powers the connection state
     machine (internal-only — never part of the exported surface).
-  - Android host → **AAR, GitHub Packages** (Maven format, `io.less:bare-host`).
+  - Android host → **AAR, GitHub Packages** (Maven format, `io.ekrooh:bare-host`).
     The AAR is self-contained: Bare Kit runtime classes and native libs are
     bundled into the artifact at build time, so consumers need no prebuilds
     download.
@@ -62,7 +62,7 @@ top of this framework.
   - bare-kit prebuilds → **GitHub Release artifacts** (the pattern upstream
     `bare-kit` already uses), fetched by a documented script run by CI and on
     consumer setup. Prebuilds are never committed to this repository.
-- The npm name `@less/bare` is approved but **not yet registered**. The first
+- The npm name `@ekrooh/bare` is approved but **not yet registered**. The first
   publish claims it; until then treat it as reserved in all docs and scripts.
 - Release process is documented in `RELEASING.md` and executable by an AI agent
   with no human intervention beyond the tag decision.
@@ -77,7 +77,7 @@ internal module APIs, build scripts).
 2. **Plugin manifest & event contracts** — `vendor.plugin` IDs,
    `DISPATCH`/`INVOKE_REQUEST`/`INVOKE_RESPONSE` semantics, event names and
    shapes, `Either` result tuples, deterministic error codes.
-3. **JS exported surface** — the subpath exports of `@less/bare`.
+3. **JS exported surface** — the subpath exports of `@ekrooh/bare`.
 4. **Kotlin host public API** — what Android consumers instantiate/subclass
    (bridge, coordinator, plugin registry).
 
@@ -124,7 +124,7 @@ These built-ins are the documented command surface — agent instructions and
 ## Repository structure
 
 - `core/`, `plugins/`, `web/transports` — sources of the single publishable
-  package `@less/bare`.
+  package `@ekrooh/bare`.
 - `examples/` — the reference app (web UI + Android app + iOS app), private
   workspace package, consumes the framework and is the integration harness.
 - `e2e/` — Playwright specs against the reference app on the mock transport.
@@ -164,7 +164,7 @@ presence manifest, public-API snapshot, and export-surface checks live in
    covered framework core (`all: false`, `core/**` + `plugins/**` + `web/**`);
    branches are reported, not gated. Thresholds are anchored to day-one
    measured values and only get stricter.
-3. **Public API snapshot** — the exported names of every `@less/bare` subpath
+3. **Public API snapshot** — the exported names of every `@ekrooh/bare` subpath
    are frozen; changing them is a major-version event.
 4. **Export-surface integrity** — every `package.json` `exports` and `files`
    entry resolves to a real path.

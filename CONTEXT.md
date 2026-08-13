@@ -1,4 +1,4 @@
-# @less/bare
+# @ekrooh/bare
 
 The boring bootstrap for cross-platform apps on the Bare runtime: a wire protocol, plugin contracts, transports, and native host bridges. This context is the framework's own development — the document set and conventions that govern how the repo is built and maintained.
 
@@ -25,5 +25,5 @@ The no-regress threshold on statement/line/function coverage over the covered se
 _Avoid_: "coverage requirement" alone
 
 **Public API snapshot**:
-The contract test that freezes the exact exported names of each `@less/bare` subpath, so an accidental break of a stability boundary fails CI as a test, not a review note.
+The contract test that freezes the exact exported names of each `@ekrooh/bare` subpath, so an accidental break of a stability boundary fails CI as a test, not a review note.
 _Avoid_: "API test" (too generic)

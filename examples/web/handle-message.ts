@@ -1,4 +1,4 @@
-import type { WireMessage } from '@less/bare/core';
+import type { WireMessage } from '@ekrooh/bare/core';
 
 export function handleMessage(msg: WireMessage) {
   if (msg.header.type === 'INVOKE_RESPONSE' && msg.header.error) {

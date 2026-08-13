@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { MessageProtocol, MessageType } from '@less/bare/core';
-import type { RuntimeTarget } from '@less/bare/core';
+import { MessageProtocol, MessageType } from '@ekrooh/bare/core';
+import type { RuntimeTarget } from '@ekrooh/bare/core';
 
 test('protocol round-trip preserves type/header/payload', () => {
   const protocol = new MessageProtocol();

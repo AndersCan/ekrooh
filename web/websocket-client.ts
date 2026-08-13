@@ -10,11 +10,14 @@ import { createConnectionMachine } from './connection-machine';
 
 declare global {
   interface Window {
-    /** Per-session token injected by the embedding shell on-device. The page
-     * exchanges it for a session cookie via `POST /login`, which then rides
-     * every same-origin request — including the WebSocket upgrade. Browser
-     * dev has none (the dev backend runs without auth). */
-    __lessBareToken?: string;
+    /** Per-session bridge state injected by the embedding shell on-device.
+     * `token` is exchanged for a session cookie via `POST /login`, which then
+     * rides every same-origin request — including the WebSocket upgrade.
+     * Browser dev has none (the dev backend runs without auth). */
+    __ekrooh?: {
+      token?: string;
+      [key: string]: unknown;
+    };
     /** Set by the embedding shell on-device. */
     BareShell?: boolean;
   }
@@ -87,7 +90,7 @@ export function createWebSocketTransport(
   const maxRetries = options.maxRetries ?? DEFAULT_RETRIES;
   const initialBackoff = options.backoffMs ?? DEFAULT_BACKOFF_MS;
   const token =
-    typeof window !== 'undefined' ? window.__lessBareToken : undefined;
+    typeof window !== 'undefined' ? window.__ekrooh?.token : undefined;
   const shouldLogin =
     options.login !== false && typeof token === 'string' && token.length > 0;
 

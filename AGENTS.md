@@ -21,7 +21,7 @@ Docs are local at `node_modules/vite-plus/docs` or online at https://viteplus.de
 
 # Project Operating Manual
 
-This repo is **`@less/bare`** — the boring bootstrap for cross-platform apps on
+This repo is **`@ekrooh/bare`** — the boring bootstrap for cross-platform apps on
 the Bare runtime. **Read `vision.md` first.** It defines what this project is
 and is not, and it wins over any code-level decision.
 
@@ -76,7 +76,7 @@ Notes:
 | `vision.md`, `plan.md`, `CONTEXT.md`, `rendering.md`, `ios-handoff.md`, `RELEASING.md`, `CHANGELOG.md`, `docs/` | docs         | Decision + planning documents; ADRs live in `docs/adr/`                                                                              |
 
 The framework's public API surface is the `exports` map in `package.json`
-(`@less/bare/core`, `/runtime`, `/plugins`, `/plugins/*/events`,
+(`@ekrooh/bare/core`, `/runtime`, `/plugins`, `/plugins/*/events`,
 `/transports`) — every entry points at the **compiled `dist/` output**
 (`build:pkg`), never TypeScript source. Per the stability contract in
 `vision.md`, breaking the wire protocol, plugin contracts, JS exports, or
@@ -114,7 +114,7 @@ when extending the host/transport surface.
 
 ### Issue tracker
 
-Issues live in GitHub Issues for `AndersCan/less-bare-android`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues for `AndersCan/ekrooh`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

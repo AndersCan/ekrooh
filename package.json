@@ -1,12 +1,12 @@
 {
-  "name": "@less/bare",
+  "name": "@ekrooh/bare",
   "version": "0.1.0-beta.1",
   "type": "module",
-  "description": "The boring bootstrap for cross-platform apps on the Bare runtime: wire protocol, plugin kernel, RPC messenger, transports, and native host bridges.",
+  "description": "One soul, many platforms — the boring bootstrap for cross-platform apps on the Bare runtime: wire protocol, plugin kernel, RPC messenger, transports, and native host bridges.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AndersCan/less-bare-android.git"
+    "url": "https://github.com/AndersCan/ekrooh.git"
   },
   "workspaces": [
     "examples/*",
@@ -81,8 +81,8 @@
     "vite-plus": "0.2.8"
   },
   "dependencies": {
-    "@mantaq/core": "^0.1.0",
-    "@mantaq/sugar": "^0.1.0",
+    "@mantaq/core": "^0.2.0",
+    "@mantaq/sugar": "^0.2.0",
     "bare-crypto": "^1.15.3",
     "bare-encoding": "^1.0.3",
     "bare-env": "^3.0.0",

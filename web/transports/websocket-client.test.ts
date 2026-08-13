@@ -100,7 +100,7 @@ describe('createWebSocketTransport URL selection', () => {
 
 describe('createWebSocketTransport /login bootstrap', () => {
   it('exchanges an injected token for a session cookie before opening', async () => {
-    vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+    vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -115,7 +115,7 @@ describe('createWebSocketTransport /login bootstrap', () => {
   });
 
   it('falls back to the query token when login is rejected', async () => {
-    vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+    vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({ ok: false })),
@@ -128,7 +128,7 @@ describe('createWebSocketTransport /login bootstrap', () => {
   });
 
   it('falls back to the query token when login throws', async () => {
-    vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+    vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
@@ -153,7 +153,7 @@ describe('createWebSocketTransport /login bootstrap', () => {
   });
 
   it('skips login when explicitly disabled', async () => {
-    vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+    vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -279,7 +279,7 @@ describe('createWebSocketTransport reconnect', () => {
   });
 
   it('retries with the query token when the upgrade is rejected despite a successful /login', async () => {
-    vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+    vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({ ok: true })),
@@ -323,7 +323,7 @@ describe('createWebSocketTransport reconnect', () => {
   });
 
   it('gives up after the retry cap once the token URL is also rejected', async () => {
-    vi.stubGlobal('window', { __lessBareToken: 'secret-token' });
+    vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({ ok: true })),

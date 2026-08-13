@@ -5,11 +5,11 @@ import {
   MessageType,
   createPluginBus,
   createProtocolMessenger,
-} from '@less/bare/core';
-import { discoveryEvents } from '@less/bare/plugins/discovery/events';
-import { healthEvents } from '@less/bare/plugins/health/events';
-import { mediaEvents } from '@less/bare/plugins/media/events';
-import { permissionEvents } from '@less/bare/plugins/permissions/events';
+} from '@ekrooh/bare/core';
+import { discoveryEvents } from '@ekrooh/bare/plugins/discovery/events';
+import { healthEvents } from '@ekrooh/bare/plugins/health/events';
+import { mediaEvents } from '@ekrooh/bare/plugins/media/events';
+import { permissionEvents } from '@ekrooh/bare/plugins/permissions/events';
 import { $capabilitiesSummary, $lastResult, $mediaUrl } from './app-state';
 import { $currentTime } from './current-time';
 import { handleMessage } from './handle-message';

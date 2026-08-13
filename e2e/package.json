@@ -1,10 +1,10 @@
 {
-  "name": "@less/bare-e2e",
+  "name": "@ekrooh/bare-e2e",
   "private": true,
   "version": "0.0.0",
-  "description": "Playwright end-to-end specs for the @less/bare reference web app.",
+  "description": "Playwright end-to-end specs for the @ekrooh/bare reference web app.",
   "dependencies": {
-    "@less/bare": "file:../.."
+    "@ekrooh/bare": "file:../.."
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1"

@@ -9,7 +9,7 @@ import {
 
 /**
  * The WebSocket connection state machine for `createWebSocketTransport`,
- * modeled with mantaq (internal-only — never part of the public `@less/bare`
+ * modeled with mantaq (internal-only — never part of the public `@ekrooh/bare`
  * surface). Owns the connection lifecycle, exponential backoff, retry cap,
  * and the `?token=` upgrade-rejection fallback; the transport shell drives
  * socket I/O against it and reacts to its state changes.

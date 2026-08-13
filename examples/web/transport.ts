@@ -2,7 +2,7 @@ import {
   createMockTransport,
   createWebSocketTransport,
   type MessageTransport,
-} from '@less/bare/transports';
+} from '@ekrooh/bare/transports';
 
 let transport: MessageTransport | null = null;
 

@@ -1,6 +1,6 @@
 # Research: Maestro on WebView apps
 
-**Ticket #3** (part of #1). Question: can Maestro drive `@less/bare` apps — native shell whose whole UI is a WebView/WKWebView loading a loopback-served web app, state via plugin RPC over a loopback WebSocket?
+**Ticket #3** (part of #1). Question: can Maestro drive `@ekrooh/bare` apps — native shell whose whole UI is a WebView/WKWebView loading a loopback-served web app, state via plugin RPC over a loopback WebSocket?
 
 **Verdict: go-with-caveats.** Maestro can see and drive web content inside WebViews on both platforms — it has first-party e2e tests for exactly our shape of app — but webview handling has known gaps/flakiness, needs `extendedWaitUntil` for async state, and multi-device p2p needs two concurrent invocations (fixed in CLI 2.6.0+).
 
