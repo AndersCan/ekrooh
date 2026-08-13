@@ -11,13 +11,22 @@
  * is diagnosable (Playwright swallows webServer output once ready).
  */
 import { spawn } from 'node:child_process';
-import { openSync, writeSync, rmSync, mkdirSync } from 'node:fs';
+import { chmodSync, openSync, writeSync, rmSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const bareExecutable = require('bare-runtime')();
+
+// npm ci can leave the prebuilt bare binary without the exec bit on Linux
+// runners (the tarball ships it non-executable); the direct spawn below then
+// fails with EACCES. Restore the bit before use.
+try {
+  chmodSync(bareExecutable, 0o755);
+} catch {
+  // best-effort: chmod is a no-op on Windows / read-only mounts
+}
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const entry = path.join(root, 'core', 'harness.core.gen.js');
