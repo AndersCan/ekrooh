@@ -1,0 +1,51 @@
+---
+title: Ekrooh
+description: One soul, many platforms — the boring bootstrap for cross-platform apps on the Bare runtime.
+hero:
+  tagline: One soul, many platforms.
+  actions:
+    - text: Get started
+      link: /getting-started/introduction/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/AndersCan/ekrooh
+      icon: external
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+`@ekrooh/bare` is the **boring bootstrap** for cross-platform apps on the
+[Bare runtime](https://github.com/holepunchto/bare): a binary wire protocol,
+plugin kernel, RPC messenger, transports, and native host bridges — plus a
+reference app that demonstrates all of it.
+
+The **frontend** (browser or WebView) is written as if there is only a
+**backend** reachable over a **WebSocket** (binary framed messages). On-device,
+the worklet runs one loopback HTTP+WS server that serves the web app, the media
+files, and the protocol socket — so the page connects to the same origin it was
+served from.
+
+<CardGrid>
+  <Card title="Wire Protocol" icon="seti:code">
+    A binary framing protocol with a plugin kernel and RPC messenger shared by
+    every platform.
+  </Card>
+  <Card title="Transports" icon="seti:package">
+    WebSocket transport with same-origin cookie login, reconnect, and a mock
+    transport for tests.
+  </Card>
+  <Card title="Native Hosts" icon="seti:android">
+    Android (`:bare-host`) and iOS (`BareHost`) host libraries with IPC
+    coordinators and plugin registries.
+  </Card>
+  <Card title="Reference App" icon="seti:react">
+    Web, Android, and iOS examples demonstrating the full stack end to end.
+  </Card>
+</CardGrid>
+
+## Getting started
+
+- [Installation](getting-started/installation/) — install the package and wire
+  it into your app.
+- [Architecture](getting-started/architecture/) — how the pieces fit together.
+- [End-to-End Quickstart](consumers/end-to-end/) — from zero to a running app.
