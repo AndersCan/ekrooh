@@ -131,6 +131,12 @@ export function createHarnessSupervisor(
         const [rawPath] = url.split('?');
         const cleanPath = rawPath.replace(/\/+$/, '') || '/';
 
+        if (req.method === 'GET' && cleanPath === '/health') {
+          // Playwright's webServer readiness poll (404 would never satisfy it).
+          writeJson(res, 200, { ok: true });
+          return;
+        }
+
         if (req.method === 'POST' && cleanPath === '/instances') {
           const allocated = await allocate();
           writeJson(res, 201, allocated);

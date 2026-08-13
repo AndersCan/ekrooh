@@ -20,8 +20,10 @@ jobs:
         # On Linux, --with-deps installs apt libraries the browser needs.
         # Uses repo-local .playwright-browsers (see scripts/playwright-local-browsers.mjs).
         run: npm run playwright:install -- --with-deps
-      - name: Run Playwright tests
+      - name: Run Playwright tests (mock transport)
         run: npm run test:e2e:web
+      - name: Run Playwright tests (multi-instance harness)
+        run: npm run test:e2e:harness
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:

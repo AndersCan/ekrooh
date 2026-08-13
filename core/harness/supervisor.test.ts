@@ -222,4 +222,25 @@ describe('createHarnessSupervisor', () => {
       });
     });
   });
+
+  it('serves a 200 /health readiness probe', async () => {
+    const sup = createHarnessSupervisor({
+      webAssets: webDir,
+      baseDir,
+      idleTimeoutMs: 600_000,
+    });
+    const mgmt = await sup.origin();
+
+    const health = await jsonRequest(`${mgmt}/health`, 'GET');
+    expect(health.status).toBe(200);
+    expect(health.body).toEqual({ ok: true });
+
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, 2000);
+      sup.close(() => {
+        clearTimeout(t);
+        resolve();
+      });
+    });
+  });
 });

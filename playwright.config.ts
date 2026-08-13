@@ -46,6 +46,9 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      // The multi-instance harness spec lives in e2e/harness/ and runs under
+      // its own server (playwright.harness.config.ts) — never against the mock.
+      testIgnore: '**/harness/**',
       use: { ...devices['Desktop Chrome'] },
     },
 
