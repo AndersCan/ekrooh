@@ -38,6 +38,11 @@ export default defineConfig({
         'core/main.core.gen.js',
         'core/harness.core.ts',
         'core/harness.core.gen.js',
+        // Dev p2p verification worklet (+ its esbuild bundle): verified via
+        // smoke:p2p and the on-device P2PVerifyTest instrumentation/iOS
+        // tests, not unit tests.
+        'core/p2p-verify.core.ts',
+        'core/p2p-verify.core.gen.js',
       ],
       reporter: ['text'],
       thresholds: {
