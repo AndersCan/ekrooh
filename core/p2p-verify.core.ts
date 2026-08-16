@@ -63,6 +63,10 @@ const failMarker = path.join(storageDir, 'p2p-verify.fail');
 
 const P2P_TOPIC = Buffer.alloc(32, 7);
 const P2P_TIMEOUT = 30_000;
+/** On-device DHT + Noise handshake budget: the in-process DHT runs 5-10x
+ * slower under a software-rendered CI emulator (x86_64 + swiftshader) than on
+ * a desktop; a 30s budget made the handshake flaky there (issue #41 PR). */
+const HANDSHAKE_TIMEOUT = 60_000;
 /** Matches the on-device photo app's remote-open deadline (issue #41); a
  * local-loopback DHT usually resolves far sooner, the headroom is for slow
  * CI emulators/simulators. */
@@ -161,22 +165,36 @@ async function verifyP2PHandshake(bootstrapPort: number): Promise<number> {
     // server's announce is stored, or `flushed()` resolves from a lookup
     // that raced ahead of the announce (no peer, next refresh ~5 min out).
     const serverJoin = server.join(P2P_TOPIC, { server: true, client: true });
-    await withTimeout(serverJoin.flushed(), P2P_TIMEOUT, 'server discovery');
+    await withTimeout(
+      serverJoin.flushed(),
+      HANDSHAKE_TIMEOUT,
+      'server discovery',
+    );
 
     let clientJoin = client.join(P2P_TOPIC, { server: true, client: true });
-    await withTimeout(clientJoin.flushed(), P2P_TIMEOUT, 'client discovery');
+    await withTimeout(
+      clientJoin.flushed(),
+      HANDSHAKE_TIMEOUT,
+      'client discovery',
+    );
 
-    while (Date.now() - start < P2P_TIMEOUT && !echoReceived) {
-      await sleep(1500);
-      if (echoReceived) break;
-      // Re-join to force a fresh lookup until the server's announce shows up.
-      try {
-        clientJoin.destroy();
-      } catch {
-        // Already destroyed.
+    // Require a REAL cross-peer connection before calling it done: a client
+    // lookup racing the server's announce can resolve from the client's own
+    // announce and dial itself — the client shows a peer but the server stays
+    // 0/0 and no echo ever arrives ("no p2p handshake/echo ... 0/0 server
+    // peers/conns, 1/1 client peers/conns" on a slow CI emulator). Re-join
+    // (fresh lookup) until the SERVER reports a peer, then wait for the echo.
+    while (Date.now() - start < HANDSHAKE_TIMEOUT && !echoReceived) {
+      if (server.peers.size === 0) {
+        try {
+          clientJoin.destroy();
+        } catch {
+          // Already destroyed.
+        }
+        clientJoin = client.join(P2P_TOPIC, { server: true, client: true });
+        await clientJoin.flushed().catch(() => undefined);
       }
-      clientJoin = client.join(P2P_TOPIC, { server: true, client: true });
-      await clientJoin.flushed().catch(() => undefined);
+      await sleep(1500);
     }
 
     if (!echoReceived) {
@@ -187,7 +205,7 @@ async function verifyP2PHandshake(bootstrapPort: number): Promise<number> {
         ? `; errors: ${errors.slice(0, 3).join('; ')}`
         : '';
       throw new Error(
-        `no p2p handshake/echo within ${P2P_TIMEOUT}ms (${conns}${detail})`,
+        `no p2p handshake/echo within ${HANDSHAKE_TIMEOUT}ms (${conns}${detail})`,
       );
     }
 
@@ -276,11 +294,15 @@ async function verifyPeerDriveReplication(
     const start = Date.now();
 
     const creatorDrive: SmokeDrive = new Hyperdrive(creatorStore);
-    await withTimeout(creatorDrive.ready(), P2P_TIMEOUT, 'creator drive ready');
+    await withTimeout(
+      creatorDrive.ready(),
+      HANDSHAKE_TIMEOUT,
+      'creator drive ready',
+    );
     const photo = Buffer.from(`peer-drive-photo:${Date.now().toString(16)}`);
     await withTimeout(
       creatorDrive.put('/photos/remote.jpg', photo),
-      P2P_TIMEOUT,
+      HANDSHAKE_TIMEOUT,
       'creator drive put',
     );
     const topic = creatorDrive.discoveryKey;
@@ -289,7 +311,11 @@ async function verifyPeerDriveReplication(
       server: true,
       client: true,
     });
-    await withTimeout(creatorJoin.flushed(), P2P_TIMEOUT, 'creator discovery');
+    await withTimeout(
+      creatorJoin.flushed(),
+      HANDSHAKE_TIMEOUT,
+      'creator discovery',
+    );
 
     // Reader opens the drive by key before the swarm joins — the same order
     // the photo app uses (new Hyperdrive(corestore, key) → join → ready).
@@ -299,17 +325,22 @@ async function verifyPeerDriveReplication(
     );
     await withTimeout(
       readerStore.ready(),
-      P2P_TIMEOUT,
+      HANDSHAKE_TIMEOUT,
       'reader corestore ready',
     );
     const readerJoin = readerSwarm.join(topic, { server: false, client: true });
-    await withTimeout(readerJoin.flushed(), P2P_TIMEOUT, 'reader discovery');
+    await withTimeout(
+      readerJoin.flushed(),
+      HANDSHAKE_TIMEOUT,
+      'reader discovery',
+    );
 
     // Wait for the real peer connection before ready(): the app's ready()
-    // race needs the replication stream up (a few seconds on a fresh DHT).
+    // race needs the replication stream up (a few seconds on a fresh DHT;
+    // slower on a CI emulator).
     const connectedAt = Date.now();
     while (
-      Date.now() - connectedAt < P2P_TIMEOUT &&
+      Date.now() - connectedAt < REMOTE_DRIVE_TIMEOUT &&
       readerSwarm.connections.size === 0
     ) {
       await sleep(250);
@@ -319,7 +350,7 @@ async function verifyPeerDriveReplication(
         ? `; errors: ${errors.slice(0, 3).join('; ')}`
         : '';
       throw new Error(
-        `no peer connection for the reader within ${P2P_TIMEOUT}ms${detail}`,
+        `no peer connection for the reader within ${REMOTE_DRIVE_TIMEOUT}ms${detail}`,
       );
     }
 

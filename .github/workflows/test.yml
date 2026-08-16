@@ -122,6 +122,7 @@ jobs:
           arch: x86_64
           target: google_apis
           force-avd-creation: true
+          cores: 4
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
           script: ./gradlew :examples:android-app:connectedDebugAndroidTest
 

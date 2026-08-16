@@ -41,7 +41,7 @@ class P2PVerifyTest {
 
             val okMarker = File(storageDir, "p2p-verify.ok")
             val failMarker = File(storageDir, "p2p-verify.fail")
-            val deadline = System.currentTimeMillis() + 150_000
+            val deadline = System.currentTimeMillis() + 240_000
             while (System.currentTimeMillis() < deadline) {
                 if (okMarker.exists()) return
                 if (failMarker.exists()) {
@@ -49,7 +49,7 @@ class P2PVerifyTest {
                 }
                 Thread.sleep(500)
             }
-            fail("p2p verify did not complete within 150s")
+            fail("p2p verify did not complete within 240s")
         } finally {
             worklet.terminate()
         }

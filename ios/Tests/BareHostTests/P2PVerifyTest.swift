@@ -32,7 +32,7 @@ final class P2PVerifyTest: XCTestCase {
     let failMarker = storageDir.appendingPathComponent("p2p-verify.fail")
     // Headroom: the worklet now runs handshake + peer-drive replication (the
     // remote ready() may take a while on a cold CI simulator).
-    let deadline = Date().addingTimeInterval(150)
+    let deadline = Date().addingTimeInterval(240)
     while Date() < deadline {
       if FileManager.default.fileExists(atPath: okMarker.path) {
         worklet.terminate()
@@ -46,6 +46,6 @@ final class P2PVerifyTest: XCTestCase {
       Thread.sleep(forTimeInterval: 0.5)
     }
     worklet.terminate()
-    XCTFail("p2p verify did not complete within 150s")
+    XCTFail("p2p verify did not complete within 240s")
   }
 }
