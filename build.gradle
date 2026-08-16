@@ -5,6 +5,11 @@ plugins {
   id "io.github.gradle-nexus.publish-plugin" version "2.0.0"
 }
 
+// The nexus publish plugin resolves the Sonatype staging profile from the
+// root project's group — it must match the published groupId below and the
+// namespace verified on central.sonatype.com (RELEASING.md).
+group = "io.github.anderscan.ekrooh"
+
 // Maven Central publication (Sonatype Central Portal via the OSSRH staging
 // API). Credentials come from the sonatypeUsername / sonatypePassword Gradle
 // properties (CI sets ORG_GRADLE_PROJECT_sonatypeUsername / ...Password).

@@ -64,7 +64,17 @@ jobs:
       - name: Publish :bare-host AAR to GitHub Packages
         # The publication is signed (see android/build.gradle), so the signing
         # secrets are required here too — not just the Maven Central step.
-        run: ./gradlew :bare-host:publishMavenAarPublicationToGitHubPackagesRepository
+        # Idempotent: skips when this exact version already exists on GitHub
+        # Packages (maven-metadata.xml check with the actions token), so a
+        # partial release can be re-run after a failed later step.
+        run: |
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          METADATA="https://maven.pkg.github.com/AndersCan/ekrooh/io/github/anderscan/ekrooh/bare-host/maven-metadata.xml"
+          if curl -fsS -H "Authorization: Bearer $GITHUB_TOKEN" "$METADATA" 2>/dev/null | grep -q "<version>$VERSION</version>"; then
+            echo "GitHub Packages: bare-host@$VERSION already published — skipping"
+          else
+            ./gradlew :bare-host:publishMavenAarPublicationToGitHubPackagesRepository
+          fi
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ github.token }}
