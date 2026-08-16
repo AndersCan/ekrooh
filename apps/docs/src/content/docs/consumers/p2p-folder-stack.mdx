@@ -55,7 +55,8 @@ if (storage) {
 The framework repo ships `core/p2p-verify.core.ts` — a worklet that boots and
 exercises Corestore, Hyperdrive, and Hyperswarm end-to-end (run on the iOS
 simulator via `P2PVerifyTest`, on an Android emulator via the reference app's
-`P2PVerifyTest` instrumentation test, or locally via `npm run smoke:p2p`).
+`P2PVerifyTest` instrumentation test in `mode=self`, or locally via
+`npm run smoke:p2p`).
 Since issue #28 the smoke performs a **real connect**: it brings up a local
 ephemeral DHT bootstrap, joins two in-process swarms on one topic, completes
 the Noise secret-stream handshake, and asserts an encrypted message
@@ -64,4 +65,8 @@ possible. Since issue #41 it also **replicates a peer's drive**: a creator
 announces its drive and serves it; a reader joins the topic client-only, opens
 the drive by key, `ready()`s it, and reads a photo — the exact flow the
 on-device photo app timed out on. A green run on a runtime proves that
-platform can do peer reads; a red run reproduces the timeout.
+platform can do peer reads; a red run reproduces the timeout. The full
+peer-drive gate runs on the macOS smoke and the iOS simulator; the Android
+emulator instrumentation test uses `mode=self` (self-reads) because real DHT
+peer discovery is not a stable gate under the software-rendered x86_64 CI
+emulator.

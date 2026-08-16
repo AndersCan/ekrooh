@@ -18,11 +18,15 @@ p2p-verify.core.ts`, issue #41): the worklet now replicates a drive across
   replicate a peer's drive": green on a runtime proves it can do peer reads.
 - **Android emulator p2p verify** (`examples/android-app`): the reference app
   packs `core/p2p-verify.core.ts` as `p2p-verify.bundle` and ships a
-  `P2PVerifyTest` instrumentation test that boots it on an emulator; a new
-  `android-emulator` CI job runs it (KVM emulator on `ubuntu-latest`).
-  Verified locally: `peer-drive 308ms` on an Android emulator — the framework
-  stack handles peer-drive reads on Android bare-kit, pointing the #41
-  timeout at the consumer's wiring rather than the runtime.
+  `P2PVerifyTest` instrumentation test + a new `android-emulator` CI job. The
+  Android gate runs the worklet in `mode=self` (corestore/hyperdrive
+  self-reads — the "reverse direction" that always worked on Android per
+  #41), because real DHT peer discovery is unreliable under the
+  software-rendered x86_64 CI emulator; the full peer-drive replication gate
+  runs on the macOS smoke (`npm run smoke:p2p`) and the iOS simulator.
+  Verified locally: full peer-drive `308ms` on an Android emulator — the
+  framework stack handles peer-drive reads on Android bare-kit, pointing the
+  #41 timeout at the consumer's wiring rather than the runtime.
 
 ### Fixed
 

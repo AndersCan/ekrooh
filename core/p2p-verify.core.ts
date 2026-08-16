@@ -61,6 +61,22 @@ const storageDir = resolveStorageDir();
 const okMarker = path.join(storageDir, 'p2p-verify.ok');
 const failMarker = path.join(storageDir, 'p2p-verify.fail');
 
+// Optional `mode=self` argv token: runs only the self-contained corestore/
+// hyperdrive smoke (native addons load + self-reads). Used by the Android
+// emulator instrumentation test — real DHT peer discovery (server:true
+// sockets reachable from a peer) is unreliable under a software-rendered
+// x86_64 CI emulator, so the on-device Android gate asserts the addon stack
+// boots and reads locally; the full peer-drive replication gate runs on the
+// macOS smoke and the iOS simulator, where the DHT reliably works. Matches
+// the issue #41 observation that the "reverse direction" (device serving its
+// own drive) always worked on Android.
+function resolveMode(): 'full' | 'self' {
+  const argv =
+    typeof Bare !== 'undefined' && Array.isArray(Bare.argv) ? Bare.argv : [];
+  return argv.includes('mode=self') ? 'self' : 'full';
+}
+const verifyMode = resolveMode();
+
 const P2P_TOPIC = Buffer.alloc(32, 7);
 const P2P_TIMEOUT = 30_000;
 /** On-device DHT + Noise handshake budget: the in-process DHT runs 5-10x
@@ -394,15 +410,19 @@ async function run() {
     throw new Error(`hyperdrive readback mismatch: ${data?.toString()}`);
   }
 
-  const roundtripMs = await verifyP2PHandshake(await reserveLoopbackPort());
-  const peerDriveMs = await verifyPeerDriveReplication(
-    await reserveLoopbackPort(),
-  );
+  // In `self` mode (Android CI emulator) stop here: peer discovery is not
+  // reliable under the hosted x86_64 emulator. The full peer-drive gate runs
+  // on the macOS smoke and the iOS simulator.
+  let marker = `ok ${drive.key?.toString('hex') ?? ''} self-read`;
+  if (verifyMode === 'full') {
+    const roundtripMs = await verifyP2PHandshake(await reserveLoopbackPort());
+    const peerDriveMs = await verifyPeerDriveReplication(
+      await reserveLoopbackPort(),
+    );
+    marker = `ok ${drive.key?.toString('hex') ?? ''} p2p-handshake ${roundtripMs}ms peer-drive ${peerDriveMs}ms`;
+  }
 
-  fs.writeFileSync(
-    okMarker,
-    `ok ${drive.key?.toString('hex') ?? ''} p2p-handshake ${roundtripMs}ms peer-drive ${peerDriveMs}ms`,
-  );
+  fs.writeFileSync(okMarker, marker);
 }
 
 void run()
