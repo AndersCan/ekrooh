@@ -75,13 +75,15 @@ afterEvaluate {
         // the published POM has no <dependencies> at all and consumers fail
         // to compile on WebViewCompat/appcompat (see GitHub issue #36). The
         // release variant contributes the AAR plus the `api`/`implementation`
-        // dependencies; the sources/javadoc jars are appended below. The local
-        // `api fileTree` bare-kit jar is deliberately absent from the POM (file
-        // deps can't be resolved from a repo) — its classes ship inside the
-        // AAR's libs/.
+        // dependencies and AGP's auto-generated `releaseSourcesJar` /
+        // `releaseJavadocJar` (classifiers `sources`/`javadoc`). Adding custom
+        // sources/javadoc artifacts here would duplicate those and make the
+        // signed publication fail with "multiple artifacts with the identical
+        // extension and classifier ('jar.asc', 'sources')" (hit on v0.4.0). The
+        // local `api fileTree` bare-kit jar is deliberately absent from the POM
+        // (file deps can't be resolved from a repo) — its classes ship inside
+        // the AAR's libs/.
         from components.release
-        artifact(tasks.named("sourcesJar"))
-        artifact(tasks.named("javadocJar"))
 
         pom {
           name = "io.github.anderscan.ekrooh:bare-host"
@@ -122,28 +124,10 @@ afterEvaluate {
   }
 }
 
-// Sources + javadoc jars are mandatory for Maven Central validation. The
-// javadoc jar zips the source dirs (an empty-but-present doc jar satisfies the
-// portal); AGP already packages the AAR itself.
-tasks.register("sourcesJar", Jar) {
-  archiveClassifier = "sources"
-  from android.sourceSets.main.java.srcDirs
-}
-
-tasks.register("javadocJar", Jar) {
-  archiveClassifier = "javadoc"
-  from android.sourceSets.main.java.srcDirs
-}
-
-// Gradle 9 task-validation: the publication consumes the sources/javadoc jars
-// (via `artifact(...)`), so the metadata/POM generation tasks must depend on
-// them explicitly — otherwise publish fails with "uses this output ... without
-// declaring an explicit or implicit dependency" (hit on the v0.4.0 release).
-afterEvaluate {
-  tasks.named("generateMetadataFileForMavenAarPublication") {
-    dependsOn(tasks.named("sourcesJar"), tasks.named("javadocJar"))
-  }
-}
+// Sources + javadoc jars are mandatory for Maven Central validation. AGP's
+// release component provides both automatically (`releaseSourcesJar` /
+// `releaseJavadocJar`), so no custom jar tasks are needed here — the javadoc
+// jar zips the source dirs (an empty-but-present doc jar satisfies the portal).
 
 // GPG-sign every publication. CI provides SIGNING_KEY (ASCII-armored private
 // key) + SIGNING_PASSWORD as secrets; without them the publish task fails but
