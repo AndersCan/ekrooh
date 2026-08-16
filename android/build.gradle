@@ -135,6 +135,16 @@ tasks.register("javadocJar", Jar) {
   from android.sourceSets.main.java.srcDirs
 }
 
+// Gradle 9 task-validation: the publication consumes the sources/javadoc jars
+// (via `artifact(...)`), so the metadata/POM generation tasks must depend on
+// them explicitly — otherwise publish fails with "uses this output ... without
+// declaring an explicit or implicit dependency" (hit on the v0.4.0 release).
+afterEvaluate {
+  tasks.named("generateMetadataFileForMavenAarPublication") {
+    dependsOn(tasks.named("sourcesJar"), tasks.named("javadocJar"))
+  }
+}
+
 // GPG-sign every publication. CI provides SIGNING_KEY (ASCII-armored private
 // key) + SIGNING_PASSWORD as secrets; without them the publish task fails but
 // ordinary builds are unaffected. Runs after evaluation so the mavenAar
