@@ -59,6 +59,11 @@ class MainActivity : AppCompatActivity() {
         // ephemeral port; remove it so polling never loads a stale origin.
         File(storageDir, "handoff.json").delete()
 
+        // Fail fast on unsupported 32-bit-only runtimes: the worklet's native
+        // thread bootstrap is unreliable there (ekrooh#46), so surface a clear
+        // error instead of a native SIGSEGV.
+        BareHostAbi.requireSupportedAbi()
+
         worklet = Worklet(
             Worklet.Options()
                 .memoryLimit(128 * 1024 * 1024)

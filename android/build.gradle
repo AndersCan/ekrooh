@@ -11,6 +11,24 @@ android {
 
   defaultConfig {
     minSdk = 29
+    externalNativeBuild {
+      cmake {
+        // Compile the in-repo `libnativehelper.so` functional stub (see
+        // src/main/cpp/bare_nativehelper_stub.c). This re-provides the one
+        // symbol `libbare-kit.so` imports from the Android platform library
+        // `libnativehelper.so` (JNI_GetCreatedJavaVMs), which app processes
+        // can't otherwise resolve from the classloader namespace (ekrooh#45,
+        // #46). Shipped alongside `libbare-kit.so` in the AAR.
+        cppFlags ""
+      }
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path "src/main/cpp/CMakeLists.txt"
+      version "3.22.1"
+    }
   }
 
   compileOptions {
