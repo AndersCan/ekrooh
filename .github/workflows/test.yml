@@ -127,7 +127,21 @@ jobs:
           force-avd-creation: true
           cores: 4
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
-          script: ./gradlew :examples:android-app:connectedDebugAndroidTest
+          # The hosted software-rendered x86_64 emulator intermittently fails
+          # the very first APK install with a boot-race NPE in the storage
+          # service ("StorageManager.getVolumes() on a null object reference" /
+          # ShellCommandUnresponsiveException) before any test runs. That is an
+          # infrastructure flake, not a test failure, so retry the whole
+          # connected test on the now-stabilized emulator.
+          script: |
+            for i in 1 2 3; do
+              echo "=== connectedDebugAndroidTest attempt $i/3 ==="
+              if ./gradlew :examples:android-app:connectedDebugAndroidTest; then
+                exit 0
+              fi
+              echo "Attempt $i failed (transient emulator install flake) — retrying"
+            done
+            exit 1
 
       - name: Assert the published POM carries the api dependencies
         # Regression guard for GitHub issue #36: the bare-host POM used to be
