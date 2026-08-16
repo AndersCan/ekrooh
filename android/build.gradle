@@ -33,6 +33,13 @@ android {
       useLegacyPackaging = true
     }
   }
+
+  publishing {
+    singleVariant("release") {
+      withSourcesJar()
+      withJavadocJar()
+    }
+  }
 }
 
 // The Bare Kit runtime is shipped in the published AAR: AGP packages the local
@@ -124,10 +131,15 @@ afterEvaluate {
   }
 }
 
-// Sources + javadoc jars are mandatory for Maven Central validation. AGP's
-// release component provides both automatically (`releaseSourcesJar` /
-// `releaseJavadocJar`), so no custom jar tasks are needed here — the javadoc
-// jar zips the source dirs (an empty-but-present doc jar satisfies the portal).
+// Sources + javadoc jars are mandatory for Maven Central validation. These
+// come from AGP's `android.publishing.singleVariant("release")` with
+// `withSourcesJar()` + `withJavadocJar()` (declared above): AGP wires the
+// auto-generated source/javadoc jars (`releaseSourcesJar` / `javaDocReleaseJar`)
+// into the publication as `sources` / `javadoc` classifiers, so no custom jar
+// tasks or `artifact(...)` entries are needed (the latter of which previously
+// collided with AGP's own artifacts — "multiple artifacts with the identical
+// extension and classifier ('jar.asc', 'sources')" on v0.4.0). The javadoc jar
+// zips the source dirs (an empty-but-present doc jar satisfies the portal).
 
 // GPG-sign every publication. CI provides SIGNING_KEY (ASCII-armored private
 // key) + SIGNING_PASSWORD as secrets; without them the publish task fails but
