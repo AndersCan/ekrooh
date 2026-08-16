@@ -27,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     private val hostPlugins = HostPluginRegistry()
     private lateinit var storageDir: File
     private lateinit var webappDir: File
+    private lateinit var bareCacheDir: File
     private val mainHandler = Handler(Looper.getMainLooper())
 
     // vendor.media: native picker/camera launchers. The host handlers run on the
@@ -51,6 +52,7 @@ class MainActivity : AppCompatActivity() {
         // copy would otherwise go stale across rebuilds.
         storageDir = File(cacheDir, "bare").apply { mkdirs() }
         webappDir = File(cacheDir, "webapp")
+        bareCacheDir = File(cacheDir, "bare-cache").apply { mkdirs() }
         copyWebAssets(webappDir)
 
         // A previous run may have left a handoff file pointing at a dead
@@ -68,7 +70,15 @@ class MainActivity : AppCompatActivity() {
                 worklet.start(
                     "/main.core.bundle",
                     bundleStream,
-                    arrayOf(webappDir.absolutePath, storageDir.absolutePath),
+                    // On-device argv contract: [webAssets, storage, cache] (see
+                    // `resolveWorkletConfig()`). All three must be directories;
+                    // a missing/absent cache falls back to storage with a
+                    // warning, so pass a real cache dir to keep boots quiet.
+                    arrayOf(
+                        webappDir.absolutePath,
+                        storageDir.absolutePath,
+                        bareCacheDir.absolutePath,
+                    ),
                 )
             }
             ipc = IPC(worklet)

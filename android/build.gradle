@@ -70,7 +70,16 @@ afterEvaluate {
         groupId = "io.github.anderscan.ekrooh"
         artifactId = "bare-host"
         version = rootProject.jsonVersion()
-        artifact(tasks.named("bundleReleaseAar"))
+        // `from components.release` (not a bare `artifact(...)`) so the
+        // generated POM carries the module's dependency metadata — without it
+        // the published POM has no <dependencies> at all and consumers fail
+        // to compile on WebViewCompat/appcompat (see GitHub issue #36). The
+        // release variant contributes the AAR plus the `api`/`implementation`
+        // dependencies; the sources/javadoc jars are appended below. The local
+        // `api fileTree` bare-kit jar is deliberately absent from the POM (file
+        // deps can't be resolved from a repo) — its classes ship inside the
+        // AAR's libs/.
+        from components.release
         artifact(tasks.named("sourcesJar"))
         artifact(tasks.named("javadocJar"))
 

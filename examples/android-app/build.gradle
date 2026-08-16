@@ -68,11 +68,25 @@ def getExtendedPath() {
   return paths.unique().join(File.pathSeparator)
 }
 
-// Helper to configure an Exec task to run through a shell at the repo root
+// Root of the JS toolchain: the directory holding package.json, node_modules
+// and the npm scripts (`build:core`, `build:web`) that the Exec tasks below
+// run. The Gradle root project is the deterministic default (never a hardcoded
+// relative depth like "../../" — that silently resolves to the wrong directory
+// when this build file is copied into a consumer module at a different depth,
+// see GitHub issue #38). Consumers whose npm root differs from the Gradle root
+// pass `-Pekrooh.repoDir=<absolute dir>`.
+def repoRootProp = providers.gradleProperty("ekroohRepoDir").orNull
+project.ext.repoRoot = repoRootProp != null ? file(repoRootProp) : rootProject.projectDir
+
+// Helper to configure an Exec task to run through a shell at the JS repo root.
+// NOTE (issue #37): the JS build steps assume a **flat** node_modules layout
+// (npm/yarn default, or pnpm with `nodeLinker=hoisted`). Under pnpm's default
+// isolated linker, bare-pack cannot resolve through the symlinked virtual store
+// and bare-link may link nothing silently.
 def configureExec(Exec task, String command) {
   def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
   task.environment "PATH", getExtendedPath()
-  task.workingDir "../../"
+  task.workingDir project.ext.repoRoot
 
   if (isWindows) {
     task.commandLine "cmd", "/c", command
@@ -86,7 +100,44 @@ def configureExec(Exec task, String command) {
 tasks.register("link", Exec) {
   def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
   def bin = isWindows ? "node_modules\\.bin\\bare-link.cmd" : "node_modules/.bin/bare-link"
-  configureExec(it, "${bin} --preset android --out examples/android-app/src/main/addons")
+  // `--out` is the module's own addons dir (absolute, independent of the
+  // working dir); bare-link resolves the deps to link from the cwd package's
+  // node_modules. Consumers whose entry package has no direct native-addon
+  // deps must pass the app bundle package as the entry:
+  //   bare-link --preset android --out <out> <entry-package>
+  configureExec(it, "${bin} --preset android --out ${projectDir}/src/main/addons")
+  doLast {
+    // Regression guard for issue #37: bare-link exits 0 and links nothing when
+    // run from a package without direct native-addon deps (or under pnpm's
+    // isolated linker) — the APK then ships without the p2p native addons and
+    // the worklet aborts at runtime with `dlopen failed`. Fail the build early
+    // instead of producing a silently broken APK. bare-link lays the addons
+    // out per-ABI (arm64-v8a/, armeabi-v7a/, x86/, x86_64/), so count .so files
+    // recursively.
+    def addonsDir = file("src/main/addons")
+    def linked = []
+    if (addonsDir.exists()) {
+      addonsDir.listFiles().each { abiDir ->
+        if (abiDir.isDirectory()) {
+          abiDir.listFiles().each { f ->
+            if (f.isFile() && f.name.endsWith(".so")) linked << f
+          }
+        }
+      }
+    }
+    if (linked.isEmpty()) {
+      throw new GradleException(
+        "bare-link produced no native addons in ${addonsDir}. " +
+        "This usually means the JS toolchain cannot see the native deps: " +
+        "run the build from the monorepo root, use a flat node_modules " +
+        "(npm/yarn, or pnpm with nodeLinker=hoisted), and if the entry " +
+        "package has no direct bare-*/rocksdb/sodium/udx deps, pass it " +
+        "explicitly (bare-link --preset android --out ${addonsDir} <entry>). " +
+        "See the consumer guide (docs/consumers/android-host-build)."
+      )
+    }
+    logger.lifecycle("bare-link linked ${linked.size()} addon .so file(s) into ${addonsDir}")
+  }
 }
 
 tasks.register("buildBareJs", Exec) {
@@ -111,7 +162,9 @@ tasks.register("packApp", Exec) {
   dependsOn "buildBareJs"
   def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
   def bin = isWindows ? "node_modules\\.bin\\bare-pack.cmd" : "node_modules/.bin/bare-pack"
-  configureExec(it, "${bin} --preset android --out examples/android-app/src/main/assets/main.core.bundle core/main.core.gen.js")
+  // Output lands in the module's own assets dir (absolute); the bundle source
+  // `core/main.core.gen.js` is produced by `build:core` at the repo root.
+  configureExec(it, "${bin} --preset android --out ${projectDir}/src/main/assets/main.core.bundle ${project.ext.repoRoot}/core/main.core.gen.js")
 }
 
 tasks.register("pack") {

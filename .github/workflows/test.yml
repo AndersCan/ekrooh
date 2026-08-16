@@ -79,6 +79,18 @@ jobs:
       - name: Gradle build (includes host JUnit tests)
         run: ./gradlew build
 
+      - name: Assert the published POM carries the api dependencies
+        # Regression guard for GitHub issue #36: the bare-host POM used to be
+        # published with no <dependencies> at all (consumers failed to compile
+        # on WebViewCompat/appcompat). Fail the build if the generated POM
+        # drops the androidx deps again.
+        run: |
+          ./gradlew :bare-host:generatePomFileForMavenAarPublication
+          POM=android/build/publications/mavenAar/pom-default.xml
+          grep -q "androidx.webkit" "$POM" || { echo "POM is missing androidx.webkit — see issue #36"; exit 1; }
+          grep -q "androidx.appcompat" "$POM" || { echo "POM is missing androidx.appcompat — see issue #36"; exit 1; }
+          echo "POM dependency metadata OK"
+
   ios:
     runs-on: macos-latest
     name: ios
