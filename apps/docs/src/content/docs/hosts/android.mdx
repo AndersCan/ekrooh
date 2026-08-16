@@ -55,4 +55,9 @@ npm run prebuilds      # fetch Bare Kit prebuilds (prebuilds/)
 ./gradlew :examples:android-app:assembleDebug
 ```
 
+The Gradle `Exec` tasks that build the JS inputs assume a **flat node_modules**
+(npm/yarn, or pnpm with `nodeLinker=hoisted`) and run from the repo root — see
+[Android Host Build](../consumers/android-host-build) before copying the
+`build.gradle` pattern into a consumer repo.
+
 Tests: JUnit in `src/test/` (`./gradlew :bare-host:testDebugUnitTest`).

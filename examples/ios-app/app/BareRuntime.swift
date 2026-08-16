@@ -20,6 +20,12 @@ final class BareRuntime {
     try? FileManager.default.createDirectory(
       at: storageDir, withIntermediateDirectories: true
     )
+    // Ephemeral cache dir: kept outside the durable storage dir so the worklet
+    // can treat it as disposable (asset cache, photo spool, temp).
+    let bareCacheDir = documents.appendingPathComponent("bare-cache", isDirectory: true)
+    try? FileManager.default.createDirectory(
+      at: bareCacheDir, withIntermediateDirectories: true
+    )
     self.handoffURL = storageDir.appendingPathComponent("handoff.json")
     // A previous run may have left a handoff file pointing at a dead ephemeral
     // port; remove it so polling never loads a stale origin.
@@ -46,7 +52,11 @@ final class BareRuntime {
       name: "main.core",
       ofType: "bundle",
       inBundle: .main,
-      arguments: [webAssetsURL.path, storageDir.path]
+      // On-device argv contract: [webAssets, storage, cache] (see
+      // `resolveWorkletConfig()`). All three must be directories; a
+      // missing/absent cache falls back to storage with a warning, so pass a
+      // real cache dir to keep boots quiet.
+      arguments: [webAssetsURL.path, storageDir.path, bareCacheDir.path]
     )
     self.worklet = worklet
     self.ipc = IPC(worklet: worklet)

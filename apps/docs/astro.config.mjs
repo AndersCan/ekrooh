@@ -73,6 +73,10 @@ export default defineConfig({
               slug: 'consumers/android-aar',
             },
             {
+              label: 'Android Host Build',
+              slug: 'consumers/android-host-build',
+            },
+            {
               label: 'iOS Embedding',
               slug: 'consumers/ios-embedding',
             },

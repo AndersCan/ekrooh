@@ -56,6 +56,30 @@ export function createAppRuntime(): WorkletRuntime {
 See [Dev Mode & Storage](./dev-mode-storage) for running a stateful consumer
 backend under the CLI.
 
+## On-device argv contract
+
+On-device hosts start the worklet with **three positional arguments**, in this
+exact order, each an **existing directory**:
+
+| Position | Arg         | Contents                                                    |
+| -------- | ----------- | ----------------------------------------------------------- |
+| 0        | `webAssets` | the built web app dir, served at `/` by the loopback server |
+| 1        | `storage`   | durable app-sandbox: `handoff.json` + the p2p corestore     |
+| 2        | `cache`     | ephemeral app-sandbox: asset-cache, photo spool, temp       |
+
+The arguments land at `Bare.argv[0..2]`. The Android reference host
+(`MainActivity.kt`) and iOS host (`BareRuntime.swift`) both pass all three:
+
+```kotlin
+worklet.start("/main.core.bundle", bundleStream,
+    arrayOf(webappDir.absolutePath, storageDir.absolutePath, cacheDir.absolutePath))
+```
+
+If `cache` is missing or not a directory, the runtime falls back to `storage`
+and logs a warning (`[bare] cache dir missing or not a directory...`). The
+fallback is graceful, but pass a real cache dir so boots are quiet and
+ephemeral data (asset cache, photo spool) doesn't pollute durable storage.
+
 ## CLI config tokens (dev / e2e)
 
 `resolveCliConfig()` parses the bare CLI argv as `key=value` tokens and returns

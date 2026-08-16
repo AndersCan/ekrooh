@@ -37,12 +37,13 @@ function readBareArgv(): string[] {
 }
 
 /** Resolves the host-provided worklet configuration from `start(...)`
- * arguments. On-device hosts pass `["<webAssets>", "<storage>", "<cache>"]`,
- * landing at `Bare.argv[0..2]`; the Bare CLI (dev) passes the binary and the
- * script path instead, so a missing/absent config means dev mode (auth off,
- * fixed port, no handoff file). Falls back to the labeled CLI token syntax
- * (see `resolveCliConfig`) when the positional shape doesn't match, so the
- * same entry works for both device and dev runs. */
+ * arguments. On-device hosts pass `["<webAssets>", "<storage>", "<cache>"]`
+ * (three existing directories, in that order), landing at `Bare.argv[0..2]`;
+ * the Bare CLI (dev) passes the binary and the script path instead, so a
+ * missing/absent config means dev mode (auth off, fixed port, no handoff
+ * file). Falls back to the labeled CLI token syntax (see `resolveCliConfig`)
+ * when the positional shape doesn't match, so the same entry works for both
+ * device and dev runs. */
 export function resolveWorkletConfig(): WorkletRuntimeOptions {
   const argv = readBareArgv();
   const webAssets = argv[0];
@@ -56,7 +57,8 @@ export function resolveWorkletConfig(): WorkletRuntimeOptions {
           typeof cache === 'string' && isDir(cache) ? cache : storage;
         if (cacheDir !== cache) {
           console.warn(
-            '[bare] cache dir missing or not a directory; falling back to the storage dir',
+            `[bare] cache dir missing or not a directory; falling back to the storage dir. ` +
+              `Pass three dirs in order to the worklet: [webAssets, storage, cache].`,
           );
         }
         return { webAssets, storage, cache: cacheDir };

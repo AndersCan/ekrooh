@@ -1,0 +1,72 @@
+---
+title: Android Host Build
+description: Build prerequisites for the Android host shell — repo root working dir, flat node_modules, and bare-link/bare-pack.
+---
+
+The Android reference shell (`examples/android-app`) wires the JS toolchain
+(`bare-link`, `bare-pack`, `npm run build:core` / `build:web`) into Gradle with
+`Exec` tasks. This page documents the assumptions those tasks make, so copying
+the pattern into your own repo doesn't fail with confusing errors.
+
+## The JS tasks run from the repo root
+
+The `Exec` tasks (`link`, `buildBareJs`, `buildWebAssets`, `packApp`) run from
+the **repo root** — the directory holding `package.json`, `node_modules`, and
+the npm scripts they invoke. The working dir is computed deterministically:
+
+- The Gradle **root project** (`rootProject.projectDir`) by default.
+- Override with `-Pekrooh.repoDir=<absolute dir>` when your npm root differs
+  from the Gradle root (e.g. a monorepo where Gradle and npm live at different
+  levels).
+
+Never hardcode a relative depth like `"../../"` — Gradle resolves it against
+the module's project dir, so it silently points at the wrong directory when the
+module sits at a different depth (GitHub issue #38).
+
+Task outputs that belong to the module (the addons dir, the packed bundle) are
+written under the module's own project dir, so they don't depend on the working
+dir.
+
+## The JS toolchain needs a flat node_modules
+
+`bare-link` and `bare-pack` traverse `node_modules` as a **flat** tree (npm and
+yarn layout). Under pnpm's default isolated linker, `bare-pack` cannot resolve
+modules through the symlinked virtual store and fails with `MODULE_NOT_FOUND`
+even though Node itself resolves the same graph fine (GitHub issue #37).
+
+- **pnpm**: set `nodeLinker=hoisted` (pnpm 10: `.npmrc`; pnpm 11:
+  `pnpm-workspace.yaml`). Only auth/registry settings are read from `.npmrc` in
+  pnpm 11.
+- **npm / yarn**: the default layout works.
+
+## Pass the entry package to bare-link
+
+`bare-link` with no `[entry]` defaults to the **cwd package**. In a monorepo
+root whose `package.json` has no direct native-addon deps (`bare-*`,
+rocksdb/sodium/udx), it exits 0 and links **nothing** — the APK then ships
+without the p2p native addons and the worklet aborts at runtime with
+`dlopen failed`. Pass the app bundle package as the entry explicitly:
+
+```bash
+bare-link --preset android --out <addons-dir> <entry-package>
+```
+
+The reference shell's `link` task guards against this: it fails the build when
+the addons dir ends up empty, so you never produce a silently broken APK.
+
+## Example: consumer `build.gradle` snippet
+
+```groovy
+// Root of the JS toolchain — override with -Pekrooh.repoDir=<dir> if needed.
+def repoRootProp = providers.gradleProperty("ekroohRepoDir").orNull
+project.ext.repoRoot = repoRootProp != null ? file(repoRootProp) : rootProject.projectDir
+
+tasks.register("link", Exec) {
+  commandLine "bash", "-c", "node_modules/.bin/bare-link --preset android --out ${projectDir}/src/main/addons <entry-package>"
+  workingDir project.ext.repoRoot
+  doLast {
+    def linked = file("src/main/addons").exists() ? file("src/main/addons").listFiles().findAll { it.isFile() } : []
+    if (linked.isEmpty()) throw new GradleException("bare-link linked nothing — check flat node_modules and the entry package")
+  }
+}
+```

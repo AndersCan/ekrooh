@@ -5,6 +5,39 @@ All notable changes to `@ekrooh/bare` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **bare-host POM drops `api` dependencies** (`android/build.gradle`, issue
+  #36): the published AAR's POM carried no `<dependencies>` because the
+  publication attached the AAR artifact directly instead of the AGP `release`
+  component. Consumers compiling against `io.github.anderscan.ekrooh:bare-host`
+  failed on `WebViewCompat`/appcompat. The publication now uses
+  `from components.release`, so the POM carries the `api` deps; CI asserts it.
+- **Reference hosts pass the full worklet argv** (`examples/android-app`,
+  `examples/ios-app`, issue #39): both shells now start the worklet with the
+  three-dir contract `[webAssets, storage, cache]`, silencing the
+  `cache dir missing or not a directory` fallback warning on every boot.
+- **Android example build works at any module depth** (`examples/android-app/
+build.gradle`, issue #38): the JS `Exec` tasks use the Gradle root project
+  (overridable via `-Pekrooh.repoDir=<dir>`) instead of a hardcoded `"../../"`
+  working dir, and write outputs under the module's own dir.
+- **`link` task fails on an empty link set** (`examples/android-app/
+build.gradle`, issue #37): bare-link exiting 0 while linking nothing (pnpm
+  isolated node_modules, or a monorepo root without direct native-addon deps)
+  now fails the build with an actionable message instead of shipping an APK
+  that aborts with `dlopen failed`.
+
+### Docs
+
+- **On-device argv contract** documented in `apps/docs` (consumers/
+  worklet-entry + host-handoff): `[webAssets, storage, cache]` order, the
+  cache-dir fallback warning, and the labeled CLI tokens.
+- **New consumer guide** `consumers/android-host-build`: repo-root working dir,
+  flat-node_modules requirement (pnpm `nodeLinker=hoisted`), passing the entry
+  package to `bare-link`, and the empty-link-set guard.
+
 ## [0.3.0] - 2026-08-16
 
 ### Added

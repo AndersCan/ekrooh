@@ -97,6 +97,10 @@ const result = await transport.invoke(healthEvents.ping());
 ## 5. Native side
 
 - Android: see [Android AAR Setup](./android-aar) + [Host Handoff](./host-handoff).
+  When you copy the reference `build.gradle` (the JS `Exec` tasks) into your own
+  repo, read [Android Host Build](./android-host-build) first — it documents
+  the flat-node_modules requirement, the repo-root working dir, and how to pass
+  the entry package to `bare-link`.
 - iOS: see [iOS Embedding](./ios-embedding).
 - Everything in between: [P2P Folder Stack](./p2p-folder-stack) for storage +
   sync, [Backend → Web Push](./backend-push) for server-initiated events.
