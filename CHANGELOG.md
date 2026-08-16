@@ -7,6 +7,23 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Peer-drive replication in the on-device p2p verify worklet** (`core/
+p2p-verify.core.ts`, issue #41): the worklet now replicates a drive across
+  two real peers over the local DHT — a creator announces its drive and
+  serves it; a reader joins the topic client-only, opens the drive by key,
+  `ready()`s it (the call the Android photo app timed out on), and reads a
+  photo. This is the platform-level reproduction gate for "Android cannot
+  replicate a peer's drive": green on a runtime proves it can do peer reads.
+- **Android emulator p2p verify** (`examples/android-app`): the reference app
+  packs `core/p2p-verify.core.ts` as `p2p-verify.bundle` and ships a
+  `P2PVerifyTest` instrumentation test that boots it on an emulator; a new
+  `android-emulator` CI job runs it (KVM emulator on `ubuntu-latest`).
+  Verified locally: `peer-drive 308ms` on an Android emulator — the framework
+  stack handles peer-drive reads on Android bare-kit, pointing the #41
+  timeout at the consumer's wiring rather than the runtime.
+
 ### Fixed
 
 - **bare-host POM drops `api` dependencies** (`android/build.gradle`, issue

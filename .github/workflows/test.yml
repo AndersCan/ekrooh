@@ -79,6 +79,52 @@ jobs:
       - name: Gradle build (includes host JUnit tests)
         run: ./gradlew build
 
+  android-emulator:
+    name: android-emulator (p2p verify)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: tools platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Fetch Bare Kit prebuilds
+        run: npm run prebuilds
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build JS and web assets for Android
+        run: npm run build
+
+      - name: Run the on-device p2p verify instrumentation test (issue #41)
+        # Boots `core/p2p-verify.core.ts` on an Android emulator: real DHT +
+        # Noise handshake + peer-drive replication (open a peer's drive by
+        # key, ready(), read a photo). This is the reproduction gate for the
+        # "Android cannot replicate a peer's drive" report — the framework
+        # stack must stay green here.
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: ./gradlew :examples:android-app:connectedDebugAndroidTest
+
       - name: Assert the published POM carries the api dependencies
         # Regression guard for GitHub issue #36: the bare-host POM used to be
         # published with no <dependencies> at all (consumers failed to compile

@@ -14,6 +14,7 @@ android {
     targetSdk = 35
     versionCode = 1
     versionName = "1.0"
+    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   compileOptions {
@@ -167,11 +168,28 @@ tasks.register("packApp", Exec) {
   configureExec(it, "${bin} --preset android --out ${projectDir}/src/main/assets/main.core.bundle ${project.ext.repoRoot}/core/main.core.gen.js")
 }
 
+// On-device p2p verification bundle (issue #41): `core/p2p-verify.core.ts`
+// (esbuild'd by `build:p2p-verify`, then bare-pack'd) is booted by the
+// instrumentation test (`P2PVerifyTest`) to reproduce peer-drive replication
+// on the emulator. Dev tooling — never shipped in a release APK surface.
+tasks.register("buildP2pVerifyJs", Exec) {
+  def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+  def npm = isWindows ? "npm.cmd" : "npm"
+  configureExec(it, "${npm} run build:p2p-verify")
+}
+
+tasks.register("packP2pVerify", Exec) {
+  dependsOn "buildP2pVerifyJs"
+  def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+  def bin = isWindows ? "node_modules\\.bin\\bare-pack.cmd" : "node_modules/.bin/bare-pack"
+  configureExec(it, "${bin} --preset android --out ${projectDir}/src/main/assets/p2p-verify.bundle ${project.ext.repoRoot}/core/p2p-verify.core.gen.js")
+}
+
 tasks.register("pack") {
   dependsOn packApp
 }
 
-preBuild.dependsOn link, buildWebAssets, pack
+preBuild.dependsOn link, buildWebAssets, pack, packP2pVerify
 
 dependencies {
   implementation project(":bare-host")
@@ -180,4 +198,10 @@ dependencies {
   implementation "androidx.activity:activity-ktx:1.9.3"
   implementation "com.google.android.material:material:1.12.0"
   implementation "androidx.constraintlayout:constraintlayout:2.1.4"
+
+  // Instrumentation tests (P2PVerifyTest boots the on-device p2p verify
+  // worklet on the emulator — issue #41 reproduction gate).
+  androidTestImplementation "androidx.test:runner:1.5.2"
+  androidTestImplementation "androidx.test:core-ktx:1.5.0"
+  androidTestImplementation "androidx.test.ext:junit:1.1.5"
 }
