@@ -48,17 +48,28 @@ jobs:
       - name: Publish @ekrooh/bare to npm
         # Trusted publishing (OIDC): `id-token: write` above + the trusted
         # publisher configured on npmjs.com for this workflow. No NPM_TOKEN.
+        # Idempotent: skips when this exact version is already on the registry
+        # so a partial release can be re-run after a failed later step.
         # npm refuses prerelease versions without an explicit dist-tag: derive
         # it from the version (beta/alpha/rc → that identifier, stable → latest).
         run: |
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          if npm view "@ekrooh/bare@$VERSION" version >/dev/null 2>&1; then
+            echo "npm: @ekrooh/bare@$VERSION already published — skipping"
+            exit 0
+          fi
           TAG=$(node -e "const v=require('./package.json').version; const m=v.match(/-([a-z]+)\./); process.stdout.write(m ? m[1] : 'latest')")
           npm publish --access public --tag "$TAG"
 
       - name: Publish :bare-host AAR to GitHub Packages
+        # The publication is signed (see android/build.gradle), so the signing
+        # secrets are required here too — not just the Maven Central step.
         run: ./gradlew :bare-host:publishMavenAarPublicationToGitHubPackagesRepository
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ github.token }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
 
       - name: Publish :bare-host AAR to Maven Central
         # Sonatype Central Portal (OSSHR staging API) — no auth for consumers.
