@@ -62,6 +62,7 @@ export default defineConfig({
               label: 'End-to-End Quickstart',
               slug: 'consumers/end-to-end',
             },
+            { label: 'Web Rendering', slug: 'consumers/rendering' },
             { label: 'Worklet Entry', slug: 'consumers/worklet-entry' },
             {
               label: 'Authoring a Plugin',

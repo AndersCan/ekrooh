@@ -1,12 +1,6 @@
 import { Actor, RealClock, event, type Clock } from '@mantaq/core';
-import { ActorMap, states } from '@mantaq/sugar';
-import {
-  createPendingCall,
-  rejectedE,
-  respondE,
-  resolvedE,
-  startE,
-} from './pending-call';
+import { ActorMap, onOutput, states } from '@mantaq/sugar';
+import { createPendingCall, respondE, settledE, startE } from './pending-call';
 import type {
   MessageHeader,
   PluginDispatchHeader,
@@ -16,18 +10,22 @@ import type {
 /**
  * PROTOTYPE — side-by-side comparison against `rpc-messenger.ts`.
  *
- * One messenger machine owns one `ActorMap(factory, { autoReap })`. Each
- * in-flight `invoke` is a worker child (see `pending-call.ts`) spawned into
- * the map, keyed by requestId. The messenger passes itself into the map's
- * factory, so every worker holds it in context and EMITS `RESOLVED` /
- * `REJECTED` back to it; this machine listens (declared as inputs) and
- * resolves / rejects the pending promise from its context. `autoReap` removes
- * each worker the moment it reaches a final state — no manual `kill`, no
- * `done` subscription. `ActorMap.send` to an unknown key is a no-op, matching
- * the Map version.
+ * One messenger machine owns one `ActorMap(factory, { autoReap: true })`. Each
+ * in-flight `invoke` is a request handler child (see `pending-call.ts`), keyed
+ * by requestId. The handler owns its outcome and reports it by emitting
+ * `settled` as a DECLARED OUTPUT on its terminal transition; the map factory
+ * wires that output back into this machine with one `onOutput` line. The
+ * machine re-emits it as `done`; the shell's `onOutput(manager, …)` resolves /
+ * rejects the pending promise. A handler that dies into `__error` emits no
+ * `settled` — the factory's `done` guard rejects instead, so the invoke never
+ * hangs. No promise ever lives in the machine — the promise bridge is a
+ * shell-side map keyed by requestId, exactly like the Map version. `autoReap`
+ * removes each handler the moment it reaches a final state (including
+ * `__error`).
+ * `ActorMap.send` to an unknown key is a no-op, matching the Map version.
  *
- * This file deliberately contains exactly one `new Actor` (the invoke
- * machine) and one `new ActorMap`; per-request workers are the map's dynamic
+ * This file deliberately contains exactly one `new Actor` (the messenger
+ * machine) and one `new ActorMap`; per-request handlers are the map's dynamic
  * children, created in `pending-call.ts`.
  */
 type DistributiveOmit<T, K extends keyof any> = T extends any
@@ -70,18 +68,15 @@ const invokeE = event('INVOKE')<{
   requestId: string;
   requestType: string;
   timeoutMs: number;
-  resolve: (header: MessageHeader) => void;
-  reject: (reason?: unknown) => void;
 }>();
 
-type Pending = {
-  resolve: (header: MessageHeader) => void;
-  reject: (reason?: unknown) => void;
+type Settled = {
+  requestId: string;
+  status: 'answered' | 'timedOut';
+  header?: MessageHeader;
 };
 
-type MessengerContext = {
-  pending: Record<string, Pending>;
-};
+const doneE = event('DONE')<Settled>();
 
 export function createProtocolMessenger(
   send: (
@@ -92,58 +87,77 @@ export function createProtocolMessenger(
 ): ProtocolMessenger {
   const clock = options.clock ?? new RealClock();
 
-  let pending: ActorMap;
-  const invoke = new Actor({
-    inputs: [invokeE, respondE, resolvedE, rejectedE],
+  type Pending = {
+    requestType: string;
+    resolve: (header: MessageHeader) => void;
+    reject: (reason?: unknown) => void;
+  };
+  const pending = new Map<string, Pending>();
+
+  let requests: ActorMap;
+  const manager = new Actor({
+    inputs: [invokeE, respondE, settledE],
+    outputs: [doneE],
     states: [ready],
     initial: ready,
     clock,
-    context: { pending: {} } as MessengerContext,
     setup: (m) => {
-      m.on(ready, invokeE, (event, opts) => {
-        const { requestId, requestType, timeoutMs, resolve, reject } =
-          event.payload;
-        const s = opts.context.get();
-        opts.context.set({
-          ...s,
-          pending: { ...s.pending, [requestId]: { resolve, reject } },
-        });
-        pending.ensure(requestId);
-        pending.send(requestId, startE.create({ requestType, timeoutMs }));
+      m.on(ready, invokeE, (event) => {
+        const { requestId, timeoutMs } = event.payload;
+        requests.ensure(requestId);
+        requests.send(requestId, startE.create({ timeoutMs }));
         return {};
       });
       m.on(ready, respondE, (event) => {
         const requestId = event.payload.header.requestId;
         if (!requestId) return {};
-        pending.send(requestId, respondE.create(event.payload));
+        requests.send(requestId, respondE.create(event.payload));
         return {};
       });
-      m.on(ready, resolvedE, (event, opts) => {
-        const s = opts.context.get();
-        const call = s.pending[event.payload.requestId];
-        if (!call) return {};
-        const next = { ...s.pending };
-        delete next[event.payload.requestId];
-        opts.context.set({ ...s, pending: next });
-        call.resolve(event.payload.header);
-        return {};
-      });
-      m.on(ready, rejectedE, (event, opts) => {
-        const s = opts.context.get();
-        const call = s.pending[event.payload.requestId];
-        if (!call) return {};
-        const next = { ...s.pending };
-        delete next[event.payload.requestId];
-        opts.context.set({ ...s, pending: next });
-        call.reject(event.payload.error);
-        return {};
-      });
+      m.on(ready, settledE, (event) => ({
+        emit: [doneE.create(event.payload)],
+      }));
     },
   });
-  pending = new ActorMap(
-    (requestId) => createPendingCall(requestId, invoke, clock),
+  requests = new ActorMap(
+    (requestId) => {
+      const child = createPendingCall(requestId, clock);
+      onOutput(child, (e) => {
+        if (settledE.is(e)) manager.send(e);
+      });
+      // A handler that dies into `__error` never emits `settled` — the shell
+      // promise would hang. `done` still fires, and the settlement output
+      // drains before this microtask runs, so a still-pending entry here
+      // means the handler died unsettled: reject so the invoke never hangs.
+      child.on('done', () => {
+        queueMicrotask(() => {
+          const call = pending.get(requestId);
+          if (!call) return;
+          pending.delete(requestId);
+          call.reject(
+            new Error(`invoke timeout for ${call.requestType} (${requestId})`),
+          );
+        });
+      });
+      return child;
+    },
     { autoReap: true },
   );
+
+  onOutput(manager, (e) => {
+    if (!doneE.is(e)) return;
+    const { requestId, status, header } = e.payload;
+    const call = pending.get(requestId);
+    if (!call) return;
+    pending.delete(requestId);
+    if (status === 'answered' && header) {
+      call.resolve(header);
+    } else {
+      call.reject(
+        new Error(`invoke timeout for ${call.requestType} (${requestId})`),
+      );
+    }
+  });
 
   return {
     dispatch(request, payload) {
@@ -155,13 +169,16 @@ export function createProtocolMessenger(
       const requestWithId = withRequestId(request);
 
       return new Promise<MessageHeader>((resolve, reject) => {
-        invoke.send(
+        pending.set(requestWithId.requestId, {
+          requestType: request.type,
+          resolve,
+          reject,
+        });
+        manager.send(
           invokeE.create({
             requestId: requestWithId.requestId,
             requestType: request.type,
             timeoutMs,
-            resolve,
-            reject,
           }),
         );
         send(requestWithId, payload);
@@ -169,7 +186,7 @@ export function createProtocolMessenger(
     },
     handleIncoming(header) {
       if (!header.requestId) return;
-      invoke.send(respondE.create({ header }));
+      manager.send(respondE.create({ header }));
     },
   };
 }

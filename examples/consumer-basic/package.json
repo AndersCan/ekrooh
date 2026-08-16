@@ -1,0 +1,18 @@
+{
+  "name": "@ekrooh/bare-example-consumer-basic",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Minimal runnable @ekrooh/bare consumer: own worklet entry + app.basic plugin (invoke + push) + web layer + real-stack e2e.",
+  "scripts": {
+    "dev": "concurrently \"vp dev\" \"npm run dev:worklet\"",
+    "dev:worklet": "node scripts/boot-worklet.mjs --watch",
+    "build:web": "vp build",
+    "build:worklet": "node scripts/boot-worklet.mjs --bundle-only",
+    "test:e2e": "node ../../scripts/playwright-local-browsers.mjs test --config examples/consumer-basic/playwright.config.ts"
+  },
+  "dependencies": {
+    "@ekrooh/bare": "file:../..",
+    "lit-html": "^3.3.2"
+  }
+}

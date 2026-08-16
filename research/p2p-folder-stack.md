@@ -81,6 +81,19 @@ Known gaps / caveats:
   (https://docs.pears.com/how-to/stream-and-share-media/create-a-full-peer-to-peer-filesystem-with-hyperdrive/).
 - iOS: sockets need a background mode (or same foreground-only stance) and the
   holepunch bootstrap servers must be reachable.
+- **macOS dev pitfall (issue #28):** a long-lived local DHT bootstrap gets
+  poisoned by dead announce records — swarm processes killed without a clean
+  unannounce leave records that hyperdht only expires after its 20-minute
+  record TTL. Fresh peers then discover the dead records, burn their
+  connection budget on `ETIMEDOUT`/`ECONNRESET`, and never connect to the live
+  peers, until the records age out. Same-process and cross-runtime
+  (bare↔Node) Noise handshakes all pass on a fresh local DHT; the failures are
+  state, not a runtime/addon bug at the pinned versions. The `smoke:p2p` worklet
+  (`core/p2p-verify.core.ts`) now does a **real connect + handshake** on its own
+  ephemeral-loopback bootstrap (immune to stale state) and asserts an encrypted
+  message round-trip; a repeated `peers=0`/handshake-timeout in dev usually
+  means a stale bootstrapper from an earlier run is still alive — restart it or
+  wait out the 20-minute record TTL.
 
 ## Serving a remote peer's file to the WebView
 

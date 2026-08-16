@@ -1,6 +1,25 @@
 import { AsyncDirective, directive } from 'lit-html/async-directive.js';
 import type { ReadableAtom } from 'nanostores';
 
+/**
+ * Bind a nanostores atom to a template slot.
+ *
+ * ONLY valid as a direct template expression — `${useStore($x)}` /
+ * `${useStore($x, select)}` — where lit-html evaluates the directive inside
+ * the `AsyncDirective` lifecycle and swaps the returned marker for the live
+ * value. Do NOT assign the result to a variable and dereference it: the
+ * returned object is a directive marker, so reading a field off it crashes
+ * (`Cannot read properties of undefined`) or silently breaks the branch.
+ *
+ * To bind several atoms and read fields, derive one nanostores `computed`
+ * view-model and consume it with a single binding:
+ *
+ * ```ts
+ * const $vm = computed([$a, $b], (a, b) => ({ a, b }));
+ * html`${useStore($vm, (vm) => body(vm))}`
+ * ```
+ */
+
 class UseStoreDirective extends AsyncDirective {
   #unsub: (() => void) | undefined;
   #store: ReadableAtom<unknown> | undefined;

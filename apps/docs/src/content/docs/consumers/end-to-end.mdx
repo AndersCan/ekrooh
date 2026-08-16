@@ -7,6 +7,18 @@ This guide is the consumer path: you have the npm package and the Android AAR,
 and you want an app running. The framework repo's own docs describe its
 internal structure; this is the "make it mine" path.
 
+> **Want it running instead of described?** The repo ships a minimal runnable
+> consumer at `examples/consumer-basic/` (private workspace package): its own
+> worklet entry, an `app.basic` plugin (one invoke + one backend → web push),
+> the web layer, and a real-stack e2e. It is the copy-paste starting point for
+> everything on this page:
+>
+> ```bash
+> npm run build:pkg                    # compile @ekrooh/bare to dist/ (prereq)
+> CONSUMER_BASIC_PORT=8091 npm run test:e2e:consumer   # real-stack e2e
+> npm --prefix examples/consumer-basic run dev         # dev loop (Vite + bare)
+> ```
+
 ## What you end up with
 
 ```

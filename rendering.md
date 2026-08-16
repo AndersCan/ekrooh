@@ -8,6 +8,39 @@ Call **`render()` once** on the app root. Do not subscribe to stores with `effec
 
 Inside directives, use **`listen()`**, not `subscribe()`, so the initial value comes from `render()` and you do not get a redundant first callback.
 
+## Consumer footguns
+
+**`useStore` is only valid as a direct template expression** — `${useStore($x)}`
+/ `${useStore($x, select)}`. It is a lit-html `AsyncDirective`: lit-html
+evaluates it inside the directive lifecycle and replaces the returned marker
+with the live value. Assigning the result to a variable and dereferencing it
+gives you the directive marker, not the value — which crashes (`Cannot read
+properties of undefined`) or silently breaks the branch:
+
+```ts
+// ❌ Wrong — `v` is a directive marker, not the store value
+const v = useStore($x);
+return html`${v}`;
+
+// ✅ Right — direct template expression
+return html`${useStore($x)}`;
+```
+
+To bind several atoms and read fields, do not compose `useStore` calls. Derive
+one **`computed` view-model** and consume it with a single binding:
+
+```ts
+const $vm = computed([$user, $session], (user, session) => ({
+  name: user.name,
+  online: session.online,
+}));
+
+return html`${useStore($vm, (vm) => body(vm))}`;
+```
+
+The same applies to any directive wrapper you add (`useMapKey`, ...): it is a
+marker for lit-html, not a value.
+
 ## Store patterns (nanostores)
 
 - **`atom`** — single value; `set` / `get`.

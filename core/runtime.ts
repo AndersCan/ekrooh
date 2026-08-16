@@ -30,14 +30,21 @@ export { getIPC } from './lib/get-ipc';
 /** Global provided by the Bare runtime (also present in bare-kit worklets). */
 declare const Bare: { argv?: string[] } | undefined;
 
+function readBareArgv(): string[] {
+  return typeof Bare !== 'undefined' && Array.isArray(Bare.argv)
+    ? Bare.argv
+    : [];
+}
+
 /** Resolves the host-provided worklet configuration from `start(...)`
  * arguments. On-device hosts pass `["<webAssets>", "<storage>", "<cache>"]`,
  * landing at `Bare.argv[0..2]`; the Bare CLI (dev) passes the binary and the
  * script path instead, so a missing/absent config means dev mode (auth off,
- * fixed port, no handoff file). */
+ * fixed port, no handoff file). Falls back to the labeled CLI token syntax
+ * (see `resolveCliConfig`) when the positional shape doesn't match, so the
+ * same entry works for both device and dev runs. */
 export function resolveWorkletConfig(): WorkletRuntimeOptions {
-  const argv =
-    typeof Bare !== 'undefined' && Array.isArray(Bare.argv) ? Bare.argv : [];
+  const argv = readBareArgv();
   const webAssets = argv[0];
   const storage = argv[1];
   const cache = argv[2];
@@ -58,7 +65,77 @@ export function resolveWorkletConfig(): WorkletRuntimeOptions {
       // Fall through: not a device configuration.
     }
   }
-  return {};
+  return resolveCliConfig(argv);
+}
+
+/**
+ * Parses the dev/CLI labeled-token configuration from bare CLI arguments:
+ * `webassets=<dir>`, `storage=<dir>`, `cache=<dir>`, `host=<addr>`,
+ * `port=<n>`, `auth=<on|off|true|false|1|0>` — a single `key=value` separator.
+ * Unknown labels (e.g. `bootstrap=127.0.0.1:49737`) are ignored and stay
+ * consumer-owned.
+ *
+ * Returns the equivalent `WorkletRuntimeOptions` in **dev mode**: `deviceMode:
+ * false` (so a `storage=` token does not flip auth on or make the port
+ * ephemeral), `auth: false`, `port: 8080`, each overridable by a token. When
+ * no labeled tokens are present it returns `{}` (plain dev defaults).
+ */
+export function resolveCliConfig(
+  argv: readonly string[] = readBareArgv(),
+): WorkletRuntimeOptions {
+  const parsed: {
+    webAssets?: string;
+    storage?: string;
+    cache?: string;
+    host?: string;
+    port?: number;
+    auth?: boolean;
+  } = {};
+  let matched = false;
+
+  for (const token of argv) {
+    const m = /^([A-Za-z][A-Za-z0-9]*)=(.*)$/.exec(token);
+    if (!m) continue;
+    const [, key, value] = m;
+    matched = true;
+    switch (key) {
+      case 'webassets':
+        parsed.webAssets = value;
+        break;
+      case 'storage':
+        parsed.storage = value;
+        break;
+      case 'cache':
+        parsed.cache = value;
+        break;
+      case 'host':
+        parsed.host = value;
+        break;
+      case 'port': {
+        const n = Number(value);
+        if (Number.isInteger(n) && n >= 0 && n <= 65535) {
+          parsed.port = n;
+        } else {
+          console.warn(`[bare] ignoring invalid port= token: "${value}"`);
+        }
+        break;
+      }
+      case 'auth':
+        parsed.auth = value !== 'off' && value !== 'false' && value !== '0';
+        break;
+      default:
+        // Unknown labels are consumer-owned (e.g. hyperswarm bootstrap).
+        break;
+    }
+  }
+
+  if (!matched) return {};
+  return {
+    deviceMode: false,
+    auth: false,
+    port: 8080,
+    ...parsed,
+  };
 }
 
 export type WorkletRuntimeOptions = {
@@ -75,6 +152,10 @@ export type WorkletRuntimeOptions = {
   port?: number;
   /** Require the per-session token/cookie. Defaults to on in device mode. */
   auth?: boolean;
+  /** Explicit device-mode override. Defaults to on whenever `storage` is set
+   * (the on-device 3-arg contract); `resolveCliConfig` resolves it to false so
+   * a dev backend keeps auth off + fixed port even with a storage dir. */
+  deviceMode?: boolean;
   /** Additional plugin manifests to register after the canonical defaults
    * (consumer product plugins, e.g. `app.photos`). */
   plugins?: PluginManifest[];
@@ -129,7 +210,7 @@ function writeIpc(
 export function createWorkletRuntime(
   options: WorkletRuntimeOptions = {},
 ): WorkletRuntime {
-  const deviceMode = options.storage !== undefined;
+  const deviceMode = options.deviceMode ?? options.storage !== undefined;
   const auth = options.auth ?? deviceMode;
   const port = options.port ?? (deviceMode ? 0 : 8080);
 

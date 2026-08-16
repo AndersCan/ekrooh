@@ -135,6 +135,7 @@ const PUBLIC_SURFACES: Record<string, { entry: string; exports: string[] }> = {
       'createLoopbackServer',
       'createWorkletRuntime',
       'getIPC',
+      'resolveCliConfig',
       'resolveWorkletConfig',
     ],
   },

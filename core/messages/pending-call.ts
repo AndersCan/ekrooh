@@ -1,16 +1,15 @@
 import { Actor, event, type AnyActor, type Clock } from '@mantaq/core';
-import { states } from '@mantaq/sugar';
+import { states, withTimeout } from '@mantaq/sugar';
 import type { MessageHeader } from './types';
 
 /**
- * One pending-RPC worker — a dynamic child of the messenger's ActorMap. Its
- * lifecycle is `idle` → `awaiting` → `resolved` | `timedOut` (both final).
- * The messenger passes itself into the factory, so the worker holds it in
- * context and EMITS `RESOLVED` / `REJECTED` back to it from its final-state
- * effects — the invoke machine listens and resolves / rejects the promise
- * (context can hold anything, including an actor). The timeout is the
- * `awaiting` effect on the injected clock, auto-cancelled by the abort signal
- * on resolution. The map's `autoReap` removes the worker on final state.
+ * One pending-RPC handler — a dynamic child of the messenger's ActorMap. Its
+ * lifecycle is `idle` → `awaiting` → `resolved` | `timedOut` (both final). It
+ * owns its outcome and reports it by EMITTING `settled` as a declared output
+ * on its terminal transition; the messenger wires that output back to itself
+ * (`onOutput` in the map factory). The timeout is the `awaiting` effect via
+ * `withTimeout`, abort-safe on the injected clock. The map's `autoReap`
+ * removes the handler the moment it reaches a final state.
  */
 
 const { idle, awaiting, resolved, timedOut } = states(
@@ -20,80 +19,54 @@ const { idle, awaiting, resolved, timedOut } = states(
   { name: 'timedOut', final: true },
 );
 
-export const startE = event('START')<{
-  requestType: string;
-  timeoutMs: number;
-}>();
+export const startE = event('START')<{ timeoutMs: number }>();
 export const respondE = event('RESPOND')<{ header: MessageHeader }>();
-export const resolvedE = event('RESOLVED')<{
+export const settledE = event('SETTLED')<{
   requestId: string;
-  header: MessageHeader;
-}>();
-export const rejectedE = event('REJECTED')<{
-  requestId: string;
-  error: unknown;
+  status: 'answered' | 'timedOut';
+  header?: MessageHeader;
 }>();
 const timedOutE = event('TIMED_OUT')();
 
 type PendingContext = {
-  invoke: AnyActor;
-  requestType: string;
-  timeoutMs: number;
-  header?: MessageHeader;
+  timeoutMs?: number;
 };
 
-export function createPendingCall(
-  requestId: string,
-  invoke: AnyActor,
-  clock: Clock,
-): AnyActor {
+export function createPendingCall(requestId: string, clock: Clock): AnyActor {
   return new Actor({
     inputs: [startE, respondE],
+    outputs: [settledE],
     internal: [timedOutE],
     states: [idle, awaiting, resolved, timedOut],
     initial: idle,
     clock,
-    context: { invoke } as PendingContext,
+    context: {} as PendingContext,
     setup: (m) => {
       m.on(idle, startE, (event, opts) => {
         const s = opts.context.get();
-        opts.context.set({
-          ...s,
-          requestType: event.payload.requestType,
-          timeoutMs: event.payload.timeoutMs,
-        });
+        s.timeoutMs = event.payload.timeoutMs;
+        opts.context.set(s);
         return { state: awaiting };
       });
-      m.effect(awaiting, ({ signal, clock, emit, context }) => {
-        clock.setTimeout(
-          context.get().timeoutMs,
-          () => emit(timedOutE.create()),
-          { signal },
+      m.effect(awaiting, (input) => {
+        withTimeout(input.context.get().timeoutMs ?? 5000, input, () =>
+          timedOutE.create(),
         );
       });
-      m.on(awaiting, respondE, (event, opts) => {
-        opts.context.set({
-          ...opts.context.get(),
-          header: event.payload.header,
-        });
-        return { state: resolved };
-      });
-      m.on(awaiting, timedOutE, () => ({ state: timedOut }));
-      m.effect(resolved, ({ context }) => {
-        const s = context.get();
-        s.invoke.send(resolvedE.create({ requestId, header: s.header! }));
-      });
-      m.effect(timedOut, ({ context }) => {
-        const s = context.get();
-        s.invoke.send(
-          rejectedE.create({
+      m.on(awaiting, respondE, (event) => ({
+        state: resolved,
+        emit: [
+          settledE.create({
             requestId,
-            error: new Error(
-              `invoke timeout for ${s.requestType} (${requestId})`,
-            ),
+            status: 'answered',
+            header: event.payload.header,
           }),
-        );
-      });
+        ],
+      }));
+      m.on(awaiting, timedOutE, () => ({
+        state: timedOut,
+        emit: [settledE.create({ requestId, status: 'timedOut' })],
+      }));
     },
   });
 }

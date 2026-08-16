@@ -16,6 +16,51 @@ description: Unit, type, integration, and native end-to-end tests.
   plus a UI test on the iOS simulator (discovery summary, Ping / Payload Echo /
   Roundtrip / Storage permission).
 
+## Real-stack e2e (loopback origin)
+
+The mock-transport suite proves the protocol, not the real stack. The consumer
+app additionally runs an end-to-end pass over the **built** web app served by
+the worklet's own loopback server — the same-origin topology that runs on
+device.
+
+1. **Boot the worklet serving the built web app.** Build the web app, bundle
+   the worklet entry, and start it with the web-assets directory mounted at
+   `/` (dev mode: `createWorkletRuntime({ webAssets, port: 8080 })`, auth off).
+2. **Drive Playwright against the loopback origin** — `http://127.0.0.1:8080`,
+   not the Vite dev server. The page, its WebSocket (same-origin cookie login),
+   and its media URLs all come from one server, exactly like on device.
+3. **Assert every rendered photo actually decoded.** Wait for
+   `img.complete && img.naturalWidth > 0` on every `<img>`; a 200 response with
+   corrupt bytes fails here because `naturalWidth` stays `0`.
+4. **Assert no console errors.** Fail the spec on any `console.error` or
+   uncaught exception.
+
+```ts
+const errors: string[] = [];
+page.on('console', (msg) => {
+  if (msg.type() === 'error') errors.push(msg.text());
+});
+page.on('pageerror', (err) => errors.push(String(err)));
+
+await page.goto('http://127.0.0.1:8080/');
+
+await expect
+  .poll(() =>
+    page
+      .locator('img')
+      .evaluateAll((imgs) =>
+        imgs.every((img) => img.complete && img.naturalWidth > 0),
+      ),
+  )
+  .toBe(true);
+expect(errors).toEqual([]);
+```
+
+This catches regressions a mock suite cannot: corrupt served images, directive
+crashes in the real render tree (e.g. dereferencing a `useStore` marker — see
+[Web Rendering](../consumers/rendering)), and stuck-loading wedges that only
+appear against the real backend.
+
 ## Contract test
 
 `contract.test.ts` freezes the exact exported names of each `@ekrooh/bare`

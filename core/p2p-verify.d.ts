@@ -7,3 +7,5 @@
 declare module 'corestore';
 declare module 'hyperdrive';
 declare module 'hyperswarm';
+declare module 'hyperdht';
+declare module 'udx-native';

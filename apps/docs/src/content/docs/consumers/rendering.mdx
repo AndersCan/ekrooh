@@ -1,0 +1,66 @@
+---
+title: Web Rendering
+description: Render nanostores state with lit-html directives — and the useStore footgun to avoid.
+---
+
+Condensed reference for the reference web app's rendering stack
+(`examples/web/use-store.ts`): one root `render()`, per-binding subscriptions
+via `useStore`, and a `computed` view-model when a branch needs several atoms.
+
+## Core rule
+
+Call **`render()` once** on the app root. Do not subscribe to stores with
+`effect()` (or similar) to re-run the whole template. Bind dynamic text with
+**`useStore($store)`** or **`useStore($store, select)`** so each binding
+subscribes via `store.listen()` and updates only that DOM node.
+
+## Consumer footgun: `useStore` is a directive, not a value
+
+`useStore` is a lit-html **`AsyncDirective`** and is only valid as a **direct
+template expression**:
+
+```ts
+html`${useStore($x)}`;
+html`${useStore($x, (v) => renderLabel(v))}`;
+```
+
+lit-html evaluates the directive inside the directive lifecycle and replaces
+the returned marker with the live value. Do **not** assign the result to a
+variable and dereference it:
+
+```ts
+// ❌ Wrong — `v` is a directive marker, not the store value
+const v = useStore($x);
+return html`${v}`;
+
+// ✅ Right — direct template expression
+return html`${useStore($x)}`;
+```
+
+Dereferencing the marker crashes (`Cannot read properties of undefined`) or
+silently breaks the branch. To bind several atoms and read fields, do not
+compose `useStore` calls — derive one **`computed` view-model** and consume it
+with a single binding:
+
+```ts
+const $vm = computed([$user, $session], (user, session) => ({
+  name: user.name,
+  online: session.online,
+}));
+
+return html`${useStore($vm, (vm) => body(vm))}`;
+```
+
+## Store patterns
+
+- `atom` / `map` / `computed` / `batched` — derived `computed` stores are
+  glitch-free; use them so subscribers depend on the minimum.
+- `onMount` — run when the first listener appears; subscriptions from
+  `useStore` count as listeners.
+- `repeat()` with a stable key function for lists; `cache()` for route views.
+
+## Memory: `AsyncDirective` teardown
+
+Call `rootPart.setConnected(false)` before discarding a rendered tree so
+`useStore` runs `disconnected()` and unsubscribes. `cache()` handles subtree
+lifecycle for cached route views.

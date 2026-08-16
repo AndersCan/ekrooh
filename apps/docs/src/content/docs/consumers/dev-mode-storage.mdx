@@ -5,12 +5,21 @@ description: Run a stateful consumer backend under the bare CLI.
 
 Under the `bare` CLI, `resolveWorkletConfig()` returns `{}`: no storage dir, so
 `deviceMode` is off, auth is off, and the port is fixed at `8080`. For a
-**stateful** consumer app (photos persisted across restarts) you need to
-hand-roll the config:
+**stateful** consumer app (photos persisted across restarts) you need storage:
 
 ```ts
-import { createWorkletRuntime } from '@ekrooh/bare/runtime';
+import { createWorkletRuntime, resolveCliConfig } from '@ekrooh/bare/runtime';
 
+const config = resolveCliConfig(); // parses labeled bare CLI tokens (dev mode)
+const runtime = createWorkletRuntime(config);
+```
+
+`resolveCliConfig()` parses `key=value` tokens from the bare CLI argv and
+returns a dev-mode `WorkletRuntimeOptions` — auth off, fixed port 8080, no
+handoff — without flipping device mode on. That's the CLI equivalent of the
+hand-rolled options object:
+
+```ts
 const runtime = createWorkletRuntime({
   storage: './.justus-store', // durable app-sandbox dir
   cache: './.justus-cache', // ephemeral
@@ -21,9 +30,10 @@ const runtime = createWorkletRuntime({
 
 What you get and what to watch for:
 
-- `deviceMode` is derived from `options.storage !== undefined` — passing
-  `storage` flips you into device mode. `auth: false` keeps the dev backend
-  open; `port: 8080` pins it like dev mode.
+- `deviceMode` defaults to `options.storage !== undefined` — passing `storage`
+  flips you into device mode (auth on, ephemeral port). Override it with an
+  explicit `deviceMode: false` to keep dev semantics with a storage dir;
+  `resolveCliConfig()` does exactly that.
 - With `auth: false`, **no `handoff.json` is written** even though `storage`
   is set — the handoff file is a host artifact, and a dev backend must not
   leave a stale one behind.

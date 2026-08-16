@@ -53,5 +53,9 @@ if (storage) {
 ## Verify the stack on a target
 
 The framework repo ships `core/p2p-verify.core.ts` — a worklet that boots and
-exercises Corestore, Hyperdrive, and Hyperswarm (run on the iOS simulator via
-`P2PVerifyTest`, or locally via `npm run smoke:p2p`).
+exercises Corestore, Hyperdrive, and Hyperswarm end-to-end (run on the iOS
+simulator via `P2PVerifyTest`, or locally via `npm run smoke:p2p`). Since issue
+#28 the smoke performs a **real connect**: it brings up a local ephemeral DHT
+bootstrap, joins two in-process swarms on one topic, completes the Noise
+secret-stream handshake, and asserts an encrypted message round-trip —
+`peers=0`-style "works in theory" false positives are no longer possible.

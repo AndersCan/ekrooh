@@ -1,0 +1,4 @@
+dist/
+worklet/app.core.gen.js
+test-results/
+playwright-report/

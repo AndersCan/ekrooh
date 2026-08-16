@@ -20,6 +20,10 @@ kernel, RPC messenger, host IPC types, and typed plugin authoring.
 - `createPluginRegistry()`, `createPluginRouter(options)`,
   `createPluginBus(messenger)`.
 - `definePlugin(id, specs, manifest)` — typed plugin authoring.
+- `invokeEvent(spec, args, payload?, timeoutMs?)` — typed invoke envelope
+  builder; the RPC messenger's default invoke timeout is **5s**, so pass an
+  explicit `timeoutMs` for network/spool-bound events (see [Authoring a
+  Plugin](../consumers/authoring-plugins)).
 - `ok(result)` / `err(code, message)` — result envelope helpers.
 
 ## Types

@@ -13,7 +13,11 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { HashOptions } from 'node:crypto';
-import { createWorkletRuntime, resolveWorkletConfig } from './runtime';
+import {
+  createWorkletRuntime,
+  resolveCliConfig,
+  resolveWorkletConfig,
+} from './runtime';
 import { definePlugin, ok } from './messages';
 import type { EventSpec } from './messages';
 
@@ -127,6 +131,80 @@ describe('resolveWorkletConfig', () => {
     vi.stubGlobal('Bare', undefined);
     expect(resolveWorkletConfig()).toEqual({});
   });
+
+  it('falls back to labeled CLI tokens when positional parsing fails', () => {
+    vi.stubGlobal('Bare', {
+      argv: ['/usr/local/bin/bare', '/app/worklet/index.js', 'storage=/tmp/s'],
+    });
+    expect(resolveWorkletConfig()).toEqual({
+      storage: '/tmp/s',
+      deviceMode: false,
+      auth: false,
+      port: 8080,
+    });
+  });
+});
+
+describe('resolveCliConfig', () => {
+  it('parses labeled tokens with dev defaults (auth off, fixed port)', () => {
+    expect(
+      resolveCliConfig([
+        'webassets=/app/web',
+        'storage=/tmp/bare-storage',
+        'cache=/tmp/bare-cache',
+      ]),
+    ).toEqual({
+      webAssets: '/app/web',
+      storage: '/tmp/bare-storage',
+      cache: '/tmp/bare-cache',
+      deviceMode: false,
+      auth: false,
+      port: 8080,
+    });
+  });
+
+  it('honours auth=, port= and host= overrides', () => {
+    expect(resolveCliConfig(['auth=on', 'port=9000', 'host=0.0.0.0'])).toEqual({
+      deviceMode: false,
+      auth: true,
+      port: 9000,
+      host: '0.0.0.0',
+    });
+    expect(resolveCliConfig(['auth=off'])).toMatchObject({ auth: false });
+    expect(resolveCliConfig(['auth=0'])).toMatchObject({ auth: false });
+  });
+
+  it('a storage= token does not flip device mode on', () => {
+    const config = resolveCliConfig(['storage=/tmp/bare-storage']);
+    expect(config).toMatchObject({
+      deviceMode: false,
+      auth: false,
+      port: 8080,
+    });
+    const runtime = createWorkletRuntime(config);
+    expect(runtime.config.deviceMode).toBe(false);
+  });
+
+  it('ignores unknown labels (consumer-owned, e.g. bootstrap=...)', () => {
+    // Unknown labels don't map to runtime options, but a labeled token still
+    // marks the invocation as CLI mode (dev defaults).
+    expect(resolveCliConfig(['bootstrap=127.0.0.1:49737'])).toEqual({
+      deviceMode: false,
+      auth: false,
+      port: 8080,
+    });
+  });
+
+  it('warns on an invalid port token', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(resolveCliConfig(['port=abc'])).toMatchObject({ port: 8080 });
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('returns {} with no labeled tokens', () => {
+    expect(resolveCliConfig(['/usr/local/bin/bare', 'index.js'])).toEqual({});
+  });
 });
 
 describe('createWorkletRuntime', () => {
@@ -198,6 +276,29 @@ describe('createWorkletRuntime', () => {
     await runtime.start();
     // auth: false → no handoff file left for a host to misinterpret.
     expect(fs.existsSync(path.join(devStorage, 'handoff.json'))).toBe(false);
+
+    runtime.close();
+  });
+
+  it('deviceMode: false keeps dev semantics with a storage dir (CLI config)', async () => {
+    const devStorage = path.join(root, 'cli-dev-storage');
+    fs.mkdirSync(devStorage, { recursive: true });
+    const runtime = createWorkletRuntime({
+      webAssets: webDir,
+      storage: devStorage,
+      deviceMode: false,
+    });
+    // Explicit override beats the storage-derived default.
+    expect(runtime.config.deviceMode).toBe(false);
+
+    const creds = await runtime.start();
+    // Dev defaults apply even though storage is set: auth off, fixed 8080,
+    // no handoff file.
+    expect(creds.origin).toBe('http://127.0.0.1:8080');
+    expect(fs.existsSync(path.join(devStorage, 'handoff.json'))).toBe(false);
+
+    const upgrade = await wsUpgrade(creds.origin, { token: undefined });
+    expect(upgrade.split('\r\n')[0]).toContain('101');
 
     runtime.close();
   });

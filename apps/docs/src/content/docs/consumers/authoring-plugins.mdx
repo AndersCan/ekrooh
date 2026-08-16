@@ -78,6 +78,32 @@ import { photoEvents } from './shared/photo-events';
 const { url } = await transport.invoke(photoEvents.capture());
 ```
 
+## Invoke timeouts
+
+`invokeEvent(spec, args, payload, timeoutMs)` takes an optional explicit
+timeout; the messenger's **default is 5 seconds**. A consumer plugin event that
+legitimately takes longer — spooling remote photos, opening a remote drive —
+times out and fails with `TIMEOUT` unless you pass an explicit value. The
+framework's own `vendor.media` picker/capture passes 5 minutes because the
+native picker is user-mediated
+(`plugins/media/events.ts`).
+
+Give network- and spool-bound events generous, explicit timeouts — the consumer
+app uses 30s for list/status and 60s for join:
+
+```ts
+import { invokeEvent } from '@ekrooh/bare/core';
+
+export const spoolEvents = {
+  open(remoteId: string) {
+    return invokeEvent(spoolSpecs.open, { remoteId }, null, 60_000);
+  },
+  list(remoteId: string) {
+    return invokeEvent(spoolSpecs.list, { remoteId }, null, 30_000);
+  },
+};
+```
+
 ## Host-delegated plugins
 
 For capabilities the host owns (camera, permissions), the worklet plugin

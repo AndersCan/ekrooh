@@ -56,6 +56,30 @@ export function createAppRuntime(): WorkletRuntime {
 See [Dev Mode & Storage](./dev-mode-storage) for running a stateful consumer
 backend under the CLI.
 
+## CLI config tokens (dev / e2e)
+
+`resolveCliConfig()` parses the bare CLI argv as `key=value` tokens and returns
+a dev-mode `WorkletRuntimeOptions` (auth off, fixed port 8080, `deviceMode:
+false`), so a `storage=` token never flips auth on or makes the port ephemeral.
+`resolveWorkletConfig()` tries the on-device positional shape first, then falls
+back to these tokens — one entry serves both.
+
+| Token        | Maps to     | Notes                                          |
+| ------------ | ----------- | ---------------------------------------------- |
+| `webassets=` | `webAssets` | built web app dir served at `/` same-origin    |
+| `storage=`   | `storage`   | durable app-sandbox (persists across runs)     |
+| `cache=`     | `cache`     | ephemeral app-sandbox                          |
+| `port=`      | `port`      | default `8080`; invalid values warn + ignore   |
+| `host=`      | `host`      | bind address, default `127.0.0.1`              |
+| `auth=`      | `auth`      | `on`/`off`/`true`/`false`/`1`/`0`; default off |
+
+```bash
+bare worklet/app.core.js webassets=dist storage=./.store cache=./.cache port=8080
+```
+
+Unknown labels (e.g. `bootstrap=127.0.0.1:49737`) are ignored and stay
+consumer-owned — the framework only parses the runtime options above.
+
 ## Bundling
 
 Bundle with esbuild, externalizing packages, node platform, ESM output:
@@ -67,3 +91,22 @@ esbuild worklet/index.ts --bundle --packages=external \
 
 The host runs this bundle inside Bare. `core/main.core.ts` is the reference;
 your entry is "just register plugins + wire p2p + start".
+
+## Don't block before `start()`
+
+`start()` binds the loopback server and the WebSocket protocol socket — the
+web layer's lifeline. Anything that runs before it **must not block**: a
+`store.ready()` that `await`s network-bound work (e.g. a hyperswarm
+`join().flushed()` against an unreachable DHT) delays the WS bind
+indefinitely, and the app shows repeated "WebSocket connection lost" +
+"invoke timeout" errors with no obvious cause.
+
+Rules of thumb:
+
+- **Nothing blocking runs before `start()`** — register plugins and wire
+  modules synchronously, then start.
+- **Network bootstrap is fire-and-forget.** Swarm/DHT joins run in the
+  background (never `await ...flushed()` before `start()`); the p2p layer
+  self-heals once the DHT is reachable.
+- **Boot degraded.** The app must render and serve even with the swarm
+  offline — gallery works, sync is "pending" until peers connect.

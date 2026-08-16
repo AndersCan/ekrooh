@@ -10,6 +10,7 @@
   },
   "workspaces": [
     "examples/*",
+    "examples/consumer-basic",
     "e2e",
     "apps/*"
   ],
@@ -36,9 +37,10 @@
     "docs:preview": "vp run docs#preview",
     "docs:check": "node scripts/docs-check.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vp test && npm run test:e2e:web && npm run test:e2e:harness",
+    "test": "vp test && npm run test:e2e:web && npm run test:e2e:harness && npm run test:e2e:consumer",
     "test:unit": "vp test",
     "test:e2e:web": "node scripts/playwright-local-browsers.mjs test",
+    "test:e2e:consumer": "node scripts/playwright-local-browsers.mjs test --config examples/consumer-basic/playwright.config.ts",
     "dev": "concurrently \"vp -C examples/web dev\" \"npm run dev:bare\"",
     "predev": "npm run build:pkg",
     "dev:bare": "node scripts/dev-bare.mjs",
@@ -87,7 +89,7 @@
   },
   "dependencies": {
     "@mantaq/core": "^0.2.0",
-    "@mantaq/sugar": "^0.2.0",
+    "@mantaq/sugar": "^0.3.0",
     "bare-crypto": "^1.15.3",
     "bare-encoding": "^1.0.3",
     "bare-env": "^3.0.0",
