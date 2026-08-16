@@ -82,6 +82,18 @@ jobs:
   android-emulator:
     name: android-emulator (p2p verify)
     runs-on: ubuntu-latest
+    # The hosted software-rendered x86_64 emulator is flaky at the infra level
+    # (boot hangs in `getprop sys.boot_completed` polling, APK install fails
+    # with a storage-service NPE / ShellCommandUnresponsiveException) — all
+    # before any test runs, and all unrelated to the code under test. Retry the
+    # whole job up to 3 times sequentially; only the final attempt can fail the
+    # check, so a single transient emulator flake doesn't block a green merge.
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        attempt: [1, 2, 3]
+    continue-on-error: ${{ matrix.attempt < 3 }}
     steps:
       - uses: actions/checkout@v4
 
@@ -127,21 +139,7 @@ jobs:
           force-avd-creation: true
           cores: 4
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
-          # The hosted software-rendered x86_64 emulator intermittently fails
-          # the very first APK install with a boot-race NPE in the storage
-          # service ("StorageManager.getVolumes() on a null object reference" /
-          # ShellCommandUnresponsiveException) before any test runs. That is an
-          # infrastructure flake, not a test failure, so retry the whole
-          # connected test on the now-stabilized emulator.
-          script: |
-            for i in 1 2 3; do
-              echo "=== connectedDebugAndroidTest attempt $i/3 ==="
-              if ./gradlew :examples:android-app:connectedDebugAndroidTest; then
-                exit 0
-              fi
-              echo "Attempt $i failed (transient emulator install flake) — retrying"
-            done
-            exit 1
+          script: ./gradlew :examples:android-app:connectedDebugAndroidTest
 
       - name: Assert the published POM carries the api dependencies
         # Regression guard for GitHub issue #36: the bare-host POM used to be
