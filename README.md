@@ -206,6 +206,24 @@ npm run build       # core bundle + web assets
 
 `./gradlew build` additionally runs the host library's JUnit tests.
 
+### Consuming the published AAR
+
+`io.github.anderscan.ekrooh:bare-host` is published to **Maven Central** (no auth) on the same
+tag as the npm package — pin it to your `@ekrooh/bare` version:
+
+```gradle
+repositories {
+  mavenCentral() // default in modern Gradle; no credentials needed
+}
+
+dependencies {
+  implementation "io.github.anderscan.ekrooh:bare-host:<version>"
+}
+```
+
+GitHub Packages (`maven.pkg.github.com/AndersCan/ekrooh`) remains a fallback
+but requires a `read:packages` PAT — prefer Maven Central.
+
 ## iOS build
 
 Prerequisites: Xcode (macOS), Bare Kit prebuilds, and `xcodegen`.

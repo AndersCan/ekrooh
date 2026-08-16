@@ -1,6 +1,7 @@
 plugins {  id "com.android.library"
   id "org.jetbrains.kotlin.android"
   id "maven-publish"
+  id "signing"
 }
 
 android {
@@ -60,16 +61,43 @@ dependencies {
   testImplementation "org.json:json:20240303"
 }
 
-// Publish the AAR to GitHub Packages (Maven format) under the single framework
-// version from the root package.json (see RELEASING.md).
+// Publish the AAR to GitHub Packages (Maven format) and Maven Central under
+// the single framework version from the root package.json (see RELEASING.md).
 afterEvaluate {
   publishing {
     publications {
       mavenAar(MavenPublication) {
-        groupId = "io.ekrooh"
+        groupId = "io.github.anderscan.ekrooh"
         artifactId = "bare-host"
         version = rootProject.jsonVersion()
         artifact(tasks.named("bundleReleaseAar"))
+        artifact(tasks.named("sourcesJar"))
+        artifact(tasks.named("javadocJar"))
+
+        pom {
+          name = "io.github.anderscan.ekrooh:bare-host"
+          description = "Android host library for the @ekrooh/bare runtime: IPC coordinator, host plugin registry, WebView client."
+          url = "https://github.com/AndersCan/ekrooh"
+          licenses {
+            license {
+              name = "Apache-2.0"
+              url = "https://www.apache.org/licenses/LICENSE-2.0"
+              distribution = "repo"
+            }
+          }
+          developers {
+            developer {
+              id = "AndersCan"
+              name = "Anders Can"
+              email = "anders.can1@gmail.com"
+            }
+          }
+          scm {
+            connection = "scm:git:https://github.com/AndersCan/ekrooh.git"
+            developerConnection = "scm:git:git@github.com:AndersCan/ekrooh.git"
+            url = "https://github.com/AndersCan/ekrooh"
+          }
+        }
       }
     }
     repositories {
@@ -82,5 +110,33 @@ afterEvaluate {
         }
       }
     }
+  }
+}
+
+// Sources + javadoc jars are mandatory for Maven Central validation. The
+// javadoc jar zips the source dirs (an empty-but-present doc jar satisfies the
+// portal); AGP already packages the AAR itself.
+tasks.register("sourcesJar", Jar) {
+  archiveClassifier = "sources"
+  from android.sourceSets.main.java.srcDirs
+}
+
+tasks.register("javadocJar", Jar) {
+  archiveClassifier = "javadoc"
+  from android.sourceSets.main.java.srcDirs
+}
+
+// GPG-sign every publication. CI provides SIGNING_KEY (ASCII-armored private
+// key) + SIGNING_PASSWORD as secrets; without them the publish task fails but
+// ordinary builds are unaffected. Runs after evaluation so the mavenAar
+// publication (declared in afterEvaluate above) already exists.
+afterEvaluate {
+  signing {
+    def signingKey = providers.environmentVariable("SIGNING_KEY").orNull
+    def signingPassword = providers.environmentVariable("SIGNING_PASSWORD").orNull
+    if (signingKey != null) {
+      useInMemoryPgpKeys(signingKey, signingPassword)
+    }
+    sign publishing.publications.mavenAar
   }
 }

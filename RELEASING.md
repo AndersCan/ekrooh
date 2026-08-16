@@ -79,11 +79,27 @@ cut a release by following this document with no human beyond the tag decision.
      types** (`dist/`); `prepack`/`prepublishOnly` run `npm run build:pkg`
      (`vp pack`), so publishing always builds. Consumers never receive
      TypeScript source.
-   - **Android AAR**: `:bare-host:publishMavenAarPublicationToGitHubPackagesRepository`
-     publishes `io.ekrooh:bare-host` to GitHub Packages (`release.yml` does this
-     with the automatic `GITHUB_TOKEN`). The AAR is self-contained: the Bare Kit
-     runtime jar ships in the AAR's `libs/` and its native libs in `jni/`, so
-     consumers need no prebuilds download.
+   - **Android AAR**: `io.github.anderscan.ekrooh:bare-host` publishes to **Maven Central**
+     (`release.yml` runs `:bare-host:publishToSonatype
+closeAndReleaseSonatypeStagingRepository` with the `SONATYPE_USERNAME` /
+     `SONATYPE_PASSWORD` user-token secrets and the `SIGNING_KEY` /
+     `SIGNING_PASSWORD` GPG secrets) and to **GitHub Packages** as a fallback
+     (`:bare-host:publishMavenAarPublicationToGitHubPackagesRepository`, no
+     extra secrets — automatic `GITHUB_TOKEN`). Consumers need **no
+     credentials**: plain `mavenCentral()` resolves the AAR. The AAR is
+     self-contained: the Bare Kit runtime jar ships in the AAR's `libs/` and
+     its native libs in `jni/`, so consumers need no prebuilds download.
+
+     **One-time Maven Central setup (human, before the first Central publish)**:
+     sign in at <https://central.sonatype.com> with GitHub (auto-verifies the
+     `io.github.anderscan` namespace). The groupId `io.github.anderscan.ekrooh`
+     is a sub-namespace — allowed once the parent is verified. Then add
+     these repo secrets:
+     `SONATYPE_USERNAME`/`SONATYPE_PASSWORD` (Account → Generate User Token)
+     and `SIGNING_KEY` (ASCII-armored private key: `gpg --armor
+--export-secret-keys <id>`) / `SIGNING_PASSWORD`. Upload the public key to
+     a keyserver (`gpg --keyserver keyserver.ubuntu.com --send-keys <id>`).
+
    - **Prebuilds**: already published upstream by `holepunchto/bare-kit`; this
      repo never publishes them.
    - **iOS host**: ships as **source** in `ios/` (SPM package `BareHost`,

@@ -4,9 +4,14 @@ description: The Android host library — :bare-host.
 ---
 
 The Android host is a library module (`:bare-host`) published as a
-**self-contained AAR** (`io.ekrooh:bare-host` on GitHub Packages): the Bare Kit
-runtime jar ships in the AAR's `libs/` and its native libs in `jni/`, so
-consumers need no separate prebuilds download.
+**self-contained AAR** (`io.github.anderscan.ekrooh:bare-host` on **Maven Central**, with GitHub
+Packages as a fallback): the Bare Kit runtime jar ships in the AAR's `libs/`
+and its native libs in `jni/`, so consumers need no separate prebuilds
+download.
+
+The version tracks the framework version (single version across the npm package
+and the AAR, released together on the same tag — see `RELEASING.md`). Pin it to
+the framework version you depend on.
 
 ## Public surface
 
@@ -27,8 +32,23 @@ consumers need no separate prebuilds download.
 ## Consuming
 
 ```gradle
-implementation "io.ekrooh:bare-host:<version>"
+repositories {
+  mavenCentral() // default in modern Gradle/Android Studio; no auth needed
+}
+
+dependencies {
+  implementation "io.github.anderscan.ekrooh:bare-host:<version>" // same version as @ekrooh/bare
+}
 ```
+
+> **Note**: the groupId is your verified Maven Central namespace with the
+> project's sub-namespace appended (`io.github.anderscan.ekrooh` — parent
+> `io.github.anderscan` is the reverse of the GitHub Pages URL and
+> auto-verifiable via your GitHub account). If you were consuming from GitHub
+> Packages before, the maven layout is identical — just drop the `maven { url =
+"https://maven.pkg.github.com/AndersCan/ekrooh" }` repository and the
+> `read:packages` PAT wiring. No credential block is required for Maven
+> Central.
 
 ```bash
 npm run prebuilds      # fetch Bare Kit prebuilds (prebuilds/)
