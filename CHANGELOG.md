@@ -5,6 +5,40 @@ All notable changes to `@ekrooh/bare` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-08-16
+
+### Added
+
+- **Android host on Maven Central**: `io.github.anderscan.ekrooh:bare-host`
+  now publishes (PGP-signed, sources + javadoc included) to Maven Central
+  via the Sonatype Central Portal on the same tag as the npm package —
+  no consumer credentials. GitHub Packages remains as a fallback.
+- **CLI config tokens** (`@ekrooh/bare/runtime`): `resolveCliConfig()` parses
+  labeled `bare` CLI arguments (`webassets=`, `storage=`, `cache=`, `port=`,
+  `host=`, `auth=`); `resolveWorkletConfig()` falls back to it, so one worklet
+  entry serves both on-device and CLI runs.
+- **Consumer example** (`examples/consumer-basic`): minimal runnable consumer
+  with its own worklet entry, an `app.basic` plugin (one invoke + one
+  backend → web push), the web layer, and a real-stack e2e
+  (`npm run test:e2e:consumer`).
+
+### Changed
+
+- **Pending-call handler** (`core/messages`): the per-request handler owns its
+  outcome and emits a declared `SETTLED` output (`answered` | `timedOut`);
+  the messenger re-emits `DONE` and settles a shell-side promise map — no
+  promise lives in the machine, and a handler that dies into `__error`
+  rejects instead of hanging.
+- **`deviceMode` override**: `createWorkletRuntime({ deviceMode: false })`
+  keeps dev semantics (auth off, fixed port) even with a `storage` dir.
+
+### Fixed
+
+- **p2p smoke determinism** (`core/p2p-verify.core.ts`): the dev verify
+  worklet now performs a real connect + Noise handshake against an ephemeral
+  loopback DHT bootstrapper, immune to stale bootstrap records from earlier
+  killed runs (issue #28).
+
 ## [0.2.0] - 2026-08-13
 
 ### Added
