@@ -80,11 +80,14 @@ jobs:
         run: ./gradlew build
 
   # android-emulator / p2p verify is DISABLED pending issue #44.
-  # The job spins forever on `adb: device offline` (the emulator boots but adb
-  # never reports it online) and rings to the 6h default timeout, hanging CI on
-  # every run. The full peer-drive replication gate still runs on the macOS
-  # smoke + iOS simulator; the Android gate was only a deterministic addon-load
-  # assertion. Re-enable once the boot/offline loop has a bounded timeout.
+  # The job previously spun forever on `adb: device offline` (the emulator boots
+  # but adb never reports it online) and rang to the 6h default timeout,
+  # hanging CI on every run — before any test executes, and unrelated to the
+  # code under test. Retrying such an unbounded loop would only hang CI longer,
+  # so the job is disabled outright (see #44) until the boot/offline loop has a
+  # bounded timeout. The peer-drive replication gate still runs on the macOS
+  # smoke + iOS simulator. Re-enable with a bounded boot wait, not a retry
+  # matrix.
   #
   # android-emulator:
   #   name: android-emulator (p2p verify)
