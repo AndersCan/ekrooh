@@ -1,0 +1,181 @@
+# Android → Google Play Store deployment (template)
+#
+# Copy this file to `.github/workflows/android-play-store.yml` in your app repo
+# and fill in the placeholders + secrets (see templates/deploy/README.md).
+#
+#   workflow_dispatch   → build the signed AAB, upload to the chosen track:
+#                         `internal` (testers) or `production`. Only users in
+#                         DEPLOY_APPROVERS may trigger a run (see below).
+#
+# Production uploads also wait on the `production` environment approval gate
+# (only DEPLOY_APPROVERS may approve).
+#
+# Requires your app module's build.gradle to read `-PversionCode`/`-PversionName`
+# and a `release` signingConfig fed by the ANDROID_KEYSTORE_* env vars
+# (see README → Android setup).
+name: Android — Play Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      track:
+        description: Google Play track
+        required: false
+        default: internal
+        type: choice
+        options: [internal, production]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-deploy-${{ github.ref }}
+  cancel-in-progress: false # never cancel a publish mid-upload
+
+env:
+  # --- EDIT: app identity ----------------------------------------------------
+  APPLICATION_ID: to.holepunch.bare.android # must already exist in Play Console
+  ANDROID_MODULE: ':examples:android-app' # gradle path of your app module (e.g. ":app")
+  AAB_PATH: examples/android-app/build/outputs/bundle/release/app-release.aab
+  # Who may trigger deploys via workflow_dispatch — comma-separated GitHub
+  # usernames. Anyone not on the list gets a no-op run. Leave "<repo-owner>"
+  # replaced with your account (fail-closed until configured).
+  DEPLOY_APPROVERS: <repo-owner>
+
+jobs:
+  authorize:
+    name: Check deploy permissions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - name: Allow only approved deployers to trigger a run
+        id: check
+        run: |
+          if [ -z "${{ env.DEPLOY_APPROVERS }}" ] || [ "${{ env.DEPLOY_APPROVERS }}" = "<repo-owner>" ]; then
+            echo "DEPLOY_APPROVERS is unset or still a placeholder — no one can deploy until set."
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if echo "${{ env.DEPLOY_APPROVERS }}" | grep -qw "${{ github.actor }}"; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build signed AAB
+    needs: authorize
+    if: needs.authorize.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: tools platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Fetch Bare Kit prebuilds
+        run: npm run prebuilds
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build JS core + web assets
+        run: npm run build
+
+      - name: Restore the Play upload keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload.jks"
+
+      - name: Build + sign the release AAB
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/upload.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          MARKETING_VERSION="$(node -p "require('./package.json').version")"
+          ./gradlew "$ANDROID_MODULE:bundleRelease" \
+            -PversionCode="$GITHUB_RUN_NUMBER" \
+            -PversionName="$MARKETING_VERSION"
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab
+          path: ${{ env.AAB_PATH }}
+          if-no-files-found: error
+          retention-days: 14
+
+  test:
+    name: Upload to internal testing track
+    if: needs.authorize.outputs.allowed == 'true' && inputs.track == 'internal'
+    needs: [build, authorize]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-release-aab
+          path: build/aab
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: fastlane
+
+      - name: Upload to Google Play (internal)
+        working-directory: fastlane
+        run: bundle exec fastlane android internal
+        env:
+          APPLICATION_ID: ${{ env.APPLICATION_ID }}
+          ANDROID_AAB_PATH: build/aab/app-release.aab
+          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
+
+  production:
+    name: Upload to production
+    if: needs.authorize.outputs.allowed == 'true' && inputs.track == 'production'
+    needs: [build, authorize]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production # manual approval gate: only DEPLOY_APPROVERS may approve
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-release-aab
+          path: build/aab
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: fastlane
+
+      - name: Upload to Google Play (production)
+        working-directory: fastlane
+        run: bundle exec fastlane android production
+        env:
+          APPLICATION_ID: ${{ env.APPLICATION_ID }}
+          ANDROID_AAB_PATH: build/aab/app-release.aab
+          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
+          PLAY_ROLLOUT_FRACTION: ${{ vars.PLAY_ROLLOUT_FRACTION }}

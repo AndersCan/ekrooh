@@ -1,0 +1,170 @@
+# frozen_string_literal: true
+
+# fastlane config for an @ekrooh/bare mobile app.
+#
+# Copy this file + Gemfile into <your-app-repo>/fastlane/ and adapt the
+# placeholders (or, preferably, set them via GitHub Actions env/vars/secrets —
+# see templates/deploy/README.md).
+#
+# Lanes:
+#   android internal   → upload the AAB to Google Play internal testing track
+#   android production → upload the AAB to Google Play production
+#   ios build_ipa      → archive + export the App Store IPA (match + gym)
+#   ios testflight     → upload the IPA to TestFlight (internal testers)
+#   ios appstore       → submit the IPA for App Store review (deliver)
+
+REPO_ROOT = File.expand_path("..", __dir__)
+
+# --- App identity (set via env; edit these defaults if you prefer) -------------
+APPLICATION_ID = ENV.fetch("APPLICATION_ID", "YOUR.APPLICATION.ID") # Android applicationId
+APP_IDENTIFIER = ENV.fetch("APP_IDENTIFIER", "YOUR.BUNDLE.ID")      # iOS bundle identifier
+
+# --- Paths (repo-root relative; override via env when they differ) -------------
+AAB_PATH          = File.join(REPO_ROOT, ENV.fetch("ANDROID_AAB_PATH", "examples/android-app/build/outputs/bundle/release/app-release.aab"))
+IOS_PROJECT       = File.join(REPO_ROOT, ENV.fetch("IOS_PROJECT_PATH", "examples/ios-app/ios-app.xcodeproj"))
+IOS_SCHEME        = ENV.fetch("IOS_SCHEME", "ios-app")
+IOS_INFO_PLIST    = File.join(REPO_ROOT, ENV.fetch("IOS_INFO_PLIST", "examples/ios-app/app/Info.plist"))
+IOS_EXPORT_METHOD = ENV.fetch("IOS_EXPORT_METHOD", "app-store") # accepted by Xcode 16+ (deprecation warning) and older
+IPA_PATH          = File.join(REPO_ROOT, ENV.fetch("IPA_PATH", "fastlane/build/ios/app.ipa"))
+
+default_platform(:ios)
+
+# App Store Connect API key (Team key, App Manager role — see README).
+#   variables: APP_STORE_CONNECT_API_KEY_ID, APP_STORE_CONNECT_API_ISSUER_ID
+#   secret:    APP_STORE_CONNECT_API_KEY (contents of AuthKey_<id>.p8)
+def asc_api_key
+  app_store_connect_api_key(
+    key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"],
+    issuer_id: ENV["APP_STORE_CONNECT_API_ISSUER_ID"],
+    key_content: ENV["APP_STORE_CONNECT_API_KEY"],
+    in_house: false
+  )
+end
+
+# Download the distribution cert + App Store profile via fastlane match,
+# read-only (CI must never mint new certs). Create them once on a Mac:
+#   bundle exec fastlane match appstore
+def setup_signing
+  setup_ci if ENV["CI"] # temp keychain — avoids headless codesign prompts
+  if ENV["MATCH_GIT_URL"]
+    match(
+      type: "appstore",
+      readonly: true,
+      app_identifier: APP_IDENTIFIER,
+      git_url: ENV["MATCH_GIT_URL"],
+      git_basic_authorization: ENV["MATCH_GIT_BASIC_AUTHORIZATION"]
+    )
+  else
+    UI.important("MATCH_GIT_URL is not set — skipping code-signing setup")
+  end
+end
+
+# Stamp MARKETING_VERSION / IOS_BUILD_NUMBER into the app's Info.plist.
+# (If your project generates Info.plist instead of shipping one, set these via
+# build settings — CURRENT_PROJECT_VERSION / MARKETING_VERSION — instead.)
+def stamp_version
+  version = ENV["MARKETING_VERSION"] || "1.0"
+  build   = ENV["IOS_BUILD_NUMBER"] || "1"
+  sh "/usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString #{version}' #{IOS_INFO_PLIST} 2>/dev/null || " \
+     "/usr/libexec/PlistBuddy -c 'Add :CFBundleShortVersionString string #{version}' #{IOS_INFO_PLIST}"
+  sh "/usr/libexec/PlistBuddy -c 'Set :CFBundleVersion #{build}' #{IOS_INFO_PLIST} 2>/dev/null || " \
+     "/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string #{build}' #{IOS_INFO_PLIST}"
+  UI.message("Stamped #{version} (#{build}) into #{IOS_INFO_PLIST}")
+end
+
+# ------------------------------------------------------------------------------
+# Android — Google Play
+# ------------------------------------------------------------------------------
+platform :android do
+  desc "Upload the AAB to the internal testing track (testers)"
+  lane :internal do
+    upload_to_play_store(
+      package_name: APPLICATION_ID,
+      aab: AAB_PATH,
+      track: "internal",
+      release_status: "completed",
+      json_key_data: ENV["SERVICE_ACCOUNT_JSON"] # full service-account key JSON
+    )
+  end
+
+  desc "Upload the AAB to the production track (optionally staged)"
+  lane :production do
+    options = {
+      package_name: APPLICATION_ID,
+      aab: AAB_PATH,
+      track: "production",
+      release_status: "completed",
+      json_key_data: ENV["SERVICE_ACCOUNT_JSON"]
+    }
+    # Optional staged rollout: PLAY_ROLLOUT_FRACTION=0.1 → 10% of users
+    if ENV["PLAY_ROLLOUT_FRACTION"] && !ENV["PLAY_ROLLOUT_FRACTION"].empty?
+      options[:rollout] = ENV["PLAY_ROLLOUT_FRACTION"].to_f
+    end
+    upload_to_play_store(options)
+  end
+end
+
+# ------------------------------------------------------------------------------
+# iOS — TestFlight + App Store
+# ------------------------------------------------------------------------------
+platform :ios do
+  desc "Archive + export the App Store IPA (match + gym)"
+  lane :build_ipa do
+    stamp_version
+    setup_signing
+    gym(
+      project: IOS_PROJECT,
+      scheme: IOS_SCHEME,
+      configuration: "Release",
+      export_team_id: ENV["APPLE_TEAM_ID"],
+      export_method: IOS_EXPORT_METHOD,
+      output_directory: File.join(REPO_ROOT, "fastlane/build/ios"),
+      output_name: "app.ipa",
+      export_options: {
+        teamID: ENV["APPLE_TEAM_ID"],
+        signingStyle: "manual",
+        provisioningProfiles: { APP_IDENTIFIER => "match AppStore #{APP_IDENTIFIER}" }
+      }
+    )
+  end
+
+  desc "Upload the IPA to TestFlight (internal testers)"
+  lane :testflight do
+    pilot(
+      api_key: asc_api_key,
+      app_identifier: APP_IDENTIFIER,
+      ipa: IPA_PATH,
+      changelog: ENV["CHANGELOG"] || "Automated test build",
+      distribute_external: false,
+      notify_external_testers: false,
+      # Return as soon as the upload finishes; the build becomes available to
+      # internal testers after Apple processes it (~10-30 min).
+      skip_waiting_for_build_processing: true
+    )
+  end
+
+  desc "Submit the IPA for App Store review"
+  lane :appstore do
+    deliver(
+      api_key: asc_api_key,
+      app_identifier: APP_IDENTIFIER,
+      ipa: IPA_PATH,
+      skip_metadata: true,
+      skip_screenshots: true,
+      skip_app_version_update: false,
+      submit_for_review: true,
+      automatic_release: false, # approve release manually in App Store Connect
+      phased_release: false,
+      force: true,              # CI has no HTML preview to verify
+      run_precheck_before_submit: false,
+      languages: ENV["DELIVER_LANGUAGES"] ? ENV["DELIVER_LANGUAGES"].split(",") : nil,
+      release_notes: {
+        (ENV["DELIVER_LANGUAGES"] ? ENV["DELIVER_LANGUAGES"].split(",").first : "en-US") =>
+          ENV["CHANGELOG"] || "Automated production build"
+      },
+      submission_information: {
+        export_compliance_uses_encryption: ENV["IOS_EXPORT_COMPLIANCE_USES_ENCRYPTION"] == "true"
+      }
+    )
+  end
+end
