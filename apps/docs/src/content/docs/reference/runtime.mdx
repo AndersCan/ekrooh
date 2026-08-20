@@ -17,7 +17,10 @@ backend, the unified loopback server, and IPC helpers.
   handoff file).
 - `createLoopbackServer(...)` / `LoopbackServer` — the unified HTTP+WS server
   (web app at `/`, media mounts, protocol socket) plus `registerRoute` and
-  `push` for custom endpoints and server-initiated dispatch.
+  `push` for custom endpoints and server-initiated dispatch. `mountDir(..., {
+public: true })` marks a world-readable bootstrap mount (the web app at `/`);
+  all other mounts are gated. `credentials()` returns `{ origin, port, token,
+bootstrap }` — the host injects only `bootstrap` into the page.
 - `attachWebSocketProtocol(server, ...)` — wires the framed WS protocol onto
   the server.
 - `createLoopbackPush(server, protocol)` — the backend → web push seam.

@@ -10,14 +10,14 @@ import {
 /**
  * The WebSocket connection state machine for `createWebSocketTransport`,
  * modeled with mantaq (internal-only — never part of the public `@ekrooh/bare`
- * surface). Owns the connection lifecycle, exponential backoff, retry cap,
- * and the `?token=` upgrade-rejection fallback; the transport shell drives
- * socket I/O against it and reacts to its state changes.
+ * surface). Owns the connection lifecycle, exponential backoff and retry cap.
+ * There is no `?token=` upgrade-rejection fallback: the session token must
+ * never appear in a URL (the loopback server rejects it), so a rejected
+ * upgrade can only be retried as a fresh authenticated socket.
  */
 
 export interface ConnectionMachineOptions {
   url: string;
-  token?: string;
   maxRetries: number;
   initialBackoffMs: number;
   maxBackoffMs: number;
@@ -45,22 +45,11 @@ const retryTimer = event('RETRY_TIMER')();
 
 type ConnectionContext = {
   url: string;
-  baseUrl: string;
-  token?: string;
   maxRetries: number;
   initialBackoffMs: number;
   maxBackoffMs: number;
   retries: number;
-  tokenTried: boolean;
 };
-
-/** Append the session token to the URL as a `?token=...` query param, keeping
- * any query the URL already carries. */
-function withToken(url: string, token: string): string {
-  const parsed = new URL(url);
-  parsed.searchParams.set('token', token);
-  return parsed.toString();
-}
 
 export interface ConnectionMachine {
   url(): string;
@@ -80,13 +69,10 @@ export function createConnectionMachine(
 ): ConnectionMachine {
   const context: ConnectionContext = {
     url: options.url,
-    baseUrl: options.url,
-    token: options.token,
     maxRetries: options.maxRetries,
     initialBackoffMs: options.initialBackoffMs,
     maxBackoffMs: options.maxBackoffMs,
     retries: 0,
-    tokenTried: false,
   };
 
   const actor = new Actor({
@@ -117,13 +103,7 @@ export function createConnectionMachine(
       });
 
       m.on(idleState, loginOk, () => ({ state: openingState }));
-      m.on(idleState, loginFail, (_event, opts) => {
-        const s = opts!.context.get();
-        const tokenUrl =
-          s.token && s.token.length > 0 ? withToken(s.baseUrl, s.token) : s.url;
-        opts!.context.set({ ...s, url: tokenUrl, tokenTried: true });
-        return { state: openingState };
-      });
+      m.on(idleState, loginFail, () => ({ state: openingState }));
 
       m.on(openingState, socketOpen, (_event, opts) => {
         const s = opts!.context.get();
@@ -132,22 +112,9 @@ export function createConnectionMachine(
       });
       m.on(openingState, socketClose, (_event, opts) => {
         const s = opts!.context.get();
-        // A close while the machine is still `opening` means the socket never
-        // opened — the upgrade was rejected and the `/login` cookie may not
-        // have ridden the handshake. If a token is available and the token URL
-        // isn't already in play, retry it immediately (consumes no retry).
-        if (
-          !s.tokenTried &&
-          typeof s.token === 'string' &&
-          s.token.length > 0
-        ) {
-          opts!.context.set({
-            ...s,
-            url: withToken(s.baseUrl, s.token),
-            tokenTried: true,
-          });
-          return { state: openingState };
-        }
+        // A close while still `opening` means the upgrade was rejected and the
+        // `/login` cookie did not ride the handshake. There is no token-URL
+        // fallback — retry (or give up at the cap) on a fresh socket instead.
         if (s.retries >= s.maxRetries) return { state: gaveUpState };
         opts!.context.set({ ...s, retries: s.retries + 1 });
         return { state: backoffState };

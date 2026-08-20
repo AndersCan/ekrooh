@@ -25,7 +25,8 @@ the framework version you depend on.
 `examples/android-app` is the shell that embeds the backend and WebView:
 
 - The shell starts the worklet with the web assets dir, reads `handoff.json`,
-  injects `window.__ekrooh = { token }` (plus `window.BareShell`), and loads
+  injects `window.__ekrooh = { bootstrap }` (a one-time nonce, never the raw
+  token; plus `window.BareShell`), and loads
   `http://127.0.0.1:<port>/index.html`.
 - A real native photo picker/camera feeds `vendor.media`.
 

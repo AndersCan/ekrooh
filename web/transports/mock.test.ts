@@ -38,6 +38,46 @@ describe('createMockTransport', () => {
     }
   });
 
+  it('responds to logs.view and logs.clear invoke requests', async () => {
+    const transport = createMockTransport();
+    const messages: WireMessage[] = [];
+    transport.subscribe((message) => messages.push(message));
+
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.logs',
+        event: 'logs.view',
+        requestId: 'req-logs-1',
+        args: { tail: 10 },
+      },
+      null,
+    );
+    await flush();
+    const viewHeader = messages[0]?.header;
+    expect(viewHeader?.type).toBe('INVOKE_RESPONSE');
+    if (viewHeader?.type === 'INVOKE_RESPONSE') {
+      expect(viewHeader.result).toEqual({ entries: [] });
+    }
+
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.logs',
+        event: 'logs.clear',
+        requestId: 'req-logs-2',
+      },
+      null,
+    );
+    await flush();
+    const clearHeader = messages[1]?.header;
+    if (clearHeader?.type === 'INVOKE_RESPONSE') {
+      expect(clearHeader.result).toEqual({ cleared: 0 });
+    }
+  });
+
   it('reports UNSUPPORTED_EVENT for unknown events', async () => {
     const transport = createMockTransport();
     const messages: WireMessage[] = [];

@@ -9,6 +9,7 @@ implementation (`plugin.ts`) and typed event builders (`events.ts`).
 | `discovery/`   | `core.discovery`   | `discovery.list`                                        | `bare` (merges host capabilities) |
 | `permissions/` | `core.permissions` | `permissions.request`, `permissions.status`             | host-delegated stub               |
 | `media/`       | `vendor.media`     | `media.pick`, `media.capture`                           | `bare` (host-delegated pick)      |
+| `logs/`        | `core.logs`        | `logs.view`, `logs.clear`                               | `bare` (ring-fed capture store)   |
 
 `index.ts` exports `createDefaultPlugins(deps)` used by the worklet entry.
 

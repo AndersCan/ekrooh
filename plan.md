@@ -52,15 +52,18 @@ One server, one origin, one auth mechanism.
 - The page connects to `ws://<location.host>` (same-origin → no mixed content,
   no ATS/cleartext carve-outs beyond local networking, no custom scheme).
 - **Cookie auth** (replaces the URL token — see design note at bottom):
-  - Native shell injects `window.__ekrooh = { token }` (already the seam) +
-    a shell marker.
-  - Page calls `fetch('/login', { method: 'POST', body: token })`.
-  - Server validates and sets `Set-Cookie: bare_session=<nonce>; HttpOnly;
-SameSite=Lax; Path=/`.
+  - Native shell injects `window.__ekrooh = { bootstrap }` — a **one-time
+    bootstrap nonce**, never the raw token (the host reads the token from
+    `handoff.json` for its own IPC needs).
+  - Page calls `fetch('/login', { method: 'POST', body: bootstrap })` once.
+  - Server validates (token or the single-use bootstrap nonce) and sets
+    `Set-Cookie: bare_session=<nonce>; HttpOnly; SameSite=Lax; Path=/`.
   - Cookies auto-ride `<img>`/`<video>`/`fetch` and the **WS upgrade request**
     (same-origin), so media URLs drop `?token=` and WS auth uses the cookie.
-  - Keep `X-Bare-Token`/query-token acceptance as fallback for non-browser
-    clients (defense in depth).
+  - Keep `X-Bare-Token` header as fallback for non-browser clients. The
+    `?token=` query param was **removed** in the auth-surface ADR
+    (`docs/adr/0003-loopback-auth-surface.md`): a token in a URL is a stealable
+    bearer credential and the header already serves non-browser clients.
 - **Port handoff** worklet → host: host must know the ephemeral port + token
   before loading the page. Design decision: worklet writes
   `{ port, token }` to a file the host reads (app sandbox; host passes the
@@ -75,8 +78,10 @@ SameSite=Lax; Path=/`.
 > `start(...)` arguments (`Bare.argv[0..2]`, per the storage-durability
 > decision) while hosts also set `assets` to the storage dir. A 2-arg host
 > falls back to using the storage dir as the cache dir with a warning. The
-> bundled web app is public content (a fresh WebView must load it before
-> `/login` runs); media file mounts and the WS upgrade stay token/cookie-gated.
+> bundled web app at `/` is the **explicit bootstrap mount** (marked
+> `{ public: true }` on `mountDir`) — the only public pre-auth surface; media
+> file mounts, the WS upgrade, and any non-public directory mount stay
+> token/cookie-gated (see `docs/adr/0003-loopback-auth-surface.md`).
 
 ### Tasks (ordered)
 

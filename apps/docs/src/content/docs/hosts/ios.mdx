@@ -3,10 +3,11 @@ title: iOS
 description: The iOS host Swift package — BareHost.
 ---
 
-The iOS host is a Swift package (`BareHost`, source in `ios/`, SPM), mirroring
-the Kotlin host. It ships as **source on the release tag** — no separate
-CocoaPods/XCFramework artifact yet (distribution is revisited once a real
-consumer appears).
+The iOS host is a Swift package (`BareHost`) that ships as a **git-fetchable
+package from the repo root `Package.swift`**, so consumers add it as a normal
+SPM dependency at an exact ekrooh tag. The runtime binary (`BareKit.xcframework`)
+is bundled as a `.binaryTarget` resolved through the same tag — no sibling
+checkout, no cross-repo npm step.
 
 ## Public surface
 
@@ -17,12 +18,27 @@ consumer appears).
 
 ## Dependencies
 
-- `bare-kit-swift` (pinned revision) for the `Worklet`/`IPC` bindings.
-- `BareKit.xcframework` (from the prebuilds) embedded by the consuming app —
-  the SPM package provides typed wrappers and the `.linkedFramework("BareKit")`
-  instruction.
+- `BareKit` — vendored `Worklet`/`IPC` bridge (`Sources/BareKit` +
+  `Sources/BareKitBridge`, from `holepunchto/bare-kit-swift`, Apache-2.0).
+- `BareKit.xcframework` — the runtime binary, bundled as a SwiftPM
+  `.binaryTarget` resolved from the release tag artifact. Vendoring the bridge
+  (rather than depending on the upstream git package) is what lets it resolve
+  `<BareKit/BareKit.h>` with no consumer `FRAMEWORK_SEARCH_PATHS`.
 - P2P addons (udx-native, rocksdb-native, sodium-native, + hypercore's
   native deps) linked via `bare-link` and verified on the simulator.
+
+## Consuming
+
+```swift
+.package(url: "https://github.com/AndersCan/ekrooh", exact: "X.Y.Z")
+// targets:
+.product(name: "BareHost", package: "ekrooh")
+.product(name: "BareKit",  package: "ekrooh")
+```
+
+An app target must still embed `BareKit` and the `bare-link --preset ios`
+addon frameworks into its `Embed Frameworks` phase. See `ios/readme.md` for
+the full contract.
 
 ## Reference app
 

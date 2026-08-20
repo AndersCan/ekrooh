@@ -15,9 +15,10 @@ worklets, Bare, or host IPC.
 
 On device the page is served by the worklet's loopback server, so the
 WebSocket transport defaults to the page origin (`ws://location.host`); when a
-per-session token is injected (`window.__ekrooh.token`) it is exchanged for a
-`bare_session` cookie via `POST /login` before the socket opens, and
-reconnects with backoff (250ms → 2s, 5 tries). Browser dev is cross-origin, so
-pass an explicit URL (`VITE_BARE_WS_URL` in `examples/web`).
+one-time bootstrap nonce is injected (`window.__ekrooh.bootstrap`, never the
+raw token) it is exchanged for a `bare_session` cookie via `POST /login` before
+the socket opens, and reconnects with backoff (250ms → 2s, 5 tries). There is
+no `?token=` URL fallback. Browser dev is cross-origin, so pass an explicit URL
+(`VITE_BARE_WS_URL` in `examples/web`).
 
 Tests: `mock.test.ts` + `websocket-client.test.ts` (run via `vp test`).

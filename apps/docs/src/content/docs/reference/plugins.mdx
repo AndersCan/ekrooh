@@ -10,9 +10,10 @@ frontend.
 ## Factories
 
 - `createDefaultPlugins(deps)` — wires `core.health`, `core.discovery`,
-  `core.permissions`, and `vendor.media` with the runtime's loopback server and
-  host IPC bridge.
-- Types: `DefaultPluginsDeps`, `DiscoveryPluginDeps`, `MediaPluginDeps`.
+  `core.permissions`, `vendor.media`, and `core.logs` with the runtime's
+  loopback server and host IPC bridge.
+- Types: `DefaultPluginsDeps`, `DiscoveryPluginDeps`, `MediaPluginDeps`,
+  `LogsPluginDeps`.
 
 ## Canonical plugins
 
@@ -22,6 +23,7 @@ frontend.
 | `core.discovery`   | `discovery.summary`                          | runtime/capability discovery          |
 | `core.permissions` | `permissions.request` / `permissions.status` | storage/camera permission abstraction |
 | `vendor.media`     | `media.pick` / `media.capture`               | out-of-band binary (photos/video)     |
+| `core.logs`        | `logs.view` / `logs.clear`                   | bounded worklet + web log collection  |
 
 ## Typed event builders
 
@@ -36,12 +38,16 @@ import { healthEvents } from '@ekrooh/bare/plugins/health/events';
 import { mediaEvents } from '@ekrooh/bare/plugins/media/events';
 import { permissionEvents } from '@ekrooh/bare/plugins/permissions/events';
 import { discoveryEvents } from '@ekrooh/bare/plugins/discovery/events';
+import { logEvents } from '@ekrooh/bare/plugins/logs/events';
 ```
 
 ```ts
 const res = await transport.invoke(mediaEvents.pick({ kind: 'image' }));
 const summary = await transport.invoke(discoveryEvents.summary());
 const granted = await transport.invoke(permissionEvents.request('camera'));
+const logs = await transport.invoke(
+  logEvents.logs.view({ tail: 20, level: 'warn' }),
+);
 ```
 
 ## Result types
@@ -50,3 +56,5 @@ const granted = await transport.invoke(permissionEvents.request('camera'));
 - `PermissionResult` — `{ permission, status }` with
   `granted | denied | notDetermined | unsupported`.
 - `DiscoveryListResult` — runtime/capability summary.
+- `LogsViewResult` — `{ entries: LogEntry[] }` where `LogEntry` is
+  `{ seq, ts, level, source, tag?, message }`.

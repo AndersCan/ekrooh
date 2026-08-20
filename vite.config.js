@@ -63,6 +63,7 @@ export default defineConfig({
       'plugins-discovery-events': 'plugins/discovery/events.ts',
       'plugins-permissions-events': 'plugins/permissions/events.ts',
       'plugins-media-events': 'plugins/media/events.ts',
+      'plugins-logs-events': 'plugins/logs/events.ts',
       transports: 'web/transports/index.ts',
     },
   },

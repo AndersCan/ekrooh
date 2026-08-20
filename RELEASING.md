@@ -46,8 +46,55 @@ cut a release by following this document with no human beyond the tag decision.
    npm run test:ios
    ```
 
-   The Swift host ships as source in `ios/` on the tag; CI (`test.yml`, macOS
-   job) keeps it green.
+   The Swift host ships from the repo root `Package.swift` on the tag; CI
+   (`test.yml`, macOS job) keeps it green.
+
+#### Publish the iOS binary artifact (required before the release)
+
+The root `Package.swift` bundles `BareKit.xcframework` as a `.binaryTarget`.
+Its committed form points at the gitignored `prebuilds/ios/` as a local dev
+and CI convenience. **As part of the release**, publish the framework as an
+artifact on the same `vX.Y.Z` tag and point the `.binaryTarget` at it, so
+consumers resolve the runtime purely from SPM:
+
+1. Zip the gitignored prebuilds framework:
+
+   ```bash
+   npm run prebuilds   # ensure prebuilds/ios/BareKit.xcframework is current
+   cd prebuilds/ios && zip -r BareKit.xcframework.zip BareKit.xcframework
+   ```
+
+2. Compute the SHA-256 checksum:
+
+   ```bash
+   shasum -a 256 prebuilds/ios/BareKit.xcframework.zip
+   ```
+
+3. Edit the root `Package.swift` so the `BareKitBinary` `.binaryTarget` uses
+   the published artifact + checksum (the checksum must match what the tag
+   ships):
+
+   ```swift
+   .binaryTarget(
+     name: "BareKitBinary",
+     url: "https://github.com/AndersCan/ekrooh/releases/download/vX.Y.Z/BareKit.xcframework.zip",
+     checksum: "<sha256>"
+   )
+   ```
+
+4. Commit this change as part of the release commit (`chore: release vX.Y.Z`)
+   and tag it (steps 3.1–3.2 below). The tag therefore carries the `url` form
+   that consumers resolve.
+5. After creating the GitHub release (step 3.3 below), upload
+   `prebuilds/ios/BareKit.xcframework.zip` to the `vX.Y.Z` release as
+   `BareKit.xcframework.zip`.
+
+Consumers then add a single
+`.package(url: "https://github.com/AndersCan/ekrooh", exact: "X.Y.Z")` line
+with no sibling checkout and no npm step (see `ios/readme.md`).
+
+Keep the `url`/`checksum` in sync with the tag's artifact — SwiftPM validates
+the checksum against the fetched zip at resolve time.
 
 ### 2. Version and changelog
 
@@ -102,10 +149,12 @@ closeAndReleaseSonatypeStagingRepository` with the `SONATYPE_USERNAME` /
 
    - **Prebuilds**: already published upstream by `holepunchto/bare-kit`; this
      repo never publishes them.
-   - **iOS host**: ships as **source** in `ios/` (SPM package `BareHost`,
-     consumed by `examples/ios-app`) on the same tag; no separate artifact is
-     published until distribution is decided (see `vision.md`). Consumers
-     embed `BareKit.xcframework` from `prebuilds/ios/`.
+   - **iOS host**: ships as a **git-fetchable Swift package** (`BareHost`,
+     `Package.swift` at the repo **root**, consumed by `examples/ios-app`) on
+     the same tag. The runtime binary (`BareKit.xcframework`) is published as a
+     release **artifact on the same `vX.Y.Z` tag** so consumers resolve it
+     through the package's `.binaryTarget`. See the "iOS binary artifact" step
+     below.
 
 The `@ekrooh/bare` exports map is frozen at first publish (beta): `core`,
 `runtime`, `plugins`, `plugins/*/events`, and `transports` (WebSocket + mock

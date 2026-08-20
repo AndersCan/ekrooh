@@ -11,10 +11,14 @@ import { createConnectionMachine } from './connection-machine';
 declare global {
   interface Window {
     /** Per-session bridge state injected by the embedding shell on-device.
-     * `token` is exchanged for a session cookie via `POST /login`, which then
-     * rides every same-origin request — including the WebSocket upgrade.
-     * Browser dev has none (the dev backend runs without auth). */
+     * `bootstrap` is a one-time nonce the page exchanges for a session cookie
+     * via `POST /login` (single-use — the raw session token is never exposed
+     * to page JS). `token` remains as a legacy login fallback for consumers
+     * that still inject it. The cookie then rides every same-origin request —
+     * including the WebSocket upgrade. Browser dev has none (the dev backend
+     * runs without auth). */
     __ekrooh?: {
+      bootstrap?: string;
       token?: string;
       [key: string]: unknown;
     };
@@ -89,10 +93,15 @@ export function createWebSocketTransport(
   const url = options.url ?? defaultWsUrl();
   const maxRetries = options.maxRetries ?? DEFAULT_RETRIES;
   const initialBackoff = options.backoffMs ?? DEFAULT_BACKOFF_MS;
-  const token =
-    typeof window !== 'undefined' ? window.__ekrooh?.token : undefined;
+  // `bootstrap` (the one-time nonce) is preferred; `token` remains a legacy
+  // login fallback for consumers that inject it. Neither is ever placed in a
+  // URL — the transport exchanges the credential for the HttpOnly cookie.
+  const bridge = typeof window !== 'undefined' ? window.__ekrooh : undefined;
+  const credential = bridge?.bootstrap ?? bridge?.token;
   const shouldLogin =
-    options.login !== false && typeof token === 'string' && token.length > 0;
+    options.login !== false &&
+    typeof credential === 'string' &&
+    credential.length > 0;
 
   const listeners = new Set<(message: WireMessage) => void>();
   const queued: QueuedMessage[] = [];
@@ -100,7 +109,6 @@ export function createWebSocketTransport(
 
   const machine = createConnectionMachine({
     url,
-    token: typeof token === 'string' ? token : undefined,
     maxRetries,
     initialBackoffMs: initialBackoff,
     maxBackoffMs: MAX_BACKOFF_MS,
@@ -175,8 +183,7 @@ export function createWebSocketTransport(
   }
 
   // The machine drives the shell: entering `opening` means a socket should
-  // exist (first connect, a retry after backoff, or the immediate token-URL
-  // fallback after a rejected upgrade); `gaveUp` fails the queue.
+  // exist (first connect, or a retry after backoff); `gaveUp` fails the queue.
   machine.onChange((state) => {
     if (state === 'opening') {
       openSocket();
@@ -192,16 +199,17 @@ export function createWebSocketTransport(
       });
       try {
         const outcome = await Promise.race([
-          fetch('/login', { method: 'POST', body: token }).then((response) =>
-            response.ok ? 'ok' : 'rejected',
+          fetch('/login', { method: 'POST', body: credential }).then(
+            (response) => (response.ok ? 'ok' : 'rejected'),
           ),
           loginTimeout,
         ]);
         if (outcome === 'ok') {
           machine.sendLoginOk();
         } else {
-          // Login rejected or timed out; the machine switches to the query
-          // token URL (the server still accepts it for non-cookie clients).
+          // Login rejected or timed out; the machine may retry the socket, but
+          // there is no token-URL fallback — a token must never be placed in a
+          // URL (the loopback server rejects `?token=`).
           machine.sendLoginFail();
         }
       } catch {
@@ -229,7 +237,7 @@ export function createWebSocketTransport(
         emitTransportError(header, WS_DISCONNECTED_MESSAGE);
         return;
       }
-      // Queue while connecting (first open, backoff, token fallback, login).
+      // Queue while connecting (first open, backoff, login).
       queued.push({ bytes: encoded, header });
     },
     subscribe(handler) {

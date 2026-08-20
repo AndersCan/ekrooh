@@ -5,11 +5,12 @@ options:
     iOS: '14.0'
   createIntermediateGroups: true
 packages:
+  # The iOS host ships as a git-fetchable Swift package from the repo ROOT
+  # (Package.swift — see ios/readme.md). The reference app consumes it by local
+  # path because it lives in the same monorepo; external consumers add
+  # `https://github.com/AndersCan/ekrooh` at an exact `vX.Y.Z` tag instead.
   BareHost:
-    path: ../../ios
-  BareKit:
-    url: https://github.com/holepunchto/bare-kit-swift
-    revision: ef26bbde9bb47eaebeb4e50944306b4ff23934ce
+    path: ../..
 targets:
   ios-app:
     type: application
@@ -25,8 +26,15 @@ targets:
         type: folder
         buildPhase: resources
     dependencies:
+      # Links both the host (`BareHost`) and the runtime bridge (`BareKit`)
+      # products of the root package; xcodegen links every library product of a
+      # package, so a single `- package: BareHost` is sufficient.
       - package: BareHost
-      - package: BareKit
+      # BareKit is a SwiftPM `.binaryTarget` inside the root package. Its
+      # xcframework still has to be physically embedded into the app bundle,
+      # so point xcodegen at the gitignored prebuilds artifact the package
+      # binary also resolves (see scripts/fetch-prebuilds.mjs). External
+      # consumers embed the same framework resolved through SPM instead.
       - framework: ../../prebuilds/ios/BareKit.xcframework
         embed: true
       # Native addons produced by `bare-link --preset ios` (gitignored; see
@@ -86,7 +94,6 @@ targets:
     dependencies:
       - target: ios-app
       - package: BareHost
-      - package: BareKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: to.holepunch.bare.ios.tests

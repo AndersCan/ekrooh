@@ -6,35 +6,56 @@ description: One HTTP+WS server serves the app, media, and protocol socket.
 One loopback HTTP+WS server (`core/server/static-file-server.ts`) serves the
 web app at `/`, the media files mounted by plugins, and the framed-protocol
 WebSocket socket. On device it binds `127.0.0.1` on an ephemeral port, and
-every request is gated by a per-session token:
+every gated request is authorized by a per-session credential:
 
-1. The shell injects `window.__ekrooh = { token }` (plus `window.BareShell` as
-   a presence marker) before the page loads.
-2. The page exchanges it for a `bare_session` cookie via `POST /login`
-   (`HttpOnly; SameSite=Lax; Path=/`).
+1. The host starts the worklet, which writes `{ origin, port, token, bootstrap }`
+   to `handoff.json`. The host injects **only the one-time `bootstrap` nonce**
+   into the page (`window.__ekrooh = { bootstrap }`), never the raw token.
+2. The page exchanges the bootstrap nonce for a `bare_session` cookie via
+   `POST /login` (`HttpOnly; SameSite=Lax; Path=/`). The nonce is single-use:
+   after the page redeems it, it is spent.
 3. The cookie then authorizes `<img>`/`<video>`/`fetch` and the WebSocket
-   upgrade. `X-Bare-Token`/`?token=` remain as a fallback for non-browser
-   clients.
-4. The worklet writes `{ origin, port, token }` to `handoff.json` in the
-   sandbox dir the host passed; the host reads it, injects the token, and
-   loads `http://127.0.0.1:<port>/index.html`.
+   upgrade. Non-browser clients use the `X-Bare-Token` header. There is **no**
+   `?token=` query-param path — a token must never appear in a URL.
+4. The host keeps the real `token` from `handoff.json` for its own IPC needs
+   and loads `http://127.0.0.1:<port>/index.html`.
 
 The dev backend runs the same bundle with auth off on a fixed port
-(`ws://localhost:8080`), so browser dev needs no token.
+(`ws://localhost:8080`), so browser dev needs no credential.
 
-## Security notes
+## Public vs gated (the threat model)
 
-- `Referrer-Policy: no-referrer` on all responses.
-- WS upgrade origin check, single-client policy, idle timeout.
-- Media mounts are per-session URLs — the mount id is unguessable.
+On one loopback origin, only the **bootstrap page** is public, and only because
+a fresh WebView must load it before it can `POST /login`:
+
+- **Public (pre-auth):** the explicit bootstrap directory mount at `/` — the
+  bundled web app — marked `mountDir('/', dir, { public: true })`.
+- **Gated:** every file mount (media), the WS upgrade, custom routes, and any
+  directory mount **not** marked `{ public: true }`. A non-public directory
+  mount 401s unauthenticated and 404s unknown paths (no SPA fallback to the
+  bootstrap `index.html`).
+
+Publicness is an explicit opt-in marker, never a property of the mount kind.
 
 ```ts
 import { createLoopbackServer } from '@ekrooh/bare/runtime';
 
 const server = await createLoopbackServer();
-server.mount('/media/photo-1', '/path/to/photo.jpg');
+server.mount('/media/photo-1', '/path/to/photo.jpg'); // gated
+server.mountDir('/photos', '/path/to/photos', { public: false }); // gated
 const url = await server.url('/media/photo-1');
 ```
+
+## Security notes
+
+- Tokens are never placed in URLs or exposed to page JS — only the one-time
+  bootstrap nonce, and the session cookie is `HttpOnly`.
+- `Referrer-Policy: no-referrer` on all responses.
+- WS upgrade origin check, single-client policy, idle timeout.
+- Media mounts are per-session URLs — the mount id is unguessable.
+
+The full decision, including the tradeoff vs per-resource capability tokens
+(deferred), is an ADR: `docs/adr/0003-loopback-auth-surface.md`.
 
 > `createLoopbackServer` resolves through the `@ekrooh/bare/runtime` export;
 > see the [runtime reference](../reference/runtime) for the exact surface.

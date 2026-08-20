@@ -55,10 +55,11 @@ top of this framework.
     The AAR is self-contained: Bare Kit runtime classes and native libs are
     bundled into the artifact at build time, so consumers need no prebuilds
     download.
-  - iOS host → **source in `ios/`** (SPM package `BareHost`, depending on
-    `bare-kit-swift`). Consumers embed `BareKit.xcframework` (prebuilds) plus
-    the linked addons themselves; distribution is revisited when a consumer
-    appears.
+  - iOS host → **git-fetchable Swift package on the release tag** (SPM
+    `BareHost` at the repo root `Package.swift` — `Worklet`/`IPC`/bridging
+    vendored, the `BareKit.xcframework` runtime bundled as a `.binaryTarget`
+    resolved from the same tag artifact). Consumers add the repo URL at an
+    exact `vX.Y.Z` tag; no sibling checkout or cross-repo npm step.
   - bare-kit prebuilds → **GitHub Release artifacts** (the pattern upstream
     `bare-kit` already uses), fetched by a documented script run by CI and on
     consumer setup. Prebuilds are never committed to this repository.
@@ -87,12 +88,12 @@ major version or be blocked by stability fears.
 
 ## Platforms and parity
 
-| Runtime        | Status                         | Transport                                                                                                  |
-| -------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Browser (dev)  | first-class                    | WebSocket                                                                                                  |
-| Browser (test) | first-class                    | Mock (deterministic Playwright runs)                                                                       |
-| Android        | first-class                    | WebSocket (same-origin loopback + cookie auth)                                                             |
-| iOS            | first-class (reference parity) | WebSocket (same-origin loopback + cookie auth); host ships as source (`ios/`, SPM) on the same release tag |
+| Runtime        | Status                         | Transport                                                                                                                        |
+| -------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| Browser (dev)  | first-class                    | WebSocket                                                                                                                        |
+| Browser (test) | first-class                    | Mock (deterministic Playwright runs)                                                                                             |
+| Android        | first-class                    | WebSocket (same-origin loopback + cookie auth)                                                                                   |
+| iOS            | first-class (reference parity) | WebSocket (same-origin loopback + cookie auth); host ships as a git-fetchable Swift package (`BareHost`) on the same release tag |
 
 Parity policy:
 
@@ -131,7 +132,8 @@ These built-ins are the documented command surface — agent instructions and
 - `android/` — the Android host as a **library module** (`com.android.library`)
   so it can be built and published as an AAR; the example app consumes it.
 - `ios/` — the iOS host as a **Swift package** (`BareHost`), mirroring the
-  Android host; the iOS example app consumes it.
+  Android host. The git-fetchable `Package.swift` lives at the repo **root** so
+  SwiftPM can resolve it from a tag; the iOS example app consumes it.
 - `prebuilds/` — build output, gitignored, fetched from GitHub Release
   artifacts.
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { VirtualClock } from '@mantaq/core';
 import { ActorMap, onOutput } from '@mantaq/sugar';
-import { createPendingCall, respondE, settledE, startE } from './pending-call';
+import { createPendingCall, respondE, startE } from './pending-call';
 import type { MessageHeader } from './types';
 
 function response(requestId: string): MessageHeader {

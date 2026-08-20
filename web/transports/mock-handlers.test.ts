@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { createHealthInvokeHandlers } from './mock-handlers';
+import {
+  createHealthInvokeHandlers,
+  createLogsInvokeHandlers,
+} from './mock-handlers';
+import { createLogRingBuffer } from '../../core/logs/store';
 
 const handlers = createHealthInvokeHandlers();
 
@@ -39,5 +43,38 @@ describe('createHealthInvokeHandlers', () => {
       pong: true,
       ts: expect.any(Number),
     });
+  });
+});
+
+describe('createLogsInvokeHandlers', () => {
+  it('logs.view returns an empty tail on a fresh store', () => {
+    const logHandlers = createLogsInvokeHandlers();
+    const result = logHandlers['logs.view']({ tail: 10 }) as {
+      entries: Array<{ seq: number }>;
+    };
+    expect(result.entries).toEqual([]);
+  });
+
+  it('logs.clear empties the store and reports the count', () => {
+    const store = createLogRingBuffer(100);
+    store.append({ ts: 1, level: 'info', source: 'web', message: 'x' });
+    const logHandlers = createLogsInvokeHandlers(store);
+    expect(logHandlers['logs.clear'](undefined)).toEqual({ cleared: 1 });
+    expect(logHandlers['logs.view'](undefined)).toEqual({ entries: [] });
+  });
+
+  it('logs.view filters by level and source', () => {
+    const store = createLogRingBuffer(100);
+    store.append({ ts: 1, level: 'info', source: 'web', message: 'web' });
+    store.append({ ts: 2, level: 'warn', source: 'backend', message: 'back' });
+    const logHandlers = createLogsInvokeHandlers(store);
+    const web = logHandlers['logs.view']({ source: 'web' }) as {
+      entries: Array<{ message: string }>;
+    };
+    expect(web.entries.map((e) => e.message)).toEqual(['web']);
+    const warn = logHandlers['logs.view']({ level: 'warn' }) as {
+      entries: Array<{ message: string }>;
+    };
+    expect(warn.entries.map((e) => e.message)).toEqual(['back']);
   });
 });

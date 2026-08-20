@@ -29,8 +29,8 @@ your-app/
 ```
 
 The frontend is a normal Vite page. The backend is a Bare worklet that runs
-your entry. The host (Android shell) starts the worklet, injects the token,
-and loads the loopback-served page.
+your entry. The host (Android shell) starts the worklet, injects the one-time
+bootstrap nonce, and loads the loopback-served page.
 
 ## 1. Install the package
 
@@ -56,7 +56,7 @@ const runtime = createWorkletRuntime(resolveWorkletConfig());
 // Register your own plugins (see "Authoring a Plugin").
 // runtime.pluginRegistry.register(myPlugin);
 
-const { origin, port, token } = await runtime.start();
+const { origin, port, token, bootstrap } = await runtime.start();
 ```
 
 `resolveWorkletConfig()` reads the host-provided config from `Bare.argv`
@@ -79,8 +79,9 @@ const transport = createWebSocketTransport();
 
 On device the page is served by the loopback server, so the WebSocket defaults
 to the page's own origin (`ws://<location.host>`) and the injected
-`window.__ekrooh = { token }` boots the `bare_session` cookie automatically.
-In browser dev, pass the backend URL explicitly:
+`window.__ekrooh = { bootstrap }` (a one-time nonce) boots the `bare_session`
+cookie automatically — the raw token is never given to page JS. In browser
+dev, pass the backend URL explicitly:
 
 ```ts
 const transport = createWebSocketTransport({ url: 'ws://localhost:8080' });

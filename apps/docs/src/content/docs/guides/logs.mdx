@@ -1,0 +1,57 @@
+---
+title: Logging
+description: Collect worklet and web debug logs through the core.logs plugin and loopback routes.
+---
+
+Debug logging is a framework capability. The worklet captures console output at
+startup into a bounded ring buffer, and the web layer can flush its own console
+output into the same buffer through the loopback ingest route.
+
+## Wire shape
+
+Entries are `LogEntry`:
+
+```ts
+{ seq: number, ts: number, level: 'debug'|'info'|'warn'|'error',
+  source: 'backend'|'web', tag?: string, message: string }
+```
+
+`seq` is a monotonic counter shared across every source, so read-back stays
+ordered.
+
+## plugin events
+
+- `logs.view({ tail?, level?, source? })` → `{ entries }` — a small bounded
+  window over the framed invoke (it must respect the header size cap).
+- `logs.clear()` → `{ cleared }` — empties the ring buffer.
+
+```ts
+import { logEvents } from '@ekrooh/bare/plugins/logs/events';
+
+const { entries } = await transport.invoke(
+  logEvents.logs.view({ tail: 50, source: 'backend' }),
+);
+```
+
+## Loopback routes
+
+Bulk read-back and ingest live on HTTP so there is no `MAX_HEADER_BYTES`
+ceiling. The routes inherit the loopback server's auth gate and single-server
+rule:
+
+- `GET /logs?tail=&level=&source=&format=jsonl|text` — read-back (defaults to
+  human-readable text; `format=jsonl` returns newline-delimited JSON).
+- `POST /logs` with `{ source: 'web', entries: [...] }` — ingest web/browser
+  log batches.
+
+## Capture
+
+The worklet runtime installs a console seam at startup
+(`installConsoleCapture`) that forwards to the originals while feeding the ring
+buffer. Retention is a consumer knob: the ring `capacity` is set via the
+`logsCapacity` runtime option. A rotating file sink is an app decision and is
+kept out of the framework.
+
+The web layer can install `installWebConsoleCapture`, which buffers console
+output and flushes it into `POST /logs`. Skip it in mock mode, where there is no
+loopback backend to ingest into.

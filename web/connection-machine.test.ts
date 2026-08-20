@@ -28,23 +28,19 @@ describe('connection-machine', () => {
     expect(m.state()).toBe('connected');
   });
 
-  it('login fail switches to the query-token URL', () => {
-    const { m } = machine({ token: 'secret-token' });
+  it('login fail opens the socket as-is (no token-URL fallback)', () => {
+    const { m } = machine();
     m.sendLoginFail();
     expect(m.state()).toBe('opening');
-    expect(m.url()).toBe('ws://test/?token=secret-token');
+    expect(m.url()).toBe('ws://test');
   });
 
-  it('close-before-open with a token retries the token URL immediately, consuming no retry', () => {
-    const { m, clock } = machine({ token: 'secret-token' });
+  it('close-before-open backs off on the same URL (no token-URL retry)', () => {
+    const { m, clock } = machine();
     m.sendLoginOk();
     m.sendClose();
-    expect(m.state()).toBe('opening');
-    expect(m.url()).toBe('ws://test/?token=secret-token');
-
-    // The token-URL attempt also fails → normal backoff (token tried once).
-    m.sendClose();
     expect(m.state()).toBe('backoff');
+    expect(m.url()).toBe('ws://test');
     clock.advance(250);
     expect(m.state()).toBe('opening');
   });

@@ -80,7 +80,9 @@ final class BareRuntime {
   }
 
   /// Polls the worklet's `handoff.json` (written once the loopback server is
-  /// up), injects the session token + shell marker, then loads the page.
+  /// up), injects the one-time bootstrap nonce + shell marker, then loads the
+  /// page. The raw session token is never exposed to page JS — only the
+  /// single-use nonce the page exchanges once via `POST /login`.
   private func waitForHandoffAndLoad(webView: WKWebView) {
     handoffTask = Task { @MainActor in
       let deadline = Date().addingTimeInterval(15)
@@ -97,7 +99,7 @@ final class BareRuntime {
         !Task.isCancelled,
         let credentials,
         let origin = credentials["origin"] as? String,
-        let token = credentials["token"] as? String,
+        let bootstrap = credentials["bootstrap"] as? String,
         let url = URL(string: "\(origin)/index.html")
       else {
         BareHostLogger.log("Timed out waiting for worklet handoff")
@@ -105,7 +107,7 @@ final class BareRuntime {
       }
       webView.configuration.userContentController.addUserScript(
         WKUserScript(
-          source: "window.__ekrooh={token:'\(token)'};window.BareShell=true;",
+          source: "window.__ekrooh={bootstrap:'\(bootstrap)'};window.BareShell=true;",
           injectionTime: .atDocumentStart,
           forMainFrameOnly: true
         )

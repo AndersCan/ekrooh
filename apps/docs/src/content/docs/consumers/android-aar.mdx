@@ -57,9 +57,9 @@ The host library surfaces:
 - `BareWebViewClient` — WebView wiring.
 
 Your `MainActivity` starts the worklet, waits for the handoff file, injects
-`window.__ekrooh = { token }`, and loads the loopback page — see
-[Host Handoff Flow](./host-handoff) for the sequence, and the framework's
-`examples/android-app` for a working shell.
+`window.__ekrooh = { bootstrap }` (a one-time nonce — never the raw token), and
+loads the loopback page — see [Host Handoff Flow](./host-handoff) for the
+sequence, and the framework's `examples/android-app` for a working shell.
 
 ## Related framework repo commands
 

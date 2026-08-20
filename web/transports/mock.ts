@@ -1,8 +1,10 @@
 import { ErrorCode, MessageType, WireMessage } from '../../core/messages';
 import {
   createHealthInvokeHandlers,
+  createLogsInvokeHandlers,
   type MockInvokeHandler,
 } from './mock-handlers';
+import { createLogRingBuffer } from '../../core/logs/store';
 import { MessageTransport } from '../websocket-client';
 
 const MOCK_MEDIA_DATA_URI =
@@ -13,6 +15,7 @@ const permissionOf = (args?: Record<string, unknown>): string =>
 
 const mockInvokeHandlers: Record<string, MockInvokeHandler> = {
   ...createHealthInvokeHandlers(),
+  ...createLogsInvokeHandlers(createLogRingBuffer(500)),
   'discovery.list': () => ({
     schemaVersion: 1 as const,
     capabilities: [

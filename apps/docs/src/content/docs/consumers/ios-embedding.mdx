@@ -41,9 +41,9 @@ npm run build:ios   # addons/, Resources/, web assets, ios-app.xcodeproj
 ```
 
 The reference `examples/ios-app` shows the full consumer shell: it runs the
-same web assets, injects `window.__ekrooh = { token }` via a `WKUserScript`,
-and loads `http://127.0.0.1:<port>/index.html` from the worklet's
-`handoff.json`.
+same web assets, injects `window.__ekrooh = { bootstrap }` (a one-time nonce,
+never the raw token) via a `WKUserScript`, and loads
+`http://127.0.0.1:<port>/index.html` from the worklet's `handoff.json`.
 
 ## Parity status
 

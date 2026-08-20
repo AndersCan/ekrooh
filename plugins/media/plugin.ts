@@ -1,3 +1,4 @@
+import crypto from 'bare-crypto';
 import {
   definePlugin,
   err,
@@ -21,7 +22,15 @@ export type MediaPluginDeps = {
 };
 
 function newRequestId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  // CSPRNG-backed mount id (not Math.random): a local client that can observe
+  // one id must not be able to guess/enumerate other mounted media.
+  const rand = crypto
+    .randomBytes(16)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return `${Date.now().toString(36)}-${rand}`;
 }
 
 /**

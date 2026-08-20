@@ -16,7 +16,6 @@ import {
   parseRange,
   sessionNonce,
   tokenFromHeaders,
-  tokenFromQuery,
 } from './static-file-server';
 
 vi.mock('bare-http1', async () => ({
@@ -181,8 +180,18 @@ function upgradeRequest(
     origin?: string;
   } = {},
 ): Promise<string> {
-  const q = opts.token ? `?token=${opts.token}` : '';
   const originHeader = opts.origin ?? origin;
+  const headerLines = [
+    'GET /ws HTTP/1.1',
+    `Host: 127.0.0.1:${port}`,
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+    'Sec-WebSocket-Version: 13',
+    `Origin: ${originHeader}`,
+  ];
+  if (opts.token) headerLines.push(`X-Bare-Token: ${opts.token}`);
+  const request = headerLines.join('\r\n') + '\r\n\r\n';
   return new Promise((resolve) => {
     let data = '';
     let done = false;
@@ -194,18 +203,7 @@ function upgradeRequest(
     };
     const socket = net.connect({ host: '127.0.0.1', port });
     socket.on('connect', () => {
-      socket.write(
-        [
-          `GET /ws${q} HTTP/1.1`,
-          `Host: 127.0.0.1:${port}`,
-          'Upgrade: websocket',
-          'Connection: Upgrade',
-          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
-          'Sec-WebSocket-Version: 13',
-          `Origin: ${originHeader}`,
-          '\r\n',
-        ].join('\r\n'),
-      );
+      socket.write(request);
       setTimeout(() => {
         socket.destroy();
         finish(data);
@@ -234,7 +232,17 @@ function openUpgrade(
 ): Promise<{ socket: net.Socket; response: string }> {
   const targetPort = opts.port ?? port;
   const originHeader = opts.origin ?? origin;
-  const q = opts.token ? `?token=${opts.token}` : '';
+  const headerLines = [
+    'GET /ws HTTP/1.1',
+    `Host: 127.0.0.1:${targetPort}`,
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+    'Sec-WebSocket-Version: 13',
+    `Origin: ${originHeader}`,
+  ];
+  if (opts.token) headerLines.push(`X-Bare-Token: ${opts.token}`);
+  const request = headerLines.join('\r\n') + '\r\n\r\n';
   return new Promise((resolve, reject) => {
     const socket = net.connect({ host: '127.0.0.1', port: targetPort });
     let data = '';
@@ -246,18 +254,7 @@ function openUpgrade(
       }
     };
     socket.on('connect', () => {
-      socket.write(
-        [
-          `GET /ws${q} HTTP/1.1`,
-          `Host: 127.0.0.1:${targetPort}`,
-          'Upgrade: websocket',
-          'Connection: Upgrade',
-          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
-          'Sec-WebSocket-Version: 13',
-          `Origin: ${originHeader}`,
-          '\r\n',
-        ].join('\r\n'),
-      );
+      socket.write(request);
     });
     socket.on('data', (d) => {
       data += String(d);
@@ -281,7 +278,7 @@ beforeAll(async () => {
   fs.writeFileSync(path.join(dir, 'assets', 'main.js'), 'export const x = 1');
 
   server = createLoopbackServer({ auth: true, token: TOKEN });
-  server.mountDir('/', dir);
+  server.mountDir('/', dir, { public: true });
   server.mount('/media/sample.png', path.join(dir, 'app.js'));
   server.onConnection((socket) => {
     socket.on('data', (raw) => socket.write(raw));
@@ -298,7 +295,7 @@ beforeAll(async () => {
   cookie = `${firstHeader(login.headers, 'set-cookie')?.split(';')[0] ?? ''}`;
 
   devServer = createLoopbackServer({ auth: false, port: 0 });
-  devServer.mountDir('/', dir);
+  devServer.mountDir('/', dir, { public: true });
   await devServer.credentials();
 });
 
@@ -328,12 +325,6 @@ describe('pure request helpers', () => {
     expect(mimeTypeFor('a.js')).toBe('text/javascript');
     expect(mimeTypeFor('b.css')).toBe('text/css');
     expect(mimeTypeFor('c.unknown')).toBe('application/octet-stream');
-  });
-
-  it('tokenFromQuery finds the token param', () => {
-    expect(tokenFromQuery('a=1&token=x&b=2')).toBe('x');
-    expect(tokenFromQuery('token=')).toBe('');
-    expect(tokenFromQuery('a=1')).toBeNull();
   });
 
   it('tokenFromHeaders reads the lowercased header', () => {
@@ -393,6 +384,15 @@ describe('loopback server HTTP', () => {
     expect(r.status).toBe(401);
   });
 
+  it('rejects an oversized /login body (unbounded-body DoS guard)', async () => {
+    const r = await request('/login', {
+      method: 'POST',
+      // Exceeds the 4096-byte login body cap.
+      body: 'x'.repeat(10_000),
+    });
+    expect(r.status).toBe(413);
+  });
+
   it('serves media with the session cookie', async () => {
     const r = await request('/media/sample.png', {
       headers: { cookie },
@@ -401,9 +401,25 @@ describe('loopback server HTTP', () => {
     expect(r.body).toBe('console.log("app")');
   });
 
-  it('accepts the query token fallback on protected mounts', async () => {
+  it('rejects the query token on protected mounts (?token= removed)', async () => {
     const r = await request(`/media/sample.png?token=${TOKEN}`);
-    expect(r.status).toBe(200);
+    expect(r.status).toBe(401);
+  });
+
+  it('accepts the bootstrap nonce once for /login, then rejects a replay', async () => {
+    const creds2 = await server!.credentials();
+    const nonce = creds2.bootstrap;
+
+    // First use: the bootstrap nonce authorizes a login.
+    const first = await request('/login', { method: 'POST', body: nonce });
+    expect(first.status).toBe(200);
+    // It sets the same HttpOnly session cookie as a token login.
+    const setCookie = firstHeader(first.headers, 'set-cookie');
+    expect(setCookie).toMatch(/^bare_session=/);
+
+    // Single-use: a replay of the same nonce is rejected.
+    const replay = await request('/login', { method: 'POST', body: nonce });
+    expect(replay.status).toBe(401);
   });
 
   it('accepts the X-Bare-Token header fallback', async () => {
@@ -433,6 +449,67 @@ describe('loopback server HTTP', () => {
   it('404s a missing subresource instead of SPA-falling back', async () => {
     const r = await request('/assets/missing.js', { headers: { cookie } });
     expect(r.status).toBe(404);
+  });
+
+  it('gates a non-public directory mount and 404s, never SPA-falls back', async () => {
+    // A separate server with a private (non-public) directory mount: the whole
+    // tree must be auth-gated and unknown paths must 404 rather than return
+    // the bootstrap index.html.
+    const priv = createLoopbackServer({ auth: true, token: TOKEN });
+    priv.mountDir('/private', dir); // NOT { public: true }
+    const creds = await priv.credentials();
+    const privOrigin = creds.origin;
+
+    const getAt = (p: string, headers: Record<string, string> = {}) =>
+      new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = http.request(
+          `${privOrigin}${p}`,
+          { method: 'GET', headers, agent: false },
+          (res) => {
+            let body = '';
+            res.on('data', (c) => (body += c));
+            res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
+          },
+        );
+        req.on('error', reject);
+        req.end();
+      });
+
+    // Unauthenticated: gated by auth (401), even though it is a directory.
+    const denied = await getAt('/private/app.js');
+    expect(denied.status).toBe(401);
+
+    // Authenticated real file: served.
+    const login = await new Promise<string>((resolve) => {
+      const req = http.request(
+        `${privOrigin}/login`,
+        { method: 'POST', agent: false },
+        (res) => {
+          res.on('data', () => {});
+          res.on('end', () =>
+            resolve((res.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? ''),
+          );
+        },
+      );
+      req.end(creds.bootstrap);
+    });
+    const authed = await getAt('/private/app.js', { cookie: login });
+    expect(authed.status).toBe(200);
+
+    // Authenticated unknown path: 404 — no SPA fallback on a private mount.
+    const unknown = await getAt('/private/nope', {
+      cookie: login,
+      accept: 'text/html',
+    });
+    expect(unknown.status).toBe(404);
+
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 2000);
+      priv.close(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   });
 
   it('serves byte ranges with Content-Range', async () => {
@@ -519,13 +596,13 @@ describe('loopback server HTTP', () => {
 });
 
 describe('loopback server WebSocket upgrade', () => {
-  it('handshakes with the query token', async () => {
+  it('handshakes with the X-Bare-Token header', async () => {
     const raw = await upgradeRequest({ token: TOKEN });
     expect(raw.split('\r\n')[0]).toContain('101');
     expect(raw).toContain('Sec-WebSocket-Accept:');
   });
 
-  it('rejects an upgrade without credentials', async () => {
+  it('rejects an upgrade with a query token (?token= removed)', async () => {
     const raw = await upgradeRequest();
     expect(raw.split('\r\n')[0]).not.toContain('101');
   });
@@ -811,5 +888,21 @@ describe('collectRequestBody (/login body decoding)', () => {
     req.emit('data', new Uint8Array([0xa9, 0x6e]));
     req.emit('end');
     await expect(pending).resolves.toBe('tokén');
+  });
+
+  it('rejects a body over the maxBytes cap', async () => {
+    const req = new EventEmitter() as unknown as HTTPIncomingMessage;
+    const pending = collectRequestBody(req, 4);
+    req.emit('data', new Uint8Array([116, 111, 107, 101, 110]));
+    req.emit('end');
+    await expect(pending).rejects.toThrow('too large');
+  });
+
+  it('accepts a body within the maxBytes cap', async () => {
+    const req = new EventEmitter() as unknown as HTTPIncomingMessage;
+    const pending = collectRequestBody(req, 4);
+    req.emit('data', new Uint8Array([116, 111, 107, 101]));
+    req.emit('end');
+    await expect(pending).resolves.toBe('toke');
   });
 });

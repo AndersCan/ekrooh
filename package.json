@@ -23,6 +23,7 @@
     "./plugins/discovery/events": "./dist/plugins-discovery-events.mjs",
     "./plugins/permissions/events": "./dist/plugins-permissions-events.mjs",
     "./plugins/media/events": "./dist/plugins-media-events.mjs",
+    "./plugins/logs/events": "./dist/plugins-logs-events.mjs",
     "./transports": "./dist/transports.mjs",
     "./package.json": "./package.json"
   },

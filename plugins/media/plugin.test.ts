@@ -8,6 +8,15 @@ import {
   type PluginContext,
 } from '../../core/messages';
 
+vi.mock('bare-crypto', async () => {
+  const crypto = await import('node:crypto');
+  return {
+    default: {
+      randomBytes: (size: number) => crypto.randomBytes(size),
+    },
+  };
+});
+
 const context: PluginContext = { runtime: 'bare', payload: new Uint8Array(0) };
 
 function stubServer(): LoopbackServer {
@@ -19,6 +28,7 @@ function stubServer(): LoopbackServer {
       origin: 'http://127.0.0.1:4242',
       port: 4242,
       token: 'testtoken',
+      bootstrap: 'test-nonce',
     })),
     mount: vi.fn(),
     unmount: vi.fn(),
@@ -60,7 +70,7 @@ describe('createMediaPlugin', () => {
     expect(error).toBeNull();
     expect(media?.path).toBe('/tmp/sample.png');
     expect(media?.url).toMatch(
-      /^http:\/\/127\.0\.0\.1:4242\/media\/image-[0-9a-z]+-[0-9a-z]+$/,
+      /^http:\/\/127\.0\.0\.1:4242\/media\/image-[0-9a-z]+-[A-Za-z0-9_-]+$/,
     );
     expect(media?.url).not.toContain('?token=');
     expect(media?.url).toContain('/media/image-');

@@ -124,7 +124,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Polls the worklet's `handoff.json` (written once the loopback server is
-     * up), injects the session token + shell marker, then loads the page. */
+     * up), injects the one-time bootstrap nonce + shell marker, then loads the
+     * page. The raw session token is never exposed to page JS — only the
+     * single-use nonce the page exchanges once via `POST /login`. */
     private fun waitForHandoffAndLoad() {
         val handoff = File(storageDir, "handoff.json")
         val deadline = System.currentTimeMillis() + 15_000
@@ -135,10 +137,10 @@ class MainActivity : AppCompatActivity() {
                     val json = JSONObject(text)
                     val origin = json.getString("origin")
                     val port = json.getInt("port")
-                    val token = json.getString("token")
+                    val bootstrap = json.getString("bootstrap")
                     WebViewCompat.addDocumentStartJavaScript(
                         webView,
-                        "window.__ekrooh={token:'$token'};window.BareShell=true;",
+                        "window.__ekrooh={bootstrap:'$bootstrap'};window.BareShell=true;",
                         // allowedOriginRules cannot wildcard the port; the
                         // handoff already knows the exact ephemeral port.
                         setOf("http://127.0.0.1:$port"),

@@ -133,16 +133,19 @@ web app at `/`, the media files mounted by plugins, and the framed-protocol
 WebSocket socket. On device it binds `127.0.0.1` on an ephemeral port and every
 request is gated by a per-session token:
 
-- The shell injects `window.__ekrooh = { token }` (plus `window.BareShell` as
-  a presence marker) before the page loads.
-- The page exchanges it for a `bare_session` cookie via `POST /login`
-  (`HttpOnly; SameSite=Lax; Path=/`).
+- The shell injects `window.__ekrooh = { bootstrap }` (a one-time nonce — never
+  the raw token; plus `window.BareShell`) before the page loads.
+- The page exchanges the bootstrap nonce for a `bare_session` cookie via
+  `POST /login` (`HttpOnly; SameSite=Lax; Path=/`); the nonce is single-use.
 - The cookie then authorizes `<img>`/`<video>`/`fetch` and the WebSocket
-  upgrade. `X-Bare-Token`/`?token=` remain as a fallback for non-browser
-  clients.
-- The worklet writes `{ origin, port, token }` to `handoff.json` in the
-  sandbox dir the host passed via `Worklet.Configuration.assets`; the host
-  reads it, injects the token, and loads `http://127.0.0.1:<port>/index.html`.
+  upgrade. Non-browser clients use the `X-Bare-Token` header. There is no
+  `?token=` URL fallback — a token never appears in a URL.
+- Only the bootstrap web-app directory mount at `/` is public pre-auth; every
+  other file/directory mount and the WS upgrade are gated.
+- The worklet writes `{ origin, port, token, bootstrap }` to `handoff.json` in
+  the sandbox dir the host passed via `Worklet.Configuration.assets`; the host
+  keeps `token` for its own needs, injects only `bootstrap` into the page, and
+  loads `http://127.0.0.1:<port>/index.html`.
 
 The dev backend runs the same bundle with auth off on a fixed port
 (`ws://localhost:8080`), so browser dev needs no token.

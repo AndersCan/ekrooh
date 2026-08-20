@@ -99,7 +99,22 @@ describe('createWebSocketTransport URL selection', () => {
 });
 
 describe('createWebSocketTransport /login bootstrap', () => {
-  it('exchanges an injected token for a session cookie before opening', async () => {
+  it('exchanges an injected bootstrap nonce for a session cookie before opening', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+    const fetchMock = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    createWebSocketTransport('ws://test');
+
+    await nextTick();
+    expect(fetchMock).toHaveBeenCalledWith('/login', {
+      method: 'POST',
+      body: 'one-time-nonce',
+    });
+    expect(lastSocket().url).toBe('ws://test');
+  });
+
+  it('exchanges an injected legacy token for a session cookie before opening', async () => {
     vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);
@@ -114,8 +129,8 @@ describe('createWebSocketTransport /login bootstrap', () => {
     expect(lastSocket().url).toBe('ws://test');
   });
 
-  it('falls back to the query token when login is rejected', async () => {
-    vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
+  it('never places a token in the URL when login is rejected', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({ ok: false })),
@@ -124,11 +139,14 @@ describe('createWebSocketTransport /login bootstrap', () => {
     createWebSocketTransport('ws://test?foo=1');
 
     await nextTick();
-    expect(lastSocket().url).toBe('ws://test/?foo=1&token=secret-token');
+    // A rejected login must NOT fall back to a ?token= URL — the loopback
+    // server rejects query tokens. The machine just opens the socket as-is.
+    expect(lastSocket().url).not.toContain('token');
+    expect(lastSocket().url).toBe('ws://test?foo=1');
   });
 
-  it('falls back to the query token when login throws', async () => {
-    vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
+  it('does not place a token in the URL when login throws', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
@@ -139,10 +157,11 @@ describe('createWebSocketTransport /login bootstrap', () => {
     createWebSocketTransport('ws://test');
 
     await nextTick();
-    expect(lastSocket().url).toBe('ws://test/?token=secret-token');
+    expect(lastSocket().url).toBe('ws://test');
+    expect(lastSocket().url).not.toContain('token');
   });
 
-  it('does not call /login when no token is injected', async () => {
+  it('does not call /login when no credential is injected', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -153,7 +172,7 @@ describe('createWebSocketTransport /login bootstrap', () => {
   });
 
   it('skips login when explicitly disabled', async () => {
-    vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -278,8 +297,8 @@ describe('createWebSocketTransport reconnect', () => {
     expect(second.sent).toHaveLength(1);
   });
 
-  it('retries with the query token when the upgrade is rejected despite a successful /login', async () => {
-    vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
+  it('retries on a fresh socket after a rejected upgrade, without a token in the URL', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({ ok: true })),
@@ -300,13 +319,16 @@ describe('createWebSocketTransport reconnect', () => {
     // opening, so the HttpOnly cookie never rode the handshake.
     first.close();
 
+    // The machine backs off and retries on a fresh socket — same clean URL.
+    await new Promise((resolve) => setTimeout(resolve, 30));
     expect(FakeWebSocket.instances.length).toBe(2);
     const second = lastSocket();
     expect(second).not.toBe(first);
-    expect(second.url).toBe('ws://test/?token=secret-token');
+    // No ?token= fallback: the retry uses the same clean URL.
+    expect(second.url).toBe('ws://test');
+    expect(second.url).not.toContain('token');
 
-    // RPC sent during the fallback is queued and flushes once the token URL
-    // actually opens — the app does not dead-end.
+    // RPC sent during the retry is queued and flushes once the socket opens.
     transport.send(
       MessageType.ENVELOPE,
       {
@@ -322,8 +344,8 @@ describe('createWebSocketTransport reconnect', () => {
     expect(second.sent).toHaveLength(1);
   });
 
-  it('gives up after the retry cap once the token URL is also rejected', async () => {
-    vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
+  it('gives up after the retry cap when the upgrade is rejected', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({ ok: true })),
@@ -349,15 +371,12 @@ describe('createWebSocketTransport reconnect', () => {
       },
       null,
     );
-    first.close(); // rejected → falls back to the token URL once
-
-    const second = lastSocket();
-    expect(second.url).toBe('ws://test/?token=secret-token');
-    second.close(); // token URL also rejected → cap reached
+    first.close(); // rejected → retry cap (0) reached → give up
 
     const header = headers[0] as PluginInvokeResponseHeader;
     expect(header.type).toBe('INVOKE_RESPONSE');
     expect(header.error?.code).toBe('TRANSPORT_ERROR');
+    expect(lastSocket().url).not.toContain('token');
   });
 
   it('queues during the reconnect window and errors after the cap', async () => {

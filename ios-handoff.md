@@ -234,8 +234,9 @@ core.discovery, core.permissions` and respond to Ping / Payload Echo /
 8. [ ] `examples/ios-app` shows the full health-check page end to end.
 9. [ ] Gates: `vp check`, `vp test` (unchanged), `xcodebuild test`, plus the
        JS+e2e suite untouched.
-10. [ ] Decide distribution (SPM host package + framework bundling); update
-        `vision.md`/`RELEASING.md`; ship source on the next tag.
+10. [x] Decide distribution (SPM host package + framework bundling); update
+        `vision.md`/`RELEASING.md`; ship the root `Package.swift` on the next
+        tag (issue #49).
 
 ## 10. Open questions for the human
 

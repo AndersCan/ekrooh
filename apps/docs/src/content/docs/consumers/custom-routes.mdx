@@ -38,8 +38,11 @@ runtime.server.mount('/photos/1.jpg', '/absolute/path/to/photo.jpg');
 runtime.server.mountDir('/photos', '/absolute/path/to/photos');
 ```
 
-`mountDir` serves every file below the prefix (longest-prefix match) with an
-SPA fallback to `index.html` for unknown GET navigations.
+`mountDir` serves every file below the prefix (longest-prefix match). By
+default a directory mount is **gated** like a file mount. Pass
+`{ public: true }` to mark it as world-readable bootstrap content (the web app
+at `/` is mounted that way); only a public mount applies the SPA fallback to
+`index.html` for unknown GET navigations — a non-public mount 404s them.
 
 ## Bytes from the browser → worklet
 

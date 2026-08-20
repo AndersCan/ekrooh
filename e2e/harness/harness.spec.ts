@@ -3,18 +3,23 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 /**
  * Multi-instance harness journeys (ticket #21). Boots the harness worklet
  * (see playwright.config.ts project "harness"), allocates one instance per
- * tab via the management server, injects the per-instance token, and loads the
- * instance's own origin — the app then connects to its instance's loopback
- * WebSocket exactly as it does on-device. The photo sync journey itself
- * ("folder create → invite → join → photo sync") lives in the consumer repo's
- * CI (beta gate A); here the harness's job is asserting per-instance isolation
- * and lifecycle, per the validated design (ticket #5).
+ * tab via the management server, injects the per-instance bootstrap nonce, and
+ * loads the instance's own origin — the app then connects to its instance's
+ * loopback WebSocket exactly as it does on-device. The photo sync journey
+ * itself ("folder create → invite → join → photo sync") lives in the consumer
+ * repo's CI (beta gate A); here the harness's job is asserting per-instance
+ * isolation and lifecycle, per the validated design (ticket #5).
  */
 
 const HARNESS_PORT = process.env.HARNESS_PORT ?? '8081';
 const SUPERVISOR = `http://127.0.0.1:${HARNESS_PORT}`;
 
-type Instance = { instanceId: string; origin: string; token: string };
+type Instance = {
+  instanceId: string;
+  origin: string;
+  token: string;
+  bootstrap: string;
+};
 
 async function allocate(): Promise<Instance> {
   const res = await fetch(`${SUPERVISOR}/instances`, { method: 'POST' });
@@ -33,11 +38,12 @@ async function listInstances(): Promise<string[]> {
 
 async function openTab(browser: Browser, instance: Instance): Promise<Page> {
   const page = await browser.newPage();
-  await page.addInitScript((token) => {
-    (window as unknown as { __ekrooh: { token?: string } }).__ekrooh = {
-      token,
+  await page.addInitScript((bootstrap) => {
+    // The page sees only the one-time bootstrap nonce — never the raw token.
+    (window as unknown as { __ekrooh: { bootstrap?: string } }).__ekrooh = {
+      bootstrap,
     };
-  }, instance.token);
+  }, instance.bootstrap);
   await page.goto(instance.origin);
   return page;
 }

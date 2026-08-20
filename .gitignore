@@ -33,6 +33,12 @@ ios/.build/
 ios/.swiftpm/
 ios/Package.resolved
 
+# Swift package (root Package.swift — the git-fetchable iOS host package)
+.build/
+.swiftpm/
+Package.resolved
+*.xcframework.zip
+
 # iOS reference app generated inputs (see scripts/build-ios-app.mjs)
 examples/ios-app/addons/
 examples/ios-app/Resources/

@@ -5,7 +5,25 @@ All notable changes to `@ekrooh/bare` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.4.0] - 2026-08-16
+## [Unreleased]
+
+### Changed
+
+- **Loopback auth surface tightened** (`core/server/static-file-server.ts`,
+  `core/runtime.ts`, reference hosts — ADR `docs/adr/0003-loopback-auth-surface.md`):
+  - The `?token=` query-param auth path is **removed**; `isAuthorized` accepts
+    only the `bare_session` cookie nonce or the `X-Bare-Token` header. The raw
+    token is never placed in a URL.
+  - The page receives only a **single-use bootstrap nonce** via
+    `window.__ekrooh.bootstrap` (exchanged for the cookie via `POST /login`),
+    never the raw token. `handoff.json` now carries `{ origin, port, token,
+bootstrap }`; the host keeps `token` for itself and injects only
+    `bootstrap`.
+  - Directory mounts are **gated by default**; `mountDir(..., { public: true })`
+    opts into world-readable bootstrap serving (the web app at `/`). The SPA
+    fallback applies only to public mounts.
+
+[0.4.0] - 2026-08-16
 
 ### Added
 

@@ -6,6 +6,9 @@ import { getIPC } from './lib/get-ipc';
 import { createHostIpcBridge } from './messages/host-ipc';
 import { MessageType, MessageProtocol, type PluginManifest } from './messages';
 import { createPluginRegistry, createPluginRouter } from './messages/protocol';
+import { installConsoleCapture } from './logs/capture';
+import { createLogRingBuffer } from './logs/store';
+import { registerLogRoutes } from './logs/routes';
 import {
   createLoopbackServer,
   type LoopbackServer,
@@ -163,6 +166,9 @@ export type WorkletRuntimeOptions = {
   plugins?: PluginManifest[];
   /** Idle timeout (ms) after which an authenticated WebSocket is dropped. */
   wsIdleTimeoutMs?: number;
+  /** Ring capacity for the `core.logs` capture store (retention knob; the
+   * rotating file sink is a consumer/app decision). Defaults to 500. */
+  logsCapacity?: number;
 };
 
 export type WorkletRuntimeConfig = {
@@ -181,7 +187,12 @@ export interface WorkletRuntime {
   config: WorkletRuntimeConfig;
   /** Binds the server, mounts the web app, attaches the protocol socket and
    * (in device mode) writes the handoff file. Resolves to the credentials. */
-  start(): Promise<{ origin: string; port: number; token: string }>;
+  start(): Promise<{
+    origin: string;
+    port: number;
+    token: string;
+    bootstrap: string;
+  }>;
   close(cb?: (err?: Error | null) => void): void;
 }
 
@@ -237,6 +248,14 @@ export function createWorkletRuntime(
     wsIdleTimeoutMs: options.wsIdleTimeoutMs,
   });
 
+  // `core.logs`: the worklet capture seam (console interception), the shared
+  // ring buffer fed by both the seam and the web ingest route, and the loopback
+  // log routes. Retention is a consumer knob (`logsCapacity`); the rotating file
+  // sink is an app decision, kept out of the framework.
+  const logStore = createLogRingBuffer(options.logsCapacity ?? 500);
+  installConsoleCapture(logStore, 'backend');
+  registerLogRoutes(server, logStore);
+
   for (const plugin of createDefaultPlugins({
     listBareCapabilities: () => pluginRegistry.listCapabilities(),
     queryHostCapabilities: () =>
@@ -244,6 +263,7 @@ export function createWorkletRuntime(
     staticServer: server,
     invokeOnHost: (header, payload) =>
       hostBridge?.invokeOnHost(header, payload) ?? Promise.resolve(null),
+    store: logStore,
   })) {
     pluginRegistry.register(plugin);
   }
@@ -290,7 +310,7 @@ export function createWorkletRuntime(
       }
     }
     if (options.webAssets) {
-      server.mountDir('/', options.webAssets);
+      server.mountDir('/', options.webAssets, { public: true });
     }
     attachWebSocketProtocol(server, { protocol, pluginRegistry, pluginRouter });
 

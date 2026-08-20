@@ -89,6 +89,7 @@ export function createHarnessSupervisor(
     instanceId: string;
     origin: string;
     token: string;
+    bootstrap: string;
   }> {
     const id = `inst-${nextInstanceId++}`;
     const { dir, storage, cache } = instanceDirs(id);
@@ -121,7 +122,12 @@ export function createHarnessSupervisor(
       },
     });
     origins.set(id, creds.origin);
-    return { instanceId: id, origin: creds.origin, token: creds.token };
+    return {
+      instanceId: id,
+      origin: creds.origin,
+      token: creds.token,
+      bootstrap: creds.bootstrap,
+    };
   }
 
   const server = http.createServer(

@@ -122,6 +122,10 @@ const PUBLIC_SURFACES: Record<string, { entry: string; exports: string[] }> = {
     entry: './plugins/media/events.ts',
     exports: ['mediaEvents', 'mediaSpecs'],
   },
+  'plugins/logs/events': {
+    entry: './plugins/logs/events.ts',
+    exports: ['logEvents', 'logsSpecs'],
+  },
   transports: {
     entry: './web/transports/index.ts',
     exports: ['createMockTransport', 'createWebSocketTransport'],
