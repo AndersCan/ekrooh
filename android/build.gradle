@@ -40,6 +40,11 @@ android {
     jvmTarget = "17"
   }
 
+  // Generate BuildConfig so host logging can be gated on BuildConfig.DEBUG.
+  buildFeatures {
+    buildConfig true
+  }
+
   // Ship consumer ProGuard rules so R8 in consumer apps keeps the host API
   // surface and the Bare Kit IPC entry points (see consumer-rules.pro).
   buildTypes {

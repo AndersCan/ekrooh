@@ -42,7 +42,7 @@ android {
   // rules keep the host API and Bare Kit JNI entry points intact.
   buildTypes {
     release {
-      isMinifyEnabled = true
+      minifyEnabled true
       proguardFiles(
         getDefaultProguardFile("proguard-android-optimize.txt"),
         "proguard-rules.pro",
