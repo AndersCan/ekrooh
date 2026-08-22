@@ -20,7 +20,7 @@ final class BareRuntime {
   init() {
     let documents =
       FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-    let storageDir = documents.appendingPathComponent("bare", isDirectory: true)
+    var storageDir = documents.appendingPathComponent("bare", isDirectory: true)
     try? FileManager.default.createDirectory(
       at: storageDir, withIntermediateDirectories: true
     )
@@ -186,7 +186,7 @@ final class BareRuntime {
   /// Removes the injected bootstrap user script so the single-use nonce cannot
   /// be re-injected into a later navigation. Called once after the first page
   /// load finishes.
-  private func consumeBootstrapOnce() {
+  fileprivate func consumeBootstrapOnce() {
     guard let webView else { return }
     webView.configuration.userContentController.removeAllUserScripts()
   }

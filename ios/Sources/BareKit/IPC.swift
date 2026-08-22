@@ -18,14 +18,14 @@ public struct IPC: AsyncSequence {
     return try await core.write(data: data)
   }
 
-  public func close() {
-    core.close()
+  public func close() async {
+    await core.close()
   }
 
   public typealias Element = Data
 
   public struct AsyncIterator: AsyncIteratorProtocol {
-    let core: IPCCore
+    fileprivate let core: IPCCore
 
     public func next() async throws -> Data? {
       return try await core.read()
