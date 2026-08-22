@@ -129,7 +129,7 @@ describe('createWebSocketTransport /login bootstrap', () => {
     expect(lastSocket().url).toBe('ws://test');
   });
 
-  it('never places a token in the URL when login is rejected', async () => {
+  it('never opens a socket when /login is rejected (no token-URL fallback)', async () => {
     vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
     vi.stubGlobal(
       'fetch',
@@ -139,13 +139,12 @@ describe('createWebSocketTransport /login bootstrap', () => {
     createWebSocketTransport('ws://test?foo=1');
 
     await nextTick();
-    // A rejected login must NOT fall back to a ?token= URL — the loopback
-    // server rejects query tokens. The machine just opens the socket as-is.
-    expect(lastSocket().url).not.toContain('token');
-    expect(lastSocket().url).toBe('ws://test?foo=1');
+    // A rejected login must NOT fall back to a ?token= URL, and must NOT open
+    // any socket — a rejected login has no cookie to ride the upgrade.
+    expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
-  it('does not place a token in the URL when login throws', async () => {
+  it('does not open a socket when /login throws', async () => {
     vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
     vi.stubGlobal(
       'fetch',
@@ -157,8 +156,36 @@ describe('createWebSocketTransport /login bootstrap', () => {
     createWebSocketTransport('ws://test');
 
     await nextTick();
-    expect(lastSocket().url).toBe('ws://test');
-    expect(lastSocket().url).not.toContain('token');
+    expect(FakeWebSocket.instances).toHaveLength(0);
+  });
+
+  it('fails queued invokes with TRANSPORT_ERROR when /login is rejected', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false })),
+    );
+
+    const transport = createWebSocketTransport('ws://test');
+    await nextTick();
+
+    const headers: unknown[] = [];
+    transport.subscribe((message) => headers.push(message.header));
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'lf1',
+      },
+      null,
+    );
+
+    const header = headers[0] as PluginInvokeResponseHeader;
+    expect(header.type).toBe('INVOKE_RESPONSE');
+    expect(header.error?.code).toBe('TRANSPORT_ERROR');
+    expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
   it('does not call /login when no credential is injected', async () => {

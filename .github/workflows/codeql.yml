@@ -1,0 +1,40 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # Weekly scheduled scan (issue #66).
+    - cron: '31 4 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # JS (web + runtime) and Kotlin (Android host) — issue #66.
+        language: ['javascript-typescript', 'kotlin']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@42947a340483f03ba47bb1a039b2c519aab3df85 # v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@42947a340483f03ba47bb1a039b2c519aab3df85 # v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@42947a340483f03ba47bb1a039b2c519aab3df85 # v3
+        with:
+          category: '/language:${{ matrix.language }}'

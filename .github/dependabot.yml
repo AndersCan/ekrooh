@@ -1,0 +1,31 @@
+# Dependabot configuration (issue #66).
+# Covers the three ecosystems this repo depends on: npm (JS toolchain +
+# runtime), gradle (Android/iOS host builds), and github-actions (CI supply
+# chain). Action SHAs are pinned in the workflows; Dependabot still tracks
+# version bumps for the referenced tag comments.
+version: 2
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    # Group all npm bumps into a single PR to reduce churn.
+    groups:
+      npm-dependencies:
+        patterns:
+          - '*'
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: 'gradle'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: 'github-actions'
+    directory: '/.github/workflows'
+    schedule:
+      interval: 'weekly'
+    # Keep the `uses: owner/action@<sha> # <tag>` pins in sync with new
+    # releases; Dependabot updates the SHA and the trailing tag comment.
+    open-pull-requests-limit: 10

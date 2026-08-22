@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { createHostIpcBridge, type BareIpcLike } from './host-ipc';
 import { MessageProtocol } from './wire-codec';
 import { MessageType } from './constants';
 import type { MessageHeader, RuntimeTarget } from './types';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 class FakeIpc implements BareIpcLike {
   writes: Uint8Array[] = [];
@@ -120,5 +124,25 @@ describe('createHostIpcBridge', () => {
       null,
     );
     expect(bridge.tryConsumeDownstreamFromHost(frame)).toBe(false);
+  });
+
+  it('times out a host invoke with the default 30s bound', async () => {
+    vi.useFakeTimers();
+    const ipc = new FakeIpc();
+    const protocol = new MessageProtocol();
+    const bridge = createHostIpcBridge({ ipc, protocol });
+    const promise = bridge.invokeOnHost(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.permissions',
+        event: 'permissions.requestStorage',
+        requestId: 'host-timeout-1',
+        args: {},
+      },
+      new Uint8Array(0),
+    );
+    const assertion = expect(promise).rejects.toThrow(/Host IPC timeout/);
+    vi.advanceTimersByTime(30001);
+    await assertion;
   });
 });

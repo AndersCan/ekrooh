@@ -9,6 +9,6 @@ public enum BareHostLogger {
   )
 
   public static func log(_ message: String) {
-    logger.error("\(message, privacy: .public)")
+    logger.error("\(message, privacy: .private)")
   }
 }

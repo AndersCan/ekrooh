@@ -17,13 +17,27 @@ function toUint8Array(data: Uint8Array | ArrayBuffer | Buffer): Uint8Array {
 }
 
 function newCorrelationId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  // CSPRNG-backed (not Math.random): unguessable request ids for host IPC.
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  const rand = bytes.reduce((acc, b) => acc + b.toString(36), '').slice(0, 22);
+  return `${Date.now().toString(36)}-${rand}`;
 }
 
 type Pending = {
   resolve: (h: MessageHeader) => void;
+  reject: (reason?: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
 };
+
+/** Hard ceiling on concurrently pending host calls. Above this, the oldest call
+ * is dropped (its timer cleared and promise rejected) so a flood of invokes
+ * cannot grow the pending map without bound. */
+const MAX_CONCURRENT_HOST_CALLS = 1024;
+
+/** Sane default for a host invoke: five-minute waits let a single stalled host
+ * call pin a slot indefinitely, so we default to 30s instead. */
+const DEFAULT_HOST_INVOKE_TIMEOUT_MS = 30000;
 
 export type BareIpcLike = {
   write(data: Uint8Array | Buffer | string): boolean;
@@ -44,6 +58,25 @@ export function createHostIpcBridge(config: {
   const { ipc, protocol } = config;
   const pending = new Map<string, Pending>();
 
+  function track(requestId: string, slot: Pending) {
+    if (pending.size >= MAX_CONCURRENT_HOST_CALLS) {
+      const oldest = pending.keys().next().value;
+      if (oldest !== undefined) {
+        const dropped = pending.get(oldest);
+        if (dropped) {
+          clearTimeout(dropped.timer);
+          dropped.reject(
+            new Error(
+              `host invoke dropped: too many concurrent host calls (${oldest})`,
+            ),
+          );
+        }
+        pending.delete(oldest);
+      }
+    }
+    pending.set(requestId, slot);
+  }
+
   function waitFor<T extends MessageHeader>(
     requestId: string,
     expectedType: T['type'],
@@ -58,7 +91,7 @@ export function createHostIpcBridge(config: {
           ),
         );
       }, timeoutMs);
-      pending.set(requestId, {
+      track(requestId, {
         timer,
         resolve: (h: MessageHeader) => {
           clearTimeout(timer);
@@ -73,6 +106,7 @@ export function createHostIpcBridge(config: {
             ),
           );
         },
+        reject,
       });
     });
   }
@@ -120,7 +154,7 @@ export function createHostIpcBridge(config: {
     async invokeOnHost(
       header: PluginInvokeRequestHeader,
       payload: Uint8Array,
-      timeoutMs = 300000,
+      timeoutMs = DEFAULT_HOST_INVOKE_TIMEOUT_MS,
     ): Promise<PluginInvokeResponseHeader | null> {
       const requestId = header.requestId;
       if (!requestId) return null;

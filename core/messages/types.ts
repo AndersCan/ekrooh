@@ -137,6 +137,10 @@ export type MessageHeader =
 export interface PluginContext {
   runtime: RuntimeTarget;
   payload: Uint8Array;
+  /** The registry-validated sender of the envelope. Always equals the
+   * wire `pluginId` once the router has matched a manifest — adapters can trust
+   * it without re-validating against the wire. */
+  sender?: { pluginId: string };
 }
 
 export interface PluginRuntimeAdapter {

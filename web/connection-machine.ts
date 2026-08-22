@@ -22,6 +22,10 @@ export interface ConnectionMachineOptions {
   initialBackoffMs: number;
   maxBackoffMs: number;
   clock?: Clock;
+  /** Returns a float in [0, 1) used to randomize the backoff delay (full
+   * jitter), so many WebViews do not reconnect in lockstep. Defaults to
+   * `Math.random`. Inject a deterministic source in tests. */
+  random?: () => number;
 }
 
 export type ConnectionStateName =
@@ -92,9 +96,14 @@ export function createConnectionMachine(
     setup: (m) => {
       m.effect(backoffState, ({ signal, context, clock, emit }) => {
         const s = context.get();
-        const delay = Math.min(
+        const capped = Math.min(
           s.initialBackoffMs * 2 ** (s.retries - 1),
           s.maxBackoffMs,
+        );
+        // Full jitter: randomize within [0, capped] so every client backs off
+        // on its own schedule instead of all retrying on the same tick.
+        const delay = Math.floor(
+          capped * Math.max(0, Math.min(1, (options.random ?? Math.random)())),
         );
         clock.setTimeout(delay, () => {
           if (signal.aborted) return;
@@ -103,7 +112,10 @@ export function createConnectionMachine(
       });
 
       m.on(idleState, loginOk, () => ({ state: openingState }));
-      m.on(idleState, loginFail, () => ({ state: openingState }));
+      // A failed login has no token-URL fallback, so it is terminal: fail the
+      // queue (the shell never opens a socket) rather than transitioning to a
+      // state that would flush queued requests.
+      m.on(idleState, loginFail, () => ({ state: gaveUpState }));
 
       m.on(openingState, socketOpen, (_event, opts) => {
         const s = opts!.context.get();

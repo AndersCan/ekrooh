@@ -34,6 +34,11 @@ export interface ProtocolMessenger {
   handleIncoming(header: MessageHeader): void;
 }
 
+/** Hard ceiling on concurrently in-flight invokes. Above this, the oldest call
+ * is dropped (its timer cleared and promise rejected) so a flood of requests
+ * cannot grow the pending map without bound. */
+const MAX_CONCURRENT_INVOKES = 1024;
+
 export function createProtocolMessenger(
   send: (
     request: InternalDispatchRequest,
@@ -43,6 +48,8 @@ export function createProtocolMessenger(
   const pending = new Map<
     string,
     {
+      pluginId: string;
+      event: string;
       resolve: (value: MessageHeader) => void;
       reject: (reason?: unknown) => void;
       timer: ReturnType<typeof setTimeout>;
@@ -57,7 +64,7 @@ export function createProtocolMessenger(
     },
     invoke(request, payload, timeoutMs = 5000) {
       const requestWithId = withRequestId(request);
-      const { requestId } = requestWithId;
+      const { requestId, pluginId, event } = requestWithId;
 
       return new Promise<MessageHeader>((resolvePromise, rejectPromise) => {
         const timer = setTimeout(() => {
@@ -67,7 +74,25 @@ export function createProtocolMessenger(
           );
         }, timeoutMs);
 
+        if (pending.size >= MAX_CONCURRENT_INVOKES) {
+          const oldest = pending.keys().next().value;
+          if (oldest !== undefined) {
+            const dropped = pending.get(oldest);
+            if (dropped) {
+              clearTimeout(dropped.timer);
+              dropped.reject(
+                new Error(
+                  `invoke dropped: too many concurrent invokes (${requestId})`,
+                ),
+              );
+            }
+            pending.delete(oldest);
+          }
+        }
+
         pending.set(requestId, {
+          pluginId,
+          event,
           resolve: resolvePromise,
           reject: rejectPromise,
           timer,
@@ -81,6 +106,14 @@ export function createProtocolMessenger(
       const pendingCall = pending.get(header.requestId);
       if (!pendingCall) return;
 
+      if (
+        header.type === 'INVOKE_RESPONSE' &&
+        (header.pluginId !== pendingCall.pluginId ||
+          header.event !== pendingCall.event)
+      ) {
+        return;
+      }
+
       clearTimeout(pendingCall.timer);
       pending.delete(header.requestId);
       pendingCall.resolve(header);
@@ -89,7 +122,11 @@ export function createProtocolMessenger(
 }
 
 function createRequestId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  // CSPRNG-backed (not Math.random): unguessable, collision-resistant ids.
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  const rand = bytes.reduce((acc, b) => acc + b.toString(36), '').slice(0, 22);
+  return `${Date.now().toString(36)}-${rand}`;
 }
 
 function withRequestId<T extends object>(

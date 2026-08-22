@@ -13,6 +13,9 @@ import Foundation
 public func registerDefaultHostPlugins(_ registry: HostPluginRegistry) {
   let statusFor = { (permission: String) -> String in
     switch permission {
+    case "storage":
+      // iOS has no storage permission; the app sandbox is always accessible.
+      return "granted"
     case "camera":
       switch AVCaptureDevice.authorizationStatus(for: .video) {
       case .authorized: return "granted"
@@ -22,7 +25,9 @@ public func registerDefaultHostPlugins(_ registry: HostPluginRegistry) {
       @unknown default: return "unsupported"
       }
     default:
-      return "granted"
+      // Unknown permissions are never auto-granted — report unsupported rather
+      // than claiming a grant the host does not actually hold.
+      return "unsupported"
     }
   }
 
@@ -40,6 +45,8 @@ public func registerDefaultHostPlugins(_ registry: HostPluginRegistry) {
   ) { args, _, respond in
     let permission = args?["permission"] as? String ?? "storage"
     switch permission {
+    case "storage":
+      respond(.ok(["permission": permission, "status": "granted"]))
     case "camera":
       AVCaptureDevice.requestAccess(for: .video) { granted in
         respond(
@@ -50,7 +57,7 @@ public func registerDefaultHostPlugins(_ registry: HostPluginRegistry) {
         )
       }
     default:
-      respond(.ok(["permission": permission, "status": "granted"]))
+      respond(.ok(["permission": permission, "status": "unsupported"]))
     }
   }
 }

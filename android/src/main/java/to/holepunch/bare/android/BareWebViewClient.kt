@@ -18,10 +18,12 @@ class BareWebViewClient : WebViewClient() {
         error: WebResourceError?,
     ) {
         super.onReceivedError(view, request, error)
-        Log.e(
-            "BARE_KOTLIN",
-            "WebView error ${error?.errorCode} ${error?.description} for ${request?.url}",
-        )
+        if (BuildConfig.DEBUG) {
+            Log.e(
+                "BARE_KOTLIN",
+                "WebView error ${error?.errorCode} ${error?.description} for ${request?.url}",
+            )
+        }
     }
 
     override fun onReceivedHttpError(
@@ -30,9 +32,11 @@ class BareWebViewClient : WebViewClient() {
         errorResponse: WebResourceResponse?,
     ) {
         super.onReceivedHttpError(view, request, errorResponse)
-        Log.e(
-            "BARE_KOTLIN",
-            "WebView http error ${errorResponse?.statusCode} for ${request?.url}",
-        )
+        if (BuildConfig.DEBUG) {
+            Log.e(
+                "BARE_KOTLIN",
+                "WebView http error ${errorResponse?.statusCode} for ${request?.url}",
+            )
+        }
     }
 }

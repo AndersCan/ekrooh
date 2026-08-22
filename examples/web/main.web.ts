@@ -10,20 +10,32 @@ import { discoveryEvents } from '@ekrooh/bare/plugins/discovery/events';
 import { healthEvents } from '@ekrooh/bare/plugins/health/events';
 import { mediaEvents } from '@ekrooh/bare/plugins/media/events';
 import { permissionEvents } from '@ekrooh/bare/plugins/permissions/events';
+import { type MessageTransport } from '@ekrooh/bare/transports';
 import { $capabilitiesSummary, $lastResult, $mediaUrl } from './app-state';
 import { $currentTime } from './current-time';
 import { handleMessage } from './handle-message';
+import { safeMediaUrl } from './media-url';
 import { $router, type AppPage } from './router';
 import { getTransport } from './transport';
 import { useStore } from './use-store';
 
-const transport = getTransport();
-const messenger = createProtocolMessenger((request, payload) => {
-  transport.send(MessageType.ENVELOPE, request, payload);
-});
-const bus = createPluginBus(messenger);
+let transport: MessageTransport;
+let bus: ReturnType<typeof createPluginBus>;
 
-main();
+async function boot() {
+  transport = await getTransport();
+  const messenger = createProtocolMessenger((request, payload) => {
+    transport.send(MessageType.ENVELOPE, request, payload);
+  });
+  bus = createPluginBus(messenger);
+  transport.subscribe((message) => {
+    messenger.handleIncoming(message.header);
+    handleMessage(message);
+  });
+  main();
+}
+
+boot();
 
 function main() {
   // The Android shell serves the app from /assets/index.html and the iOS shell
@@ -33,11 +45,6 @@ function main() {
   if (window.location.pathname.endsWith('/index.html')) {
     $router.open('/', true);
   }
-
-  transport.subscribe((message) => {
-    messenger.handleIncoming(message.header);
-    handleMessage(message);
-  });
 
   void runDiscovery();
 
@@ -235,18 +242,14 @@ async function runStoragePermission() {
 
 async function runMediaPick() {
   const [err, r] = await bus.invoke(mediaEvents.media.pick('image'));
-  $lastResult.set(
-    err ? `Media pick failed: ${err.message}` : `Media pick ok: ${r?.path}`,
-  );
-  $mediaUrl.set(r?.url ?? '');
+  $lastResult.set(err ? `Media pick failed: ${err.message}` : 'Media pick ok');
+  $mediaUrl.set(safeMediaUrl(r?.url));
 }
 
 async function runMediaCapture() {
   const [err, r] = await bus.invoke(mediaEvents.media.capture('image'));
   $lastResult.set(
-    err
-      ? `Media capture failed: ${err.message}`
-      : `Media capture ok: ${r?.path}`,
+    err ? `Media capture failed: ${err.message}` : 'Media capture ok',
   );
-  $mediaUrl.set(r?.url ?? '');
+  $mediaUrl.set(safeMediaUrl(r?.url));
 }

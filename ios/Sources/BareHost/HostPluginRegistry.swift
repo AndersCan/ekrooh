@@ -25,7 +25,10 @@ public final class HostPluginRegistry {
   public typealias Handler =
     ([String: Any]?, Data?, @escaping (HostInvokeOutcome) -> Void) -> Void
 
+  /// `handlers` is mutated from `register` (main/UI thread) and read from
+  /// `dispatch` (an IPC Task) — guard with an unfair lock to avoid a data race.
   private var handlers: [Key: Handler] = [:]
+  private var lock = os_unfair_lock()
 
   public init() {}
 
@@ -34,11 +37,15 @@ public final class HostPluginRegistry {
     event: String,
     handler: @escaping Handler
   ) {
+    os_unfair_lock_lock(&lock)
     handlers[Key(pluginId: pluginId, event: event)] = handler
+    os_unfair_lock_unlock(&lock)
   }
 
   /** Capability rows for `HOST_CAPABILITIES_RESPONSE`, runtimes `["ios"]`. */
   public func toCapabilitiesJSON() -> [[String: Any]] {
+    os_unfair_lock_lock(&lock)
+    defer { os_unfair_lock_unlock(&lock) }
     var byPlugin: [String: Set<String>] = [:]
     for key in handlers.keys {
       var events = byPlugin[key.pluginId] ?? []
@@ -63,11 +70,16 @@ public final class HostPluginRegistry {
     payload: Data?,
     respond: @escaping (HostInvokeOutcome) -> Void
   ) {
-    guard let handler = handlers[Key(pluginId: pluginId, event: event)] else {
+    os_unfair_lock_lock(&lock)
+    let handler = handlers[Key(pluginId: pluginId, event: event)]
+    os_unfair_lock_unlock(&lock)
+    // Fixed string only — never reflect caller-controlled pluginId/event back
+    // to page JS (would enable capability probing).
+    guard let handler else {
       respond(
         .fail(
           code: ErrorCodes.unsupportedCapability,
-          message: "No host handler for \(pluginId).\(event)"
+          message: "No host handler for the requested capability"
         )
       )
       return

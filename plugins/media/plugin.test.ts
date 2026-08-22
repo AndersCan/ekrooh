@@ -65,10 +65,10 @@ describe('createMediaPlugin', () => {
       { kind: 'image' },
       context,
     );
-    const media = result as { url: string; path: string } | undefined;
+    const media = result as { url: string } | undefined;
 
     expect(error).toBeNull();
-    expect(media?.path).toBe('/tmp/sample.png');
+    expect((media as Record<string, unknown>).path).toBeUndefined();
     expect(media?.url).toMatch(
       /^http:\/\/127\.0\.0\.1:4242\/media\/image-[0-9a-z]+-[A-Za-z0-9_-]+$/,
     );
@@ -113,6 +113,30 @@ describe('createMediaPlugin', () => {
 
     const [error] = await invoke('media.pick', {}, context);
     expect(error?.code).toBe('HOST_ERROR');
+  });
+
+  it('evicts least-recently-used mounts beyond the cap', async () => {
+    const staticServer = stubServer();
+    const plugin = createMediaPlugin({
+      staticServer,
+      invokeOnHost: okHost({ path: '/tmp/sample.png' }),
+    });
+    const invoke = plugin.runtimes.bare?.invoke;
+    if (!invoke) throw new Error('expected bare invoke adapter');
+
+    for (let i = 0; i < 6; i++) {
+      await invoke('media.pick', { kind: 'image' }, context);
+    }
+
+    // 6 mounts, but only the 4 most recent stay mounted — the two oldest are
+    // unmounted so media does not accumulate for the whole session.
+    expect(staticServer.mount).toHaveBeenCalledTimes(6);
+    const unmocked = vi.mocked(staticServer.unmount);
+    expect(unmocked).toHaveBeenCalled();
+    const unmounted = unmocked.mock.calls.map((c) => c[0]);
+    expect(
+      unmounted.every((p) => typeof p === 'string' && p.startsWith('/media/')),
+    ).toBe(true);
   });
 
   it('declares its events and capabilities', () => {

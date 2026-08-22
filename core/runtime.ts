@@ -274,6 +274,8 @@ export function createWorkletRuntime(
   const pluginRouter = createPluginRouter(pluginRegistry, 'bare', {
     delegateToHost: (header, payload) =>
       hostBridge?.invokeOnHost(header, payload) ?? Promise.resolve(null),
+    getHostCapabilities: () =>
+      hostBridge?.queryCapabilities() ?? Promise.resolve([]),
   });
 
   if (ipc) {

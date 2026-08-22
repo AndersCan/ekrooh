@@ -135,10 +135,78 @@ describe('attachWebSocketProtocol', () => {
     const socket = fakeSocket();
     harness.handler!(socket as never, { headers: {} });
 
-    socket.emit('data', new Uint8Array([0xff, 0x00, 0x01]));
+    // A ≥4-byte chunk (one full frame under the header-length framing) with an
+    // unsupported version byte — decoded and rejected, not left buffered.
+    socket.emit('data', new Uint8Array([0xff, 0x00, 0x00, 0x00]));
     expect(socket.write).not.toHaveBeenCalled();
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  it('reassembles a frame split across data chunks', async () => {
+    const harness = serverHarness();
+    attachWebSocketProtocol(harness.server as never, healthContext() as never);
+    const socket = fakeSocket();
+    harness.handler!(socket as never, { headers: {} });
+
+    const frame = invokeFrame({
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      requestId: 'split1',
+      args: { message: 'hi' },
+    });
+
+    // Deliver the frame one byte at a time; nothing may be decoded until the
+    // full frame has arrived.
+    for (let i = 0; i < frame.byteLength; i++) {
+      socket.emit('data', frame.subarray(i, i + 1));
+      expect(socket.write).not.toHaveBeenCalled();
+    }
+
+    await vi.waitFor(() => expect(socket.write).toHaveBeenCalledTimes(1));
+    const decoded = protocol.decode(
+      socket.write.mock.calls[0][0] as Uint8Array,
+    );
+    expect((decoded.header as PluginInvokeResponseHeader).requestId).toBe(
+      'split1',
+    );
+  });
+
+  it('drains multiple frames from a single coalesced chunk', async () => {
+    const harness = serverHarness();
+    attachWebSocketProtocol(harness.server as never, healthContext() as never);
+    const socket = fakeSocket();
+    harness.handler!(socket as never, { headers: {} });
+
+    const frame1 = invokeFrame({
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      requestId: 'coal1',
+      args: { message: 'a' },
+    });
+    const frame2 = invokeFrame({
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      requestId: 'coal2',
+      args: { message: 'b' },
+    });
+    const coalesced = new Uint8Array(frame1.byteLength + frame2.byteLength);
+    coalesced.set(frame1, 0);
+    coalesced.set(frame2, frame1.byteLength);
+
+    socket.emit('data', coalesced);
+
+    await vi.waitFor(() => expect(socket.write).toHaveBeenCalledTimes(2));
+    const ids = socket.write.mock.calls
+      .map((c) => c[0] as Uint8Array)
+      .map(
+        (b) =>
+          (protocol.decode(b).header as PluginInvokeResponseHeader).requestId,
+      );
+    expect(ids).toEqual(['coal1', 'coal2']);
   });
 });
 

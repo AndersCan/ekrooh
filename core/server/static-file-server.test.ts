@@ -432,7 +432,7 @@ describe('loopback server HTTP', () => {
   it('rejects path traversal with a raw request', async () => {
     const raw = await rawRequest([
       'GET /../etc/passwd HTTP/1.1',
-      'Host: 127.0.0.1',
+      `Host: 127.0.0.1:${port}`,
       'Connection: close',
     ]);
     expect(raw.split('\r\n')[0]).toContain('400');
@@ -541,6 +541,33 @@ describe('loopback server HTTP', () => {
     expect(r.headers['referrer-policy']).toBe('no-referrer');
   });
 
+  it('serves HTML with a strict CSP and no wildcard ACAO', async () => {
+    const r = await request('/');
+    expect(r.status).toBe(200);
+    expect(r.headers['content-security-policy']).toBe(
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws:",
+    );
+    expect(firstHeader(r.headers, 'access-control-allow-origin')).toBeNull();
+  });
+
+  it('does not send a wildcard ACAO on non-HTML assets', async () => {
+    const r = await request('/app.js', { headers: { cookie } });
+    expect(r.status).toBe(200);
+    expect(r.headers['content-security-policy']).toBeUndefined();
+    expect(firstHeader(r.headers, 'access-control-allow-origin')).toBeNull();
+  });
+
+  it('validates the token/nonce with constant-time comparison', async () => {
+    const good = await request('/login', { method: 'POST', body: TOKEN });
+    expect(good.status).toBe(200);
+    // A near-miss (same length, wrong byte) must fail, proving exact match.
+    const near = await request('/login', {
+      method: 'POST',
+      body: TOKEN.slice(0, -1) + 'x',
+    });
+    expect(near.status).toBe(401);
+  });
+
   it('handles a read-stream error without crashing the worklet (evicted file)', async () => {
     const bareFs = (await import('bare-fs')) as unknown as {
       default: typeof fs;
@@ -595,6 +622,144 @@ describe('loopback server HTTP', () => {
   });
 });
 
+describe('loopback server origin validation (auth mode)', () => {
+  let s: ReturnType<typeof createLoopbackServer> | null = null;
+  let o = '';
+  let p = 0;
+  let ck = '';
+
+  const get = (urlPath: string, headers: Record<string, string> = {}) =>
+    new Promise<{
+      status: number;
+      headers: http.IncomingHttpHeaders;
+      body: string;
+    }>((resolve, reject) => {
+      const r = http.request(
+        `${o}${urlPath}`,
+        { method: 'GET', headers, agent: false },
+        (res) => {
+          let body = '';
+          res.on('data', (c) => (body += c));
+          res.on('end', () =>
+            resolve({
+              status: res.statusCode ?? 0,
+              headers: res.headers,
+              body,
+            }),
+          );
+        },
+      );
+      r.on('error', reject);
+      r.end();
+    });
+
+  const rawGet = (lines: string[]) =>
+    new Promise<string>((resolve) => {
+      let data = '';
+      let done = false;
+      const finish = (v: string) => {
+        if (!done) {
+          done = true;
+          resolve(v);
+        }
+      };
+      const sock = net.connect({ host: '127.0.0.1', port: p });
+      sock.on('connect', () => sock.write([...lines, '\r\n'].join('\r\n')));
+      sock.on('data', (d) => {
+        data += String(d);
+        if (data.includes('\r\n')) finish(data);
+      });
+      sock.on('close', () => finish(data));
+      sock.on('error', () => finish(data));
+      setTimeout(() => {
+        sock.destroy();
+        finish(data);
+      }, 3000);
+    });
+
+  beforeAll(async () => {
+    s = createLoopbackServer({ auth: true, token: TOKEN });
+    s.mountDir('/', dir, { public: true });
+    s.mount('/media/sample.png', path.join(dir, 'app.js'));
+    // A registered route mirrors the auth-gated `/logs` endpoint.
+    s.registerRoute('GET', '/logs', (_, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('log line');
+    });
+    const creds = await s.credentials();
+    o = creds.origin;
+    p = creds.port;
+    const login = await new Promise<string>((resolve) => {
+      const r = http.request(
+        `${o}/login`,
+        { method: 'POST', agent: false },
+        (res) => {
+          res.on('data', () => {});
+          res.on('end', () =>
+            resolve((res.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? ''),
+          );
+        },
+      );
+      r.end(TOKEN);
+    });
+    ck = login;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => {
+      if (!s) return resolve();
+      let done = false;
+      s.close(() => {
+        if (!done) {
+          done = true;
+          resolve();
+        }
+      });
+      setTimeout(() => {
+        if (!done) {
+          done = true;
+          resolve();
+        }
+      }, 2000);
+    });
+  });
+
+  it('accepts media and /logs with the right origin', async () => {
+    const media = await get('/media/sample.png', { cookie: ck, origin: o });
+    expect(media.status).toBe(200);
+    const logs = await get('/logs', { cookie: ck, origin: o });
+    expect(logs.status).toBe(200);
+    expect(logs.body).toBe('log line');
+  });
+
+  it('accepts a top-level navigation (matching Host, no Origin)', async () => {
+    const page = await get('/');
+    expect(page.status).toBe(200);
+    // A gated resource without an Origin but with a matching Host still works
+    // for the same-process/local client (e.g. the host or curl).
+    const gated = await get('/media/sample.png', { cookie: ck });
+    expect(gated.status).toBe(200);
+  });
+
+  it('rejects a mismatched Origin with 403', async () => {
+    const r = await get('/media/sample.png', {
+      cookie: ck,
+      origin: 'http://evil.example',
+    });
+    expect(r.status).toBe(403);
+  });
+
+  it('rejects a DNS-rebinding navigation (foreign Host, stolen cookie) with 403', async () => {
+    const raw = await rawGet([
+      'GET /logs HTTP/1.1',
+      'Host: evil.example',
+      `Cookie: ${ck}`,
+      'Connection: close',
+    ]);
+    expect(raw.split('\r\n')[0]).toContain('403');
+  });
+});
+
 describe('loopback server WebSocket upgrade', () => {
   it('handshakes with the X-Bare-Token header', async () => {
     const raw = await upgradeRequest({ token: TOKEN });
@@ -613,6 +778,60 @@ describe('loopback server WebSocket upgrade', () => {
       origin: 'http://evil.example',
     });
     expect(raw.split('\r\n')[0]).not.toContain('101');
+  });
+
+  it('rejects an upgrade with no Origin header when auth is on', async () => {
+    // No absent-Origin bypass: a missing Origin must be refused in auth mode.
+    const sc = createLoopbackServer({ auth: true, token: TOKEN });
+    sc.mountDir('/', dir);
+    const creds = await sc.credentials();
+    const scPort = Number(
+      creds.origin.slice(creds.origin.lastIndexOf(':') + 1),
+    );
+
+    const socket = net.connect({ host: '127.0.0.1', port: scPort });
+    const request = [
+      'GET /ws HTTP/1.1',
+      `Host: 127.0.0.1:${scPort}`,
+      'Upgrade: websocket',
+      'Connection: Upgrade',
+      'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+      'Sec-WebSocket-Version: 13',
+      `X-Bare-Token: ${TOKEN}`,
+      '\r\n',
+    ].join('\r\n');
+    const outcome = await new Promise<string>((resolve) => {
+      let data = '';
+      let done = false;
+      const finish = (v: string) => {
+        if (!done) {
+          done = true;
+          resolve(v);
+        }
+      };
+      socket.on('connect', () => socket.write(request));
+      socket.on('data', (d) => {
+        data += String(d);
+        if (data.includes('\r\n')) {
+          finish(data);
+        }
+      });
+      socket.on('close', () => finish(data));
+      socket.on('error', () => finish(data));
+      setTimeout(() => {
+        socket.destroy();
+        finish(data);
+      }, 3000);
+    });
+    expect(outcome.split('\r\n')[0]).not.toContain('101');
+
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 2000);
+      sc.close(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   });
 
   it('rejects a second socket while one is active (single-client policy)', async () => {

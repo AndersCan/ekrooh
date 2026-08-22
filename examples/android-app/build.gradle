@@ -37,6 +37,18 @@ android {
       useLegacyPackaging = true
     }
   }
+
+  // Release builds ship minified; the default ProGuard file plus the app's
+  // rules keep the host API and Bare Kit JNI entry points intact.
+  buildTypes {
+    release {
+      isMinifyEnabled = true
+      proguardFiles(
+        getDefaultProguardFile("proguard-android-optimize.txt"),
+        "proguard-rules.pro",
+      )
+    }
+  }
 }
 
 // Helper to get a robust PATH including common locations for node and npm

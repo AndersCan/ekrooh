@@ -12,6 +12,9 @@ function machine(
     initialBackoffMs: 250,
     maxBackoffMs: 2000,
     clock,
+    // Deterministic jitter (full = capped delay) so the timings below are
+    // exact; production passes no `random` and gets real `Math.random`.
+    random: () => 1,
     ...overrides,
   });
   return { m, clock };
@@ -28,11 +31,11 @@ describe('connection-machine', () => {
     expect(m.state()).toBe('connected');
   });
 
-  it('login fail opens the socket as-is (no token-URL fallback)', () => {
+  it('login fail fails the queue and never opens a socket (no token-URL fallback)', () => {
     const { m } = machine();
     m.sendLoginFail();
-    expect(m.state()).toBe('opening');
-    expect(m.url()).toBe('ws://test');
+    expect(m.state()).toBe('gaveUp');
+    expect(m.isGaveUp()).toBe(true);
   });
 
   it('close-before-open backs off on the same URL (no token-URL retry)', () => {
@@ -119,5 +122,28 @@ describe('connection-machine', () => {
     m.sendClose();
     m.sendClose(); // already in backoff: defensive no-op, no change
     expect(seen).toEqual(['idle', 'opening', 'connected', 'backoff']);
+  });
+
+  it('applies full jitter within the backoff window', () => {
+    const randoms: number[] = [];
+    const { m, clock } = machine({
+      maxRetries: 3,
+      initialBackoffMs: 250,
+      maxBackoffMs: 2000,
+      // 0.5 → exactly half the exponential delay.
+      random: () => {
+        randoms.push(0.5);
+        return 0.5;
+      },
+    });
+    m.sendLoginOk();
+    m.sendClose();
+    expect(randoms).toHaveLength(1);
+    // Capped exponential at retry 1 is 250ms; half of that is 125ms.
+    expect(m.state()).toBe('backoff');
+    clock.advance(124);
+    expect(m.state()).toBe('backoff');
+    clock.advance(1);
+    expect(m.state()).toBe('opening');
   });
 });

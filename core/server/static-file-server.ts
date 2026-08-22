@@ -37,7 +37,11 @@ export function mimeTypeFor(filePath: string): string {
 }
 
 /** Reads the token from the `X-Bare-Token` request header (parser-lowercased).
- * `fetch`-based non-browser clients that cannot carry cookies use this. */
+ * `fetch`-based non-browser clients that cannot carry cookies use this.
+ * Security note: like the `bare_session` cookie, this credential travels the
+ * cleartext 127.0.0.1 loopback — it is only trusted from the bound origin
+ * (enforced by `originAllowed`), and is an escape hatch for same-loopback
+ * non-browser clients; it is accepted over TLS-agnostic plain HTTP by design. */
 export function tokenFromHeaders(
   headers: Record<string, string | number>,
 ): string | null {
@@ -65,6 +69,15 @@ export function cookieSession(
  * echoed into a request header a local attacker could read back. */
 export function sessionNonce(token: string): string {
   return crypto.createHash('blake2b-256').update(token).digest('hex');
+}
+
+/** Constant-time string comparison. bare-crypto's `timingSafeEqual` requires
+ * equal-length inputs (it throws otherwise), so guard on byte length first. */
+function secretEquals(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
 }
 
 /** Parses a `Range: bytes=<start>-<end>` header. Returns `null` when absent or
@@ -257,8 +270,32 @@ export function createLoopbackServer(
   function isAuthorized(headers: Record<string, string | number>) {
     if (!authEnabled) return true;
     if (token === null) return false;
-    if (tokenFromHeaders(headers) === token) return true;
-    return cookieSession(headers) === sessionNonce(token);
+    if (secretEquals(tokenFromHeaders(headers) ?? '', token)) return true;
+    return secretEquals(cookieSession(headers) ?? '', sessionNonce(token));
+  }
+
+  /** DNS-rebinding and cross-origin defense for plain HTTP. In auth (device)
+   * mode the server never advertises a stable hostname, so a browser request
+   * must either carry a same-origin `Origin` header (fetches/subresources) or,
+   * for top-level navigations that send no Origin (the initial WebView load),
+   * a `Host` header pointing back at the bound 127.0.0.1:port. A DNS-rebinding
+   * navigation resolves the loopback address under an attacker-controlled
+   * hostname and therefore sends a foreign `Host`. Dev (auth off) is open. */
+  function originAllowed(headers: Record<string, string | number>): boolean {
+    if (!authEnabled) return true;
+    if (boundOrigin === '') return true;
+    const boundHostPort = boundOrigin.slice('http://'.length);
+    const host = headers['host'];
+    if (typeof host !== 'string' || host !== boundHostPort) return false;
+    const origin = headers['origin'];
+    if (
+      typeof origin === 'string' &&
+      origin.length > 0 &&
+      origin !== boundOrigin
+    ) {
+      return false;
+    }
+    return true;
   }
 
   function writeError(
@@ -279,9 +316,9 @@ export function createLoopbackServer(
     void collectRequestBody(req, 4096)
       .then((body) => {
         const trimmed = body.trim();
-        const byToken = token !== null && trimmed === token;
+        const byToken = token !== null && secretEquals(trimmed, token);
         const byBootstrap =
-          bootstrapNonce !== null && trimmed === bootstrapNonce;
+          bootstrapNonce !== null && secretEquals(trimmed, bootstrapNonce);
         const accepted = !authEnabled || byToken || byBootstrap;
         if (!accepted) {
           writeError(res, 401, 'Unauthorized');
@@ -382,6 +419,14 @@ export function createLoopbackServer(
     return null;
   }
 
+  /** Strict Content-Security-Policy for HTML documents served by the loopback
+   * server; subresources must stay same-origin (the page talks to the worklet
+   * over the loopback socket). `style-src` needs `'unsafe-inline'` for the
+   * bundled web app's inline styles and `connect-src` allows the same-origin
+   * protocol socket. */
+  const CSP_HEADER =
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws:";
+
   function serveFile(
     req: HTTPIncomingMessage,
     res: HTTPServerResponse,
@@ -398,14 +443,19 @@ export function createLoopbackServer(
       writeError(res, 404, 'Not found');
       return;
     }
+    const contentType = mimeTypeFor(filePath);
+    const cspHeader: Record<string, string> =
+      contentType === 'text/html'
+        ? { 'Content-Security-Policy': CSP_HEADER }
+        : {};
     const range = parseRange(req.headers['range'], stat.size);
     if (range) {
       res.writeHead(206, {
-        'Content-Type': mimeTypeFor(filePath),
+        'Content-Type': contentType,
         'Content-Range': `bytes ${range.start}-${range.end}/${stat.size}`,
         'Content-Length': range.end - range.start + 1,
         'Accept-Ranges': 'bytes',
-        'Access-Control-Allow-Origin': '*',
+        ...cspHeader,
         'Referrer-Policy': 'no-referrer',
         'Cache-Control': 'no-store',
       });
@@ -416,10 +466,10 @@ export function createLoopbackServer(
       return;
     }
     res.writeHead(200, {
-      'Content-Type': mimeTypeFor(filePath),
+      'Content-Type': contentType,
       'Content-Length': stat.size,
       'Accept-Ranges': 'bytes',
-      'Access-Control-Allow-Origin': '*',
+      ...cspHeader,
       'Referrer-Policy': 'no-referrer',
       'Cache-Control': 'no-store',
     });
@@ -465,6 +515,13 @@ export function createLoopbackServer(
       // public directory mount.
       const cleanPath = rawPath.split('#')[0].replace(/\/+$/, '') || '/';
       const headers = req.headers as Record<string, string | number>;
+
+      // DNS-rebinding / cross-origin gate: all plain HTTP requests (login,
+      // logs, media, static) must target the bound origin in auth mode.
+      if (!originAllowed(headers)) {
+        writeError(res, 403, 'Forbidden');
+        return;
+      }
 
       if (req.method === 'POST' && cleanPath === '/login') {
         handleLogin(req, res);
@@ -540,20 +597,21 @@ export function createLoopbackServer(
   }
 
   // WS upgrade: origin check, auth check, then handshake. Rejects before the
-  // 101 so unauthenticated clients never complete a handshake. The origin
-  // check is only meaningful on-device (auth on): the page is served by this
-  // server, so its Origin matches. Dev runs cross-origin (Vite) with auth off.
+  // 101 so unauthenticated clients never complete a handshake. In auth (device)
+  // mode the page is served by this server, so its Origin must match the bound
+  // origin exactly — a missing or foreign Origin is rejected outright (no
+  // absent-Origin bypass). Dev runs cross-origin (Vite) with auth off, where
+  // the check is skipped.
   server.on('upgrade', (req, socket, head) => {
     const headers = req.headers as Record<string, string | number>;
 
     const origin = headers['origin'];
-    if (
-      authEnabled &&
+    const allowed =
       typeof origin === 'string' &&
       origin.length > 0 &&
-      boundOrigin !== '' &&
-      origin !== boundOrigin
-    ) {
+      origin === boundOrigin &&
+      boundOrigin !== '';
+    if (authEnabled && !allowed) {
       socket.destroy();
       return;
     }

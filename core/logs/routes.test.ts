@@ -156,4 +156,20 @@ describe('registerLogRoutes', () => {
     });
     expect(bad.status).toBe(400);
   });
+
+  it('rejects an oversized /logs body with 413 (unbounded-body DoS guard)', async () => {
+    store.clear();
+    const big = JSON.stringify({
+      source: 'web',
+      entries: [{ message: 'x'.repeat(2 * 1024 * 1024) }],
+    });
+    const post = await request('/logs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: big,
+    });
+    expect(post.status).toBe(413);
+    // The oversized batch must not have been ingested.
+    expect(store.view().length).toBe(0);
+  });
 });

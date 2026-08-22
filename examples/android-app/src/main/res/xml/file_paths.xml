@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- FileProvider paths: the camera writes captures into the app cache dir. -->
+<!-- FileProvider paths: the camera writes captures into a dedicated subdir of
+     the app cache (captures/), so the provider never exposes the whole
+     cacheDir (which also holds handoff.json, web assets, and worklet state). -->
 <paths>
-    <cache-path name="cache" path="." />
+    <cache-path name="captures" path="captures/" />
 </paths>

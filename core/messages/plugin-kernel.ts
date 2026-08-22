@@ -1,6 +1,7 @@
 import { ErrorCode } from './constants';
 import {
   CoreError,
+  CapabilityDescriptor,
   DispatchEnvelope,
   Either,
   InvokeEnvelope,
@@ -83,14 +84,21 @@ export type PluginRouterOptions = {
     header: PluginInvokeRequestHeader,
     payload: Uint8Array,
   ) => Promise<PluginInvokeResponseHeader | null>;
+  /** Host-registered capabilities (from `HOST_CAPABILITIES_RESPONSE`).
+   * Delegation to the host is only permitted for events the host announces
+   * here — a deny-by-default allowlist. When omitted or empty, no
+   * host-delegated invokes are allowed. */
+  getHostCapabilities?: () => Promise<CapabilityDescriptor[]>;
   logger?: Pick<Console, 'warn' | 'error'>;
 };
 
 /** Whether the router may synthesize an UNSUPPORTED_EVENT response. Events are
- * only gated when the manifest declares them; undeclared plugins opt out of
- * validation for backward compatibility. */
+ * only gated when the manifest declares them; a plugin with no manifest/owner
+ * declares nothing and is rejected. */
 function declaresEvent(plugin: PluginManifest | undefined, event: string) {
-  return plugin?.events ? plugin.events.includes(event) : true;
+  if (!plugin) return false;
+  if (!plugin.events) return false;
+  return plugin.events.includes(event);
 }
 
 export function createPluginRouter(
@@ -99,6 +107,24 @@ export function createPluginRouter(
   options?: PluginRouterOptions,
 ): PluginRouter {
   const logger = options?.logger ?? console;
+  /** Snapshot of the host-announced capabilities; loaded once on the first
+   * delegation decision. */
+  let hostCaps: CapabilityDescriptor[] | null = null;
+
+  async function hostCapabilities(): Promise<CapabilityDescriptor[]> {
+    if (hostCaps) return hostCaps;
+    hostCaps = (await options?.getHostCapabilities?.()) ?? [];
+    return hostCaps;
+  }
+
+  /** Deny-by-default host-delegation allowlist: an event can only be delegated
+   * once the host has announced it via `HOST_CAPABILITIES_RESPONSE`. */
+  function isHostRegistered(pluginId: string, event: string): boolean {
+    if (!hostCaps) return false;
+    const row = hostCaps.find((c) => c.pluginId === pluginId);
+    return row ? row.events.includes(event) : false;
+  }
+
   return {
     async route(header, payload) {
       const plugin = isPluginEnvelopeHeader(header)
@@ -132,6 +158,7 @@ export function createPluginRouter(
           await runtimeAdapter.dispatch(header.event, header.args, {
             runtime,
             payload,
+            sender: { pluginId: header.pluginId },
           });
           return null;
         } catch (e) {
@@ -156,6 +183,7 @@ export function createPluginRouter(
               {
                 runtime,
                 payload,
+                sender: { pluginId: header.pluginId },
               },
             );
             const [error, okResult] = result;
@@ -181,19 +209,22 @@ export function createPluginRouter(
           }
         }
         if (header.requestId && options?.delegateToHost) {
-          try {
-            const delegated = await options.delegateToHost(header, payload);
-            if (delegated) {
-              return delegated;
+          await hostCapabilities();
+          if (isHostRegistered(header.pluginId, header.event)) {
+            try {
+              const delegated = await options.delegateToHost(header, payload);
+              if (delegated) {
+                return delegated;
+              }
+            } catch (e) {
+              return invokeErrorResponse(
+                header,
+                new CoreError(
+                  ErrorCode.HOST_ERROR,
+                  e instanceof Error ? e.message : String(e),
+                ),
+              );
             }
-          } catch (e) {
-            return invokeErrorResponse(
-              header,
-              new CoreError(
-                ErrorCode.HOST_ERROR,
-                e instanceof Error ? e.message : String(e),
-              ),
-            );
           }
         }
         return invokeErrorResponse(

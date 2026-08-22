@@ -84,6 +84,7 @@ describe('createPluginRouter', () => {
     const dispatch = vi.fn(async () => {});
     registry.register({
       id: 'core.health',
+      events: ['health.ping'],
       runtimes: { bare: { dispatch } },
     });
     const router = createPluginRouter(registry, 'bare');
@@ -106,7 +107,11 @@ describe('createPluginRouter', () => {
 
   it('returns an error response when a dispatch has no adapter', async () => {
     const registry = createPluginRegistry();
-    registry.register({ id: 'core.health', runtimes: {} });
+    registry.register({
+      id: 'core.health',
+      events: ['health.ping'],
+      runtimes: {},
+    });
     const router = createPluginRouter(registry, 'bare');
     const response = await router.route(
       { type: 'DISPATCH', pluginId: 'core.health', event: 'health.ping' },
@@ -120,6 +125,7 @@ describe('createPluginRouter', () => {
     const registry = createPluginRegistry();
     registry.register({
       id: 'core.health',
+      events: ['health.ping'],
       runtimes: {
         bare: {
           invoke: () => ok({ message: 'pong' }),
@@ -150,6 +156,7 @@ describe('createPluginRouter', () => {
     const registry = createPluginRegistry();
     registry.register({
       id: 'core.health',
+      events: ['health.bogus'],
       runtimes: {
         bare: {
           invoke: () => err('UNSUPPORTED_EVENT', 'nope'),
@@ -224,6 +231,7 @@ describe('createPluginRouter', () => {
     const registry = createPluginRegistry();
     registry.register({
       id: 'core.health',
+      events: ['health.ping'],
       runtimes: {
         bare: {
           dispatch: () => {
@@ -244,9 +252,13 @@ describe('createPluginRouter', () => {
     );
   });
 
-  it('delegates to the host when no adapter exists', async () => {
+  it('delegates to the host when no adapter exists (declared + host-registered)', async () => {
     const registry = createPluginRegistry();
-    registry.register({ id: 'core.permissions', runtimes: {} });
+    registry.register({
+      id: 'core.permissions',
+      events: ['permissions.requestStorage'],
+      runtimes: {},
+    });
     const delegated: PluginInvokeResponseHeader = {
       type: 'INVOKE_RESPONSE',
       pluginId: 'core.permissions',
@@ -256,6 +268,14 @@ describe('createPluginRouter', () => {
     };
     const router = createPluginRouter(registry, 'bare', {
       delegateToHost: async () => delegated,
+      getHostCapabilities: async () => [
+        {
+          pluginId: 'core.permissions',
+          capabilities: ['permissions'],
+          events: ['permissions.requestStorage'],
+          runtimes: ['android'],
+        },
+      ],
     });
     const response = await router.route(
       {
@@ -269,9 +289,104 @@ describe('createPluginRouter', () => {
     expect(response).toEqual(delegated);
   });
 
+  it('does NOT delegate a declared event the host has not registered', async () => {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'core.permissions',
+      events: ['permissions.requestStorage'],
+      runtimes: {},
+    });
+    const delegateToHost = vi.fn(async () => null);
+    const router = createPluginRouter(registry, 'bare', {
+      delegateToHost,
+      getHostCapabilities: async () => [
+        {
+          pluginId: 'core.permissions',
+          capabilities: ['permissions'],
+          events: ['permissions.status'],
+          runtimes: ['android'],
+        },
+      ],
+    });
+    const response = await router.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.permissions',
+        event: 'permissions.requestStorage',
+        requestId: 'r8',
+      },
+      new Uint8Array(0),
+    );
+    expect(delegateToHost).not.toHaveBeenCalled();
+    expect(response?.error?.code).toBe('UNSUPPORTED_CAPABILITY');
+  });
+
+  it('rejects an undeclared plugin/event and does NOT forward it to the host', async () => {
+    const registry = createPluginRegistry();
+    const delegateToHost = vi.fn(async () => null);
+    const router = createPluginRouter(registry, 'bare', {
+      delegateToHost,
+      getHostCapabilities: async () => [
+        {
+          pluginId: 'attacker.plugin',
+          capabilities: [],
+          events: ['evil.run'],
+          runtimes: ['android'],
+        },
+      ],
+    });
+    const response = await router.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'attacker.plugin',
+        event: 'evil.run',
+        requestId: 'r9',
+      },
+      new Uint8Array(0),
+    );
+    expect(delegateToHost).not.toHaveBeenCalled();
+    expect(response?.error?.code).toBe(ErrorCode.UNSUPPORTED_EVENT);
+  });
+
+  it('rejects an undeclared event even when the host announces the plugin', async () => {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'core.permissions',
+      events: ['permissions.requestStorage'],
+      runtimes: {},
+    });
+    const delegateToHost = vi.fn(async () => null);
+    const router = createPluginRouter(registry, 'bare', {
+      delegateToHost,
+      getHostCapabilities: async () => [
+        {
+          pluginId: 'core.permissions',
+          capabilities: ['permissions'],
+          events: ['permissions.requestStorage'],
+          runtimes: ['android'],
+        },
+      ],
+    });
+    const response = await router.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.permissions',
+        event: 'permissions.steal',
+        requestId: 'r10',
+      },
+      new Uint8Array(0),
+    );
+    expect(delegateToHost).not.toHaveBeenCalled();
+    expect(response?.error?.code).toBe(ErrorCode.UNSUPPORTED_EVENT);
+  });
+
   it('returns UNSUPPORTED_CAPABILITY when neither adapter nor host handles it', async () => {
     const registry = createPluginRegistry();
-    registry.register({ id: 'core.health', runtimes: {} });
+    registry.register({
+      id: 'core.health',
+      events: ['health.ping'],
+      runtimes: {},
+    });
     const router = createPluginRouter(registry, 'bare');
     const response = await router.route(
       {
@@ -287,11 +402,23 @@ describe('createPluginRouter', () => {
 
   it('returns HOST_ERROR when host delegation throws', async () => {
     const registry = createPluginRegistry();
-    registry.register({ id: 'core.permissions', runtimes: {} });
+    registry.register({
+      id: 'core.permissions',
+      events: ['permissions.requestStorage'],
+      runtimes: {},
+    });
     const router = createPluginRouter(registry, 'bare', {
       delegateToHost: async () => {
         throw new Error('host exploded');
       },
+      getHostCapabilities: async () => [
+        {
+          pluginId: 'core.permissions',
+          capabilities: ['permissions'],
+          events: ['permissions.requestStorage'],
+          runtimes: ['android'],
+        },
+      ],
     });
     const response = await router.route(
       {
@@ -419,6 +546,7 @@ describe('integration: messenger + protocol + bus over an encoded channel', () =
     const registry = createPluginRegistry();
     registry.register({
       id: 'core.health',
+      events: ['health.ping'],
       runtimes: {
         bare: {
           invoke: () => ok({ message: 'pong', ts: 123 }),
@@ -454,6 +582,7 @@ describe('integration: messenger + protocol + bus over an encoded channel', () =
     const registry = createPluginRegistry();
     registry.register({
       id: 'app.photos',
+      events: ['photo.url'],
       runtimes: {
         bare: {
           invoke: () => err('app.photos/not-found', 'missing'),

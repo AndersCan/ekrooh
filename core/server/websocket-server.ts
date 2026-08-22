@@ -9,6 +9,15 @@ function toUint8Array(data: unknown): Uint8Array {
   throw new Error('Expected Uint8Array or ArrayBuffer from socket data');
 }
 
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  if (a.byteLength === 0) return b;
+  if (b.byteLength === 0) return a;
+  const out = new Uint8Array(a.byteLength + b.byteLength);
+  out.set(a, 0);
+  out.set(b, a.byteLength);
+  return out;
+}
+
 /** Envelope encoder bound to a loopback server's connected protocol socket —
  * the server-initiated (backend → web) push seam. */
 export type LoopbackPush = (
@@ -42,24 +51,51 @@ export function attachWebSocketProtocol(
   const { protocol, pluginRouter } = context;
 
   server.onConnection((socket, _request) => {
+    // Per-socket receive buffer: a single frame may arrive split across several
+    // TCP segments, or several frames may arrive coalesced into one chunk. The
+    // wire format is `[version][type][headerLen hi][headerLen lo][header][payload]`
+    // with the client→server (invoke) direction carrying its arguments in the
+    // JSON header and a zero-length payload, so a frame's length is
+    // `4 + headerLen` from bytes 2-3. Buffer frames until complete, drain them
+    // in order, and leave partial bytes for the next chunk.
+    let buffer: Uint8Array = new Uint8Array(0);
+
     socket.on('data', async (raw) => {
       try {
         const data = toUint8Array(raw);
         if (data.byteLength === 0) return;
 
-        const parsed = protocol.decode(data);
-        const header = parsed.header;
+        buffer = concatBytes(buffer, data);
 
-        const pluginResponse = await pluginRouter.route(header, parsed.payload);
-        if (pluginResponse) {
-          socket.write(
-            protocol.encode(MessageType.ENVELOPE, pluginResponse, null),
+        while (buffer.byteLength >= 4) {
+          const headerLen = (buffer[2] << 8) | buffer[3];
+          const frameLen = 4 + headerLen;
+          if (buffer.byteLength < frameLen) break;
+
+          const frame = buffer.subarray(0, frameLen);
+          buffer = buffer.subarray(frameLen);
+
+          const parsed = protocol.decode(frame);
+          const header = parsed.header;
+
+          const pluginResponse = await pluginRouter.route(
+            header,
+            parsed.payload,
           );
+          if (pluginResponse) {
+            socket.write(
+              protocol.encode(MessageType.ENVELOPE, pluginResponse, null),
+            );
+          }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error('Error handling WebSocket message:', message);
       }
+    });
+
+    socket.on('close', () => {
+      buffer = new Uint8Array(0);
     });
   });
 }

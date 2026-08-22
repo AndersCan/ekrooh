@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nothing is backed up: the worklet's sandbox dirs (web assets copy, the
+     p2p corestore, and the loopback handoff/token) are regenerated or
+     session-scoped, so device-to-device restore of the app sandbox is
+     disabled. Excludes every sandboxed domain (cache is excluded from full
+     backup by the platform; `allowBackup="false"` makes this defense-in-depth). -->
+<full-backup-content>
+    <exclude domain="file" path="." />
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="external" path="." />
+</full-backup-content>

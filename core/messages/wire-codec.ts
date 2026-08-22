@@ -1,4 +1,5 @@
 import {
+  ErrorCode,
   MAX_FRAME_BYTES,
   MAX_HEADER_BYTES,
   MessageType,
@@ -8,6 +9,7 @@ import {
 import {
   WireMessage,
   CapabilityDescriptor,
+  CoreError,
   CoreErrorWire,
   MessageHeader,
   RuntimeTarget,
@@ -20,23 +22,41 @@ export interface ProtocolOptions {
   encode?: Encoder;
   decode?: Decoder;
   allowUnknownTypes?: boolean;
-  /** Override the default {@link MAX_FRAME_BYTES} cap. */
+  /** Override the default {@link MAX_FRAME_BYTES} cap. Clamped to a sane
+   * range: it must be large enough to hold the largest legal header, and never
+   * larger than {@link MAX_FRAME_BYTES}. `Infinity`/`NaN`/negative inputs
+   * collapse to the defaults so a caller cannot disable the decode-side cap. */
   maxFrameBytes?: number;
+}
+
+/** Smallest frame that can legally carry a maximum-size header. Below this the
+ * decoder could never extract a header, so it is the effective floor for the
+ * frame cap. */
+const MIN_FRAME_BYTES = MAX_HEADER_BYTES + 4;
+
+function clampFrameBytes(value: number): number {
+  const fallback = Number.isFinite(value) ? Math.floor(value) : MAX_FRAME_BYTES;
+  return Math.min(Math.max(fallback, MIN_FRAME_BYTES), MAX_FRAME_BYTES);
 }
 
 export class MessageProtocol {
   private encodeStr: Encoder;
   private decodeStr: Decoder;
   private allowUnknownTypes: boolean;
-  private maxFrameBytes: number;
+  /** Resolved, clamped frame cap. Public so callers/tests can inspect the
+   * effective limit after clamping. */
+  readonly maxFrameBytes: number;
 
   constructor(options?: ProtocolOptions) {
     this.encodeStr =
       options?.encode || ((str) => new TextEncoder().encode(str));
     this.decodeStr =
-      options?.decode || ((bytes) => new TextDecoder().decode(bytes));
+      options?.decode ||
+      ((bytes) => new TextDecoder(undefined, { fatal: true }).decode(bytes));
     this.allowUnknownTypes = options?.allowUnknownTypes ?? false;
-    this.maxFrameBytes = options?.maxFrameBytes ?? MAX_FRAME_BYTES;
+    this.maxFrameBytes = clampFrameBytes(
+      options?.maxFrameBytes ?? MAX_FRAME_BYTES,
+    );
   }
 
   encode(
@@ -127,7 +147,15 @@ export class MessageProtocol {
       );
     }
 
-    const headerStr = this.decodeStr(view.subarray(4, 4 + headerLen));
+    let headerStr: string;
+    try {
+      headerStr = this.decodeStr(view.subarray(4, 4 + headerLen));
+    } catch {
+      throw new CoreError(
+        ErrorCode.FRAME_INVALID,
+        'FRAME_INVALID: header frame is not valid UTF-8',
+      );
+    }
     const header = parseAndValidateHeader(headerStr);
     const payload = view.subarray(4 + headerLen);
 
@@ -175,7 +203,7 @@ function parseAndValidateHeader(headerJson: string): MessageHeader {
           pluginId: header.pluginId,
           event: header.event,
           requestId: asOptionalString(header.requestId),
-          result: header.result,
+          result: sanitizeValue(header.result, 0),
           error: parseCoreErrorWire(header.error),
         });
       }
@@ -223,7 +251,7 @@ function parseAndValidateHeader(headerJson: string): MessageHeader {
           requestId: header.requestId,
           pluginId: header.pluginId,
           event: header.event,
-          result: header.result,
+          result: sanitizeValue(header.result, 0),
           error: parseCoreErrorWire(header.error),
         });
       }
@@ -232,13 +260,14 @@ function parseAndValidateHeader(headerJson: string): MessageHeader {
   throw new Error(`Unsupported header type: ${String(header.type)}`);
 }
 
-/** Validated known fields win, unknown fields pass through untouched so
- * forward-compatible peers can relay envelopes without losing data. */
+/** Only allowlisted, schema-known fields are carried forward. Unknown wire
+ * fields are dropped so attacker-controlled keys (e.g. `__proto__` or an
+ * arbitrary `args` key) never ride into plugin args/result objects. */
 function mergeHeader<T extends MessageHeader>(
   parsed: Record<string, unknown>,
   known: T,
 ): T {
-  return { ...parsed, ...known } as T;
+  return known;
 }
 
 function isValidPluginHeaderFields(
@@ -254,9 +283,39 @@ function asOptionalString(value: unknown): string | undefined {
 }
 
 function asOptionalRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object'
-    ? (value as Record<string, unknown>)
-    : undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined;
+  return sanitizeValue(value, 0) as Record<string, unknown>;
+}
+
+/** Recursively copy an attacker-controlled value onto a `null`-prototype object,
+ * dropping prototype-polluting keys (`__proto__`/`constructor`/`prototype`) and
+ * rejecting excessive nesting (depth bombs carried inside the 64KB header
+ * budget). Throws {@link ErrorCode.FRAME_INVALID} on over-deep structures. */
+const MAX_VALUE_DEPTH = 16;
+
+function sanitizeValue(value: unknown, depth: number): unknown {
+  if (depth > MAX_VALUE_DEPTH) {
+    throw new CoreError(
+      ErrorCode.FRAME_INVALID,
+      `FRAME_INVALID: value nested deeper than ${MAX_VALUE_DEPTH} levels`,
+    );
+  }
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeValue(item, depth + 1));
+  }
+  const out: Record<string, unknown> = Object.create(null);
+  for (const key of Object.keys(value as Record<string, unknown>)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      continue;
+    }
+    out[key] = sanitizeValue(
+      (value as Record<string, unknown>)[key],
+      depth + 1,
+    );
+  }
+  return out;
 }
 
 function parseCoreErrorWire(value: unknown): CoreErrorWire | undefined {

@@ -19,6 +19,7 @@ import org.json.JSONObject
 import to.holepunch.bare.kit.IPC
 import to.holepunch.bare.kit.Worklet
 import java.io.File
+import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
     private lateinit var worklet: Worklet
@@ -28,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var storageDir: File
     private lateinit var webappDir: File
     private lateinit var bareCacheDir: File
+    private lateinit var capturesDir: File
     private val mainHandler = Handler(Looper.getMainLooper())
 
     // vendor.media: native picker/camera launchers. The host handlers run on the
@@ -41,6 +43,15 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var pendingCaptureFile: File? = null
 
+    // core.permissions: real runtime permission dialog. The same Activity
+    // Result pattern as vendor.media — launch on the main thread, route the
+    // system outcome back through [pendingPermissionRespond].
+    private lateinit var permissionLauncher: ActivityResultLauncher<String>
+    @Volatile
+    private var pendingPermission: String? = null
+    @Volatile
+    private var pendingPermissionRespond: ((HostPluginRegistry.HostInvokeOutcome) -> Unit)? = null
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,6 +64,10 @@ class MainActivity : AppCompatActivity() {
         storageDir = File(cacheDir, "bare").apply { mkdirs() }
         webappDir = File(cacheDir, "webapp")
         bareCacheDir = File(cacheDir, "bare-cache").apply { mkdirs() }
+        // Camera/picker outputs live in a dedicated subdir so the FileProvider
+        // path (res/xml/file_paths.xml) never exposes the whole cacheDir
+        // (handoff.json, web assets, etc.).
+        capturesDir = File(cacheDir, "captures").apply { mkdirs() }
         copyWebAssets(webappDir)
 
         // A previous run may have left a handoff file pointing at a dead
@@ -87,7 +102,8 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             ipc = IPC(worklet)
-            registerDefaultHostPlugins(hostPlugins)
+            registerDefaultHostPlugins(hostPlugins, this)
+            registerPermissionHostPlugins(hostPlugins)
             registerMediaHostPlugins(hostPlugins)
             HostIpcCoordinator(ipc, hostPlugins).start()
         } catch (e: Exception) {
@@ -97,7 +113,7 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.webview)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
-        webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+        webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         webView.webViewClient = BareWebViewClient()
 
         waitForHandoffAndLoad()
@@ -140,12 +156,18 @@ class MainActivity : AppCompatActivity() {
                     val bootstrap = json.getString("bootstrap")
                     WebViewCompat.addDocumentStartJavaScript(
                         webView,
-                        "window.__ekrooh={bootstrap:'$bootstrap'};window.BareShell=true;",
+                        "window.__ekrooh={bootstrap:${JSONObject.quote(bootstrap)}};" +
+                            "window.BareShell=true;",
                         // allowedOriginRules cannot wildcard the port; the
                         // handoff already knows the exact ephemeral port.
                         setOf("http://127.0.0.1:$port"),
                     )
                     webView.loadUrl("$origin/index.html")
+                    // The bootstrap nonce is single-use and the page exchanges
+                    // it for the HttpOnly session cookie immediately; the raw
+                    // session token is never needed by the host again. Delete
+                    // the handoff (and the token at rest) now that it is spent.
+                    handoff.delete()
                     return
                 } catch (e: Exception) {
                     Log.e("BARE_KOTLIN", "Handoff malformed", e)
@@ -208,6 +230,66 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Reference host handler for `core.permissions`: `permissions.request`
+     * shows the system runtime-permission dialog for ids backed by a real
+     * Android runtime permission (camera) and returns the real outcome. Ids
+     * needing no runtime grant (storage → system picker) or unknown ids are
+     * reported via [resolvePermissionStatus] without a dialog — never a
+     * fabricated grant.
+     */
+    private fun registerPermissionHostPlugins(registry: HostPluginRegistry) {
+        permissionLauncher =
+            registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                val id = pendingPermission ?: return@registerForActivityResult
+                val respond = pendingPermissionRespond ?: return@registerForActivityResult
+                pendingPermission = null
+                pendingPermissionRespond = null
+                respond(
+                    HostPluginRegistry.HostInvokeOutcome.Ok(
+                        JSONObject().put("permission", id).put(
+                            "status",
+                            if (granted) "granted" else "denied",
+                        ),
+                    ),
+                )
+            }
+
+        registry.register("core.permissions", "permissions.request") { args, _, respond ->
+            // Single-slot pending callback: reject overlapping requests so one
+            // invoke cannot clobber another's response routing.
+            if (pendingPermissionRespond != null) {
+                respond(
+                    HostPluginRegistry.HostInvokeOutcome.Fail(
+                        ErrorCodes.HOST_ERROR,
+                        "Concurrent permission invocation not supported",
+                    ),
+                )
+                return@register
+            }
+            // Missing id fails closed (unsupported) rather than resolving to a
+            // granted capability.
+            val id = args?.optString("permission") ?: ""
+            val androidPermission = androidPermissionFor(id)
+            if (androidPermission == null) {
+                // No runtime dialog (scoped storage or unknown id) — reflect the
+                // real status instead of guessing.
+                respond(
+                    HostPluginRegistry.HostInvokeOutcome.Ok(
+                        JSONObject().put("permission", id).put(
+                            "status",
+                            resolvePermissionStatus(id, this),
+                        ),
+                    ),
+                )
+                return@register
+            }
+            pendingPermission = id
+            pendingPermissionRespond = respond
+            mainHandler.post { permissionLauncher.launch(androidPermission) }
+        }
+    }
+
+    /**
      * Reference host handlers for `vendor.media`: the worklet serves the
      * returned path over its loopback HTTP server, so no bytes cross the wire.
      * `media.pick` opens the system photo/video picker; `media.capture` opens
@@ -251,6 +333,15 @@ class MainActivity : AppCompatActivity() {
             }
 
         registry.register("vendor.media", "media.pick") { args, _, respond ->
+            if (pendingMedia != null) {
+                respond(
+                    HostPluginRegistry.HostInvokeOutcome.Fail(
+                        ErrorCodes.HOST_ERROR,
+                        "Concurrent media invocation not supported",
+                    ),
+                )
+                return@register
+            }
             val kind = args?.optString("kind") ?: "image"
             pendingMedia = respond
             val selector =
@@ -262,10 +353,19 @@ class MainActivity : AppCompatActivity() {
             mainHandler.post { pickLauncher.launch(PickVisualMediaRequest(selector)) }
         }
         registry.register("vendor.media", "media.capture") { args, _, respond ->
+            if (pendingMedia != null || pendingCaptureFile != null) {
+                respond(
+                    HostPluginRegistry.HostInvokeOutcome.Fail(
+                        ErrorCodes.HOST_ERROR,
+                        "Concurrent media invocation not supported",
+                    ),
+                )
+                return@register
+            }
             val kind = args?.optString("kind") ?: "image"
             pendingMedia = respond
             val ext = if (kind == "video") ".mp4" else ".jpg"
-            val file = File(cacheDir, "capture-${System.currentTimeMillis()}$ext")
+            val file = File(capturesDir, "${UUID.randomUUID()}$ext")
             pendingCaptureFile = file
             val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
             mainHandler.post {
@@ -303,7 +403,7 @@ class MainActivity : AppCompatActivity() {
                         else -> ".bin"
                     }
                 } ?: ".bin"
-            val dest = File(cacheDir, "media-${System.currentTimeMillis()}$ext")
+            val dest = File(capturesDir, "media-${UUID.randomUUID()}$ext")
             val copied =
                 contentResolver.openInputStream(uri)?.use { input ->
                     dest.outputStream().use { output -> input.copyTo(output) }

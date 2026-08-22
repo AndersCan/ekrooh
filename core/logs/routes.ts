@@ -81,38 +81,51 @@ export function registerLogRoutes(
   });
 
   server.registerRoute('POST', '/logs', (req, res) => {
-    void collectRequestBody(req).then((body) => {
-      let parsed: LogIngestPayload;
-      try {
-        parsed = JSON.parse(body) as LogIngestPayload;
-      } catch {
-        res.writeHead(400, {
+    void collectRequestBody(req, 1024 * 1024)
+      .then((body) => {
+        let parsed: LogIngestPayload;
+        try {
+          parsed = JSON.parse(body) as LogIngestPayload;
+        } catch {
+          res.writeHead(400, {
+            'Content-Type': 'text/plain',
+            'Referrer-Policy': 'no-referrer',
+          });
+          res.end('Bad request');
+          return;
+        }
+        const source: LogSource =
+          parsed.source === 'backend' ? 'backend' : 'web';
+        const batch = Array.isArray(parsed.entries) ? parsed.entries : [];
+        let accepted = 0;
+        for (const raw of batch) {
+          if (!raw || typeof raw.message !== 'string') continue;
+          store.append({
+            ts: Date.now(),
+            level: raw.level ?? 'info',
+            source,
+            tag: raw.tag,
+            message: raw.message,
+          });
+          accepted++;
+        }
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Referrer-Policy': 'no-referrer',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify({ accepted }));
+      })
+      .catch((err) => {
+        // An oversized ingest is a 413, never an OOM DoS — drop the batch and
+        // move on (the worklet is single-tenant, so nothing else can be hurt).
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('Discarding oversized /logs batch:', message);
+        res.writeHead(413, {
           'Content-Type': 'text/plain',
           'Referrer-Policy': 'no-referrer',
         });
-        res.end('Bad request');
-        return;
-      }
-      const source: LogSource = parsed.source === 'backend' ? 'backend' : 'web';
-      const batch = Array.isArray(parsed.entries) ? parsed.entries : [];
-      let accepted = 0;
-      for (const raw of batch) {
-        if (!raw || typeof raw.message !== 'string') continue;
-        store.append({
-          ts: Date.now(),
-          level: raw.level ?? 'info',
-          source,
-          tag: raw.tag,
-          message: raw.message,
-        });
-        accepted++;
-      }
-      res.writeHead(200, {
-        'Content-Type': 'application/json',
-        'Referrer-Policy': 'no-referrer',
-        'Cache-Control': 'no-store',
+        res.end('Request Entity Too Large');
       });
-      res.end(JSON.stringify({ accepted }));
-    });
   });
 }

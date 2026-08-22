@@ -74,4 +74,76 @@ describe('createProtocolMessenger', () => {
       messenger.handleIncoming(response('unknown-id')),
     ).not.toThrow();
   });
+
+  it('ignores a spoofed response whose pluginId/event do not match the request', async () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const messenger = createProtocolMessenger(send);
+    const promise = messenger.invoke({
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      args: {},
+    });
+    const request = send.mock.calls[0]?.[0];
+
+    const assertion = expect(promise).rejects.toThrow(/invoke timeout/);
+    messenger.handleIncoming({
+      type: 'INVOKE_RESPONSE',
+      pluginId: 'attacker.plugin',
+      event: 'evil.run',
+      requestId: request?.requestId,
+      result: { stolen: true },
+    });
+    vi.advanceTimersByTime(5001);
+    await assertion;
+  });
+
+  it('resolves only when pluginId and event match the pending request', async () => {
+    const send = vi.fn();
+    const messenger = createProtocolMessenger(send);
+    const promise = messenger.invoke({
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      args: {},
+    });
+    const request = send.mock.calls[0]?.[0];
+
+    messenger.handleIncoming({
+      type: 'INVOKE_RESPONSE',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      requestId: request?.requestId,
+      result: { ok: true },
+    });
+    const header = await promise;
+    expect((header as { result?: unknown }).result).toEqual({ ok: true });
+  });
+
+  it('drops the oldest invoke when the concurrent cap is exceeded', async () => {
+    const send = vi.fn();
+    const messenger = createProtocolMessenger(send);
+    const promises: Promise<unknown>[] = [];
+    for (let i = 0; i < 1025; i++) {
+      promises.push(
+        messenger.invoke(
+          {
+            type: 'INVOKE_REQUEST',
+            pluginId: 'core.health',
+            event: 'health.ping',
+            args: {},
+          },
+          null,
+          100000,
+        ),
+      );
+    }
+    await expect(promises[0]).rejects.toThrow(/too many concurrent/);
+    for (let i = 1; i < 1025; i++) {
+      const req = send.mock.calls[i]?.[0];
+      messenger.handleIncoming(response(req.requestId));
+    }
+    await expect(promises[1024]).resolves.toBeDefined();
+  });
 });

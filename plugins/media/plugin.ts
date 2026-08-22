@@ -21,6 +21,11 @@ export type MediaPluginDeps = {
   ) => Promise<PluginInvokeResponseHeader | null>;
 };
 
+/** Most media mounts are consumed once and then linger. Cap how many stay
+ * mounted at once and evict the least-recently-used so picked/captured files
+ * do not accumulate on the loopback server for the whole session. */
+const MEDIA_MOUNT_CAP = 4;
+
 function newRequestId(): string {
   // CSPRNG-backed mount id (not Math.random): a local client that can observe
   // one id must not be able to guess/enumerate other mounted media.
@@ -41,6 +46,21 @@ function newRequestId(): string {
  * is identical on every runtime.
  */
 export function createMediaPlugin(deps: MediaPluginDeps): PluginManifest {
+  // id -> mount path, insertion-ordered so the oldest is evicted first.
+  const mounted = new Map<string, string>();
+
+  const mountMedia = (id: string, path: string) => {
+    deps.staticServer.mount(`/media/${id}`, path);
+    mounted.set(id, path);
+    while (mounted.size > MEDIA_MOUNT_CAP) {
+      const oldestId = mounted.keys().next().value as string;
+      const oldestPath = mounted.get(oldestId);
+      mounted.delete(oldestId);
+      if (oldestPath !== undefined)
+        deps.staticServer.unmount(`/media/${oldestId}`);
+    }
+  };
+
   const serve = async (
     event: 'media.pick' | 'media.capture',
     args: { kind?: MediaKind } | undefined,
@@ -70,9 +90,9 @@ export function createMediaPlugin(deps: MediaPluginDeps): PluginManifest {
     }
     const kind = args?.kind ?? 'media';
     const id = `${kind}-${newRequestId()}`;
-    deps.staticServer.mount(`/media/${id}`, path);
+    mountMedia(id, path);
     const url = await deps.staticServer.url(`/media/${id}`);
-    return ok({ url, path });
+    return ok({ url });
   };
 
   return definePlugin('vendor.media', mediaSpecs, {

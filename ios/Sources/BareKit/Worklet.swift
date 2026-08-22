@@ -14,16 +14,24 @@ public struct Worklet {
 
   let worklet: BareWorklet
 
-  public init(configuration: Configuration = Configuration()) {
+  /// Throws instead of force-unwrapping so callers can degrade gracefully when
+  /// the JS engine cannot be initialized (e.g. out of memory).
+  public init(configuration: Configuration = Configuration()) throws {
     let copy = BareWorkletConfiguration()
 
     copy.memoryLimit = configuration.memoryLimit
     copy.assets = configuration.assets
 
-    self.worklet = BareWorklet(configuration: copy)!
+    guard let worklet = BareWorklet(configuration: copy) else {
+      throw WorkletError.initializationFailed
+    }
+    self.worklet = worklet
   }
 
-  public func start(
+  /// Executes arbitrary JS from a `Data` buffer. Internal: only the worklet
+  /// bootstrap should start code this way; external consumers load bundles via
+  /// the `start(name:ofType:...)` overloads instead.
+  internal func start(
     filename: String, source: Data, arguments: [String] = []
   ) {
     worklet.start(
@@ -31,7 +39,8 @@ public struct Worklet {
     )
   }
 
-  public func start(
+  /// Executes arbitrary JS from a string. Internal for the same reason as above.
+  internal func start(
     filename: String, source: String, encoding: String.Encoding, arguments: [String] = []
   ) {
     worklet.start(
@@ -107,4 +116,8 @@ public struct Worklet {
   ) async throws -> String? {
     return try await worklet.push(data, encoding: encoding.rawValue)
   }
+}
+
+public enum WorkletError: Error {
+  case initializationFailed
 }

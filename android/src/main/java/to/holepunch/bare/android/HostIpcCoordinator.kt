@@ -1,6 +1,7 @@
 package to.holepunch.bare.android
 
 import android.util.Log
+import org.json.JSONException
 import org.json.JSONObject
 import to.holepunch.bare.kit.IPC
 import java.nio.ByteBuffer
@@ -14,32 +15,55 @@ class HostIpcCoordinator(
     private val ipc: IPC,
     private val hostPlugins: HostPluginRegistry,
 ) {
+    companion object {
+        private const val MAX_FIELD_BYTES = 256
+    }
+
     fun start() {
         ipc.readable {
             try {
                 val data = ipc.read() ?: return@readable
                 val raw = ByteArray(data.remaining()).also { data.get(it) }
                 val message = BareProtocol.parseMessage(ByteBuffer.wrap(raw)) ?: return@readable
-                val headerObj = JSONObject(message.header)
+                val headerObj = try {
+                    JSONObject(message.header)
+                } catch (e: JSONException) {
+                    // Header was not valid JSON: answer with an error frame so the
+                    // web layer never waits on an unanswered correlation id, then
+                    // re-arm the readable loop and continue.
+                    writeError(null, ErrorCodes.FRAME_INVALID, "Invalid envelope header")
+                    return@readable
+                }
                 when (headerObj.optString("type")) {
                     "HOST_CAPABILITIES_QUERY" -> {
-                        val reqId = headerObj.getString("requestId")
+                        val reqId = headerObj.optString("requestId")
+                        if (!validField(reqId)) {
+                            writeError(null, ErrorCodes.FRAME_INVALID, "Missing or invalid requestId")
+                            return@readable
+                        }
                         val resp = JSONObject().apply {
                             put("type", "HOST_CAPABILITIES_RESPONSE")
                             put("requestId", reqId)
                             put("capabilities", hostPlugins.toCapabilitiesJson())
                         }
-                        val buf = BareProtocol.buildMessage(
-                            BareProtocol.MessageType.ENVELOPE,
-                            resp.toString(),
-                            null,
+                        ipc.write(
+                            BareProtocol.buildMessage(
+                                BareProtocol.MessageType.ENVELOPE,
+                                resp.toString(),
+                                null,
+                            ),
                         )
-                        ipc.write(buf)
                     }
                     "HOST_INVOKE_REQUEST" -> {
-                        val reqId = headerObj.getString("requestId")
-                        val pluginId = headerObj.getString("pluginId")
-                        val event = headerObj.getString("event")
+                        val reqId = headerObj.optString("requestId")
+                        val pluginId = headerObj.optString("pluginId")
+                        val event = headerObj.optString("event")
+                        if (!validField(reqId) || !validField(pluginId) || !validField(event)) {
+                            // Echo the original header (if any) so a correlated error
+                            // frame is returned; never let one bad frame stall the loop.
+                            writeError(message.header, ErrorCodes.FRAME_INVALID, "Malformed HOST_INVOKE_REQUEST")
+                            return@readable
+                        }
                         val args = headerObj.optJSONObject("args")
                         hostPlugins.dispatch(pluginId, event, args, message.payload) { outcome ->
                             val respHeader = JSONObject().apply {
@@ -60,18 +84,47 @@ class HostIpcCoordinator(
                                         },
                                     )
                             }
-                            val buf = BareProtocol.buildMessage(
-                                BareProtocol.MessageType.ENVELOPE,
-                                respHeader.toString(),
-                                null,
-                            )
-                            ipc.write(buf)
+                            try {
+                                ipc.write(
+                                    BareProtocol.buildMessage(
+                                        BareProtocol.MessageType.ENVELOPE,
+                                        respHeader.toString(),
+                                        null,
+                                    ),
+                                )
+                            } catch (e: Exception) {
+                                if (BuildConfig.DEBUG) Log.e("BARE_KOTLIN", "Failed to write invoke response", e)
+                            }
                         }
+                    }
+                    else -> {
+                        writeError(message.header, ErrorCodes.FRAME_INVALID, "Unknown envelope type")
+                        return@readable
                     }
                 }
             } catch (e: Exception) {
-                Log.e("BARE_KOTLIN", "Error in readable callback", e)
+                // The readable loop must survive any thrown frame so a single
+                // malformed/oversized envelope never permanently stalls all host
+                // invokes. Logging is debug-only (URLs/tokens may transit here).
+                if (BuildConfig.DEBUG) Log.e("BARE_KOTLIN", "Error in readable callback", e)
             }
         }
     }
+
+    private fun writeError(requestHeader: String?, code: String, message: String) {
+        try {
+            val header = requestHeader ?: "{}"
+            val err = BareProtocol.buildErrorResponse(
+                header,
+                code,
+                message,
+                "HOST_INVOKE_RESPONSE",
+            )
+            ipc.write(BareProtocol.buildMessage(err.type, err.header, err.payload))
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.e("BARE_KOTLIN", "Failed to write error frame", e)
+        }
+    }
+
+    private fun validField(s: String): Boolean = s.length in 1..MAX_FIELD_BYTES
 }

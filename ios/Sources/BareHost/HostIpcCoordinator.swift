@@ -27,11 +27,12 @@ public final class HostIpcCoordinator {
             try await handle(data: chunk)
           } catch {
             // Log, never silently swallow: one bad frame must not kill the loop.
-            BareHostLogger.log("Error handling IPC frame: \(error)")
+            // No interpolated error value — keep the message static.
+            BareHostLogger.log("Error handling IPC frame")
           }
         }
       } catch {
-        BareHostLogger.log("IPC stream ended: \(error)")
+        BareHostLogger.log("IPC stream ended")
       }
     }
   }
@@ -59,12 +60,11 @@ public final class HostIpcCoordinator {
       let pluginId = header["pluginId"] as? String ?? ""
       let event = header["event"] as? String ?? ""
       let args = header["args"] as? [String: Any]
-      hostPlugins.dispatch(
-        pluginId: pluginId,
-        event: event,
-        args: args,
-        payload: message.payload
-      ) { outcome in
+
+      // `respond` must fire exactly once: the registry handler may respond
+      // asynchronously (e.g. after a native picker), and a handler that never
+      // calls back would otherwise strand the web-side promise forever.
+      let responder = SingleResponse { [weak self] outcome in
         var responseHeader: [String: Any] = [
           "type": "HOST_INVOKE_RESPONSE",
           "requestId": reqId,
@@ -91,9 +91,58 @@ public final class HostIpcCoordinator {
           }
         }
       }
+      // Invoke deadline: emit a canonical timeout if the handler never responds.
+      Task {
+        try? await Task.sleep(nanoseconds: 30_000_000_000)
+        responder.call(.fail(code: ErrorCodes.timeout, message: "Host invoke timed out"))
+      }
+      hostPlugins.dispatch(
+        pluginId: pluginId,
+        event: event,
+        args: args,
+        payload: message.payload,
+        respond: responder.call
+      )
 
     default:
-      break
+      // Unknown header type: never silently drop the frame — answer with a
+      // canonical HOST_ERROR so the web side can surface a typed failure.
+      let reqId = header["requestId"] as? String ?? ""
+      var responseHeader: [String: Any] = [
+        "type": "HOST_INVOKE_RESPONSE",
+        "requestId": reqId,
+      ]
+      responseHeader["error"] = [
+        "code": ErrorCodes.hostError,
+        "message": "Unknown IPC header type",
+      ]
+      if let frame = try? BareProtocol.buildMessage(
+        type: BareProtocol.MessageType.envelope,
+        headerJson: BareProtocol.encodeJSON(responseHeader),
+        payload: nil
+      ) {
+        try? await ipc.write(data: frame)
+      }
+    }
+  }
+
+  /// Wraps a response callback so it runs at most once (success, failure, or
+  /// invoke timeout all race to call it; only the first wins).
+  private final class SingleResponse {
+    private let lock = NSLock()
+    private var done = false
+    private let send: (HostPluginRegistry.HostInvokeOutcome) -> Void
+
+    init(_ send: @escaping (HostPluginRegistry.HostInvokeOutcome) -> Void) {
+      self.send = send
+    }
+
+    func call(_ outcome: HostPluginRegistry.HostInvokeOutcome) {
+      lock.lock()
+      defer { lock.unlock() }
+      guard !done else { return }
+      done = true
+      send(outcome)
     }
   }
 

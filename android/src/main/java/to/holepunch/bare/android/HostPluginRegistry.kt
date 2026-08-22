@@ -2,6 +2,7 @@ package to.holepunch.bare.android
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Registers host-side invoke handlers for events delegated from the Bare worklet over IPC.
@@ -20,15 +21,21 @@ class HostPluginRegistry {
         data class Fail(val code: String, val message: String) : HostInvokeOutcome()
     }
 
-    private val handlers = mutableMapOf<Key, Handler>()
+    // ConcurrentHashMap: register() runs on the host app main thread while
+    // dispatch()/toCapabilitiesJson() run on Bare Kit IPC callback threads, so
+    // the shared map must be safe for concurrent mutation + iteration. Iteration
+    // is weakly consistent (never throws ConcurrentModificationException) and
+    // toCapabilitiesJson snapshots into a private map for a consistent view.
+    private val handlers = ConcurrentHashMap<Key, Handler>()
 
     fun register(pluginId: String, event: String, handler: Handler) {
         handlers[Key(pluginId, event)] = handler
     }
 
     fun toCapabilitiesJson(): JSONArray {
+        val snapshot = LinkedHashMap(handlers)
         val byPlugin = mutableMapOf<String, MutableSet<String>>()
-        for ((key, _) in handlers) {
+        for ((key, _) in snapshot) {
             byPlugin.getOrPut(key.pluginId) { mutableSetOf() }.add(key.event)
         }
         val arr = JSONArray()

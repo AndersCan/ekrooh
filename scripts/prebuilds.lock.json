@@ -1,0 +1,11 @@
+{
+  "_comment": "Integrity lockfile for bare-kit prebuilds fetched by scripts/fetch-prebuilds.mjs (issue #55). `version` MUST match the pinned version in fetch-prebuilds.mjs (and the package bump). `artifacts` maps each downloaded release asset name to its expected SHA-256. The script fails closed on a checksum mismatch. When bumping the bare-kit version, delete and re-fetch the artifact, recompute its SHA-256, and update both `version` and the per-artifact hash here. Do NOT commit placeholder/TODO hashes into a release.",
+  "version": "v2.3.0",
+  "repo": "holepunchto/bare-kit",
+  "artifacts": {
+    "prebuilds.zip": {
+      "sha256": "a386063fa405b0bb4967490e84745075f007f95359c9871c5b7a45c18c2f49e2",
+      "extract": ["android/*", "ios/*"]
+    }
+  }
+}

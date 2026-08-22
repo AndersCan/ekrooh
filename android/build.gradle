@@ -40,6 +40,14 @@ android {
     jvmTarget = "17"
   }
 
+  // Ship consumer ProGuard rules so R8 in consumer apps keeps the host API
+  // surface and the Bare Kit IPC entry points (see consumer-rules.pro).
+  buildTypes {
+    release {
+      consumerProguardFiles "consumer-rules.pro"
+    }
+  }
+
   sourceSets {
     main {
       jniLibs.srcDirs "../prebuilds/android/bare-kit/jni"
@@ -80,6 +88,8 @@ dependencies {
   // BarePortMessenger), so they are `api` for consumers.
   api "androidx.webkit:webkit:1.15.0"
   api "androidx.appcompat:appcompat:1.7.0"
+  // ContextCompat for real runtime permission checks (core.permissions).
+  implementation "androidx.core:core-ktx:1.13.1"
 
   testImplementation "junit:junit:4.13.2"
   // Real org.json for unit tests (shadows the android.jar stub).

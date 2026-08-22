@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { MessageProtocol } from './wire-codec';
-import { MAX_FRAME_BYTES, MessageType } from './constants';
+import { MAX_FRAME_BYTES, MAX_HEADER_BYTES, MessageType } from './constants';
 import type { MessageHeader, RuntimeTarget } from './types';
 
 describe('MessageProtocol encode/decode', () => {
@@ -190,8 +190,8 @@ describe('MessageProtocol encode/decode', () => {
   });
 
   it('rejects frames larger than the configured maximum', () => {
-    const protocol = new MessageProtocol({ maxFrameBytes: 64 });
-    const payload = new Uint8Array(128);
+    const protocol = new MessageProtocol({ maxFrameBytes: 70000 });
+    const payload = new Uint8Array(120000);
     expect(() =>
       protocol.encode(
         MessageType.ENVELOPE,
@@ -206,9 +206,9 @@ describe('MessageProtocol encode/decode', () => {
     const encoded = protocol.encode(
       MessageType.ENVELOPE,
       { type: 'DISPATCH', pluginId: 'a.b', event: 'e' },
-      new Uint8Array(4),
+      new Uint8Array(MAX_FRAME_BYTES - 100),
     );
-    const small = new MessageProtocol({ maxFrameBytes: 16 });
+    const small = new MessageProtocol({ maxFrameBytes: 65540 });
     expect(() => small.decode(encoded)).toThrow(/Frame too large/);
   });
 
@@ -224,7 +224,7 @@ describe('MessageProtocol encode/decode', () => {
     expect(decoded.payload.byteLength).toBe(MAX_FRAME_BYTES - 128);
   });
 
-  it('preserves unknown header fields on decode', () => {
+  it('drops unknown and prototype-polluting header fields on decode', () => {
     const protocol = new MessageProtocol();
     const header = {
       type: 'INVOKE_REQUEST',
@@ -232,16 +232,97 @@ describe('MessageProtocol encode/decode', () => {
       event: 'health.ping',
       requestId: 'req-fwd',
       futureField: { nested: true },
+      __proto__: { polluted: true },
     } as unknown as MessageHeader;
     const decoded = protocol.decode(
       protocol.encode(MessageType.ENVELOPE, header, null),
     );
-    expect(decoded.header).toMatchObject({
+    expect(decoded.header).toEqual({
       type: 'INVOKE_REQUEST',
       pluginId: 'core.health',
       event: 'health.ping',
       requestId: 'req-fwd',
-      futureField: { nested: true },
     });
+    expect(
+      (decoded.header as Record<string, unknown>).futureField,
+    ).toBeUndefined();
+    expect(({} as { polluted?: unknown }).polluted).toBeUndefined();
+  });
+
+  it('throws FRAME_INVALID on invalid UTF-8 in the header frame', () => {
+    const protocol = new MessageProtocol();
+    const good = protocol.encode(
+      MessageType.ENVELOPE,
+      { type: 'DISPATCH', pluginId: 'a.b', event: 'e' },
+      null,
+    );
+    const bad = new Uint8Array(good);
+    bad[5] = 0xff;
+    bad[6] = 0xfe;
+    expect(() => protocol.decode(bad)).toThrow(/FRAME_INVALID/);
+  });
+
+  it('clamps an out-of-range maxFrameBytes to safe bounds', () => {
+    expect(new MessageProtocol({ maxFrameBytes: 64 }).maxFrameBytes).toBe(
+      MAX_HEADER_BYTES + 4,
+    );
+    expect(new MessageProtocol({ maxFrameBytes: 0 }).maxFrameBytes).toBe(
+      MAX_HEADER_BYTES + 4,
+    );
+    expect(
+      new MessageProtocol({ maxFrameBytes: Number.NEGATIVE_INFINITY })
+        .maxFrameBytes,
+    ).toBe(MAX_FRAME_BYTES);
+    expect(
+      new MessageProtocol({ maxFrameBytes: Number.NaN }).maxFrameBytes,
+    ).toBe(MAX_FRAME_BYTES);
+    expect(
+      new MessageProtocol({ maxFrameBytes: Number.POSITIVE_INFINITY })
+        .maxFrameBytes,
+    ).toBe(MAX_FRAME_BYTES);
+  });
+
+  it('strips prototype-polluting keys from args and result', () => {
+    const protocol = new MessageProtocol();
+    const header = {
+      type: 'INVOKE_RESPONSE',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      requestId: 'req-strip',
+      result: {
+        ok: true,
+        __proto__: { polluted: true },
+        nested: { constructor: { polluted: true } },
+      },
+    } as unknown as MessageHeader;
+    const decoded = protocol.decode(
+      protocol.encode(MessageType.ENVELOPE, header, null),
+    );
+    const result = (decoded.header as { result: Record<string, unknown> })
+      .result as Record<string, unknown>;
+    expect(result.ok).toBe(true);
+    expect(result.__proto__).toBeUndefined();
+    expect(({} as { polluted?: unknown }).polluted).toBeUndefined();
+    const nested = result.nested as Record<string, unknown> | undefined;
+    expect(nested).toBeDefined();
+    expect(nested?.constructor).toBeUndefined();
+  });
+
+  it('throws FRAME_INVALID on over-deep args (depth bomb)', () => {
+    const protocol = new MessageProtocol();
+    let bomb: unknown = { leaf: true };
+    for (let i = 0; i < 40; i++) {
+      bomb = { nested: bomb };
+    }
+    const header = {
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      requestId: 'req-deep',
+      args: bomb,
+    } as unknown as MessageHeader;
+    expect(() =>
+      protocol.decode(protocol.encode(MessageType.ENVELOPE, header, null)),
+    ).toThrow(/FRAME_INVALID/);
   });
 });

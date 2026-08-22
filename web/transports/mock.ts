@@ -53,8 +53,8 @@ const mockInvokeHandlers: Record<string, MockInvokeHandler> = {
     permission: permissionOf(args),
     status: 'granted',
   }),
-  'media.pick': () => ({ url: MOCK_MEDIA_DATA_URI, path: '' }),
-  'media.capture': () => ({ url: MOCK_MEDIA_DATA_URI, path: '' }),
+  'media.pick': () => ({ url: MOCK_MEDIA_DATA_URI }),
+  'media.capture': () => ({ url: MOCK_MEDIA_DATA_URI }),
 };
 
 export function createMockTransport(): MessageTransport {

@@ -5,8 +5,6 @@ export type MediaKind = 'image' | 'video';
 export type MediaResult = {
   /** URL served by the worklet's loopback HTTP server (no bytes on the wire). */
   url: string;
-  /** Absolute filesystem path of the picked file on the host. */
-  path: string;
 };
 
 // The native picker/camera is user-mediated and can stay open for minutes;

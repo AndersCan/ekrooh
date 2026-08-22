@@ -52,7 +52,7 @@ const logs = await transport.invoke(
 
 ## Result types
 
-- `MediaResult` — `{ url, path }`.
+- `MediaResult` — `{ url }` (the on-device path never leaves the host/worklet).
 - `PermissionResult` — `{ permission, status }` with
   `granted | denied | notDetermined | unsupported`.
 - `DiscoveryListResult` — runtime/capability summary.

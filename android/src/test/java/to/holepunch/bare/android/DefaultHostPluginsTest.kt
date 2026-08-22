@@ -24,25 +24,59 @@ class DefaultHostPluginsTest {
         return captured ?: error("no outcome captured")
     }
 
+    private fun statusOf(outcome: HostPluginRegistry.HostInvokeOutcome): String {
+        assertTrue("should be Ok", outcome is HostPluginRegistry.HostInvokeOutcome.Ok)
+        return (outcome as HostPluginRegistry.HostInvokeOutcome.Ok).value.getString("status")
+    }
+
     @Test
-    fun `request and status trivially grant storage and camera`() {
+    fun `unknown permission ids are never granted`() {
         val registry = HostPluginRegistry()
         registerDefaultHostPlugins(registry)
 
         for (event in listOf("permissions.request", "permissions.status")) {
-            for (permission in listOf("storage", "camera")) {
+            for (permission in listOf("location", "camera-x", "contacts", "")) {
                 val outcome = dispatchSync(
                     registry,
                     "core.permissions",
                     event,
                     JSONObject().put("permission", permission),
                 )
-                assertTrue("$event $permission should be Ok", outcome is HostPluginRegistry.HostInvokeOutcome.Ok)
-                val value = (outcome as HostPluginRegistry.HostInvokeOutcome.Ok).value
-                assertEquals(permission, value.getString("permission"))
-                assertEquals("granted", value.getString("status"))
+                assertEquals("$event $permission", "unsupported", statusOf(outcome))
             }
         }
+    }
+
+    @Test
+    fun `storage needs no runtime grant on this host`() {
+        val registry = HostPluginRegistry()
+        registerDefaultHostPlugins(registry)
+
+        for (event in listOf("permissions.request", "permissions.status")) {
+            val outcome = dispatchSync(
+                registry,
+                "core.permissions",
+                event,
+                JSONObject().put("permission", "storage"),
+            )
+            assertEquals("$event storage", "granted", statusOf(outcome))
+        }
+    }
+
+    @Test
+    fun `camera without a context is not assumed granted`() {
+        val registry = HostPluginRegistry()
+        registerDefaultHostPlugins(registry)
+
+        val outcome = dispatchSync(
+            registry,
+            "core.permissions",
+            "permissions.status",
+            JSONObject().put("permission", "camera"),
+        )
+        // No Context in a unit test; the real grant state is unknown, so this
+        // must fail closed (never a fabricated grant).
+        assertEquals("denied", statusOf(outcome))
     }
 
     @Test

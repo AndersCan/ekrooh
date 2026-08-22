@@ -96,6 +96,16 @@ with no sibling checkout and no npm step (see `ios/readme.md`).
 Keep the `url`/`checksum` in sync with the tag's artifact — SwiftPM validates
 the checksum against the fetched zip at resolve time.
 
+> **CI assertion (recommended):** the `url:` + `checksum:` switch in
+> `Package.swift` is a manual release step and is easy to get wrong. Add a CI
+> gate (a step in `release.yml`, or a `test.yml` job triggered on the `v*`
+> tag) that, for the tagged commit, re-derives the expected `url`
+> (`https://github.com/AndersCan/ekrooh/releases/download/<tag>/BareKit.xcframework.zip`)
+> and recomputes the SHA-256 of the uploaded `BareKit.xcframework.zip`
+> artifact, then fails if the `Package.swift` `.binaryTarget` does not carry
+> the matching `url`/`checksum` pair. This catches a drifted or stale
+> checksum before consumers resolve a broken package.
+
 ### 2. Version and changelog
 
 1. Bump `version` in the root `package.json` (the single source of the version —
@@ -119,7 +129,10 @@ the checksum against the fetched zip at resolve time.
    tag:
 
    - **npm** (`@ekrooh/bare`): `npm publish --access public` from the repo root
-     (`release.yml` does this with the `NPM_TOKEN` secret). Prerelease versions
+     (`release.yml` does this via **npm Trusted Publishing (OIDC)** — `release.yml` sets
+     `permissions: id-token: write` and the workflow is registered as a
+     trusted publisher on npmjs.com, so there is **no long-lived `NPM_TOKEN`
+     secret**. Prerelease versions
      (e.g. `0.1.0-beta.1`) publish under a dist-tag derived from the
      prerelease identifier (`beta`), stable versions under `latest`. The first
      publish claims the reserved name. The package ships **compiled ESM JS +

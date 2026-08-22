@@ -158,7 +158,7 @@ private final class MediaPickerController: NSObject, PHPickerViewControllerDeleg
       [weak self] url, error in
       guard let self else { return }
       guard let url, error == nil else {
-        self.abort("Failed to load picked file: \(error?.localizedDescription ?? "unknown")")
+        self.abort("Failed to load picked file")
         return
       }
       guard let dest = self.stage(from: url) else {

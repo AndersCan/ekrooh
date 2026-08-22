@@ -80,17 +80,20 @@ object BareProtocol {
     }
 
     /**
-     * Builds an `INVOKE_RESPONSE` envelope reporting an error for a frame the
-     * bridge could not deliver, keyed to the original request when possible.
+     * Builds an error envelope for a frame the bridge could not deliver, keyed
+     * to the original request when possible. [type] controls the wire envelope
+     * type (`INVOKE_RESPONSE` for worklet-bound errors, `HOST_INVOKE_RESPONSE`
+     * for host IPC errors); it defaults to `INVOKE_RESPONSE` for parity with
+     * the original caller contract.
      */
-    fun buildErrorResponse(headerJson: String, code: String, message: String): WireMessage {
+    fun buildErrorResponse(headerJson: String, code: String, message: String, type: String = "INVOKE_RESPONSE"): WireMessage {
         val request = try {
             JSONObject(headerJson)
         } catch (e: Exception) {
             JSONObject()
         }
         val response = JSONObject().apply {
-            put("type", "INVOKE_RESPONSE")
+            put("type", type)
             put("pluginId", request.optString("pluginId"))
             put("event", request.optString("event"))
             if (request.has("requestId")) put("requestId", request.getString("requestId"))
