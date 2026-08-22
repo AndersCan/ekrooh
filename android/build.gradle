@@ -93,7 +93,7 @@ dependencies {
 
   testImplementation "junit:junit:4.13.2"
   // Real org.json for unit tests (shadows the android.jar stub).
-  testImplementation "org.json:json:20240303"
+  testImplementation "org.json:json:20260814"
 }
 
 // Publish the AAR to GitHub Packages (Maven format) and Maven Central under
