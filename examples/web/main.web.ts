@@ -5,6 +5,7 @@ import {
   MessageType,
   createPluginBus,
   createProtocolMessenger,
+  installWebConsoleCapture,
 } from '@ekrooh/bare/core';
 import { discoveryEvents } from '@ekrooh/bare/plugins/discovery/events';
 import { healthEvents } from '@ekrooh/bare/plugins/health/events';
@@ -23,6 +24,18 @@ let transport: MessageTransport;
 let bus: ReturnType<typeof createPluginBus>;
 
 async function boot() {
+  // On-device the page is served by the loopback server, which exposes a
+  // same-origin `POST /logs` ingest. Capture the webview console so decode and
+  // runtime errors surface in the loopback log tail that enriches invoke-timeout
+  // diagnostics (see rpc-messenger / websocket-client). Skip in mock mode — no
+  // loopback backend exists to ingest into. Failures are swallowed by the seam.
+  const webEnv = (
+    import.meta as { env?: Record<string, string | boolean | undefined> }
+  ).env;
+  if (webEnv?.VITE_TRANSPORT_MODE !== 'mock') {
+    installWebConsoleCapture();
+  }
+
   transport = await getTransport();
   const messenger = createProtocolMessenger((request, payload) => {
     transport.send(MessageType.ENVELOPE, request, payload);
