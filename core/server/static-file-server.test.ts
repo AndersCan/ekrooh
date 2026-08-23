@@ -430,6 +430,7 @@ describe('loopback server HTTP', () => {
     const first = await request('/login', { method: 'POST', body: nonce3 });
     expect(first.status).toBe(200);
     const setCookie = firstHeader(first.headers, 'set-cookie');
+    if (!setCookie) throw new Error('expected a Set-Cookie session header');
     expect(setCookie).toMatch(/^bare_session=/);
     const cookie = setCookie.split(';')[0]!;
 
