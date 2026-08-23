@@ -255,6 +255,59 @@ describe('attachWebSocketProtocol', () => {
       .sort();
     expect(ids).toEqual(['p1', 'p2']);
   });
+
+  it('handles the full iOS sequence ping -> payloadEcho -> roundtrip coalesced', async () => {
+    const harness = serverHarness();
+    attachWebSocketProtocol(harness.server as never, healthContext() as never);
+    const socket = fakeSocket();
+    harness.handler!(socket as never, { headers: {} });
+
+    const payload = new TextEncoder().encode('payload-check');
+    const ping = invokeFrame({
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      requestId: 'p1',
+      args: { message: 'hi' },
+    });
+    const echo = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.payloadEcho',
+        requestId: 'p2',
+        args: { label: 'x' },
+      } as Parameters<typeof protocol.encode>[1],
+      payload,
+    );
+    const roundtrip = invokeFrame({
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.roundtrip',
+      requestId: 'p3',
+      args: {},
+    });
+
+    const coalesced = new Uint8Array(
+      ping.byteLength + echo.byteLength + roundtrip.byteLength,
+    );
+    coalesced.set(ping, 0);
+    coalesced.set(echo, ping.byteLength);
+    coalesced.set(roundtrip, ping.byteLength + echo.byteLength);
+
+    socket.emit('data', coalesced);
+
+    await vi.waitFor(() => expect(socket.write).toHaveBeenCalledTimes(3));
+    const ids = socket.write.mock.calls
+      .map((c) => c[0] as Uint8Array)
+      .map(
+        (b) =>
+          (protocol.decode(b).header as PluginInvokeResponseHeader).requestId,
+      )
+      .sort();
+    expect(ids).toEqual(['p1', 'p2', 'p3']);
+  });
 });
 
 describe('createLoopbackPush', () => {
