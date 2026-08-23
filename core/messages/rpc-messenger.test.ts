@@ -121,6 +121,39 @@ describe('createProtocolMessenger', () => {
     expect((header as { result?: unknown }).result).toEqual({ ok: true });
   });
 
+  it('folds the server log tail into the invoke-timeout rejection when available', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('window', { location: { host: '127.0.0.1:4321' } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        text: async () =>
+          'backend [invoke] core.health.health.roundtrip failed: boom\n' +
+          'webview Failed to parse WS message: SyntaxError',
+      })),
+    );
+    const send = vi.fn();
+    const messenger = createProtocolMessenger(send);
+    const promise = messenger.invoke(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.roundtrip',
+        args: {},
+      },
+      null,
+      1000,
+    );
+
+    const assertion = expect(promise).rejects.toThrow(
+      /invoke timeout.*recent logs:.*health.roundtrip failed: boom/,
+    );
+    vi.advanceTimersByTime(1001);
+    await assertion;
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith('/logs?tail=50&format=text');
+  });
+
   it('drops the oldest invoke when the concurrent cap is exceeded', async () => {
     const send = vi.fn();
     const messenger = createProtocolMessenger(send);
