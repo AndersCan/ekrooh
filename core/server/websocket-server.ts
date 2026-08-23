@@ -82,9 +82,22 @@ export function attachWebSocketProtocol(
             header,
             parsed.payload,
           );
+          console.log(
+            `[f2][worklet] recv type=${header.type} event=${header.event} requestId=${header.requestId}`,
+          );
           if (pluginResponse) {
-            socket.write(
-              protocol.encode(MessageType.ENVELOPE, pluginResponse, null),
+            const frame = protocol.encode(
+              MessageType.ENVELOPE,
+              pluginResponse,
+              null,
+            );
+            console.log(
+              `[f2][worklet] emit type=${pluginResponse.type} event=${pluginResponse.event} requestId=${pluginResponse.requestId} frameLen=${frame.byteLength}`,
+            );
+            socket.write(frame);
+          } else {
+            console.log(
+              `[f2][worklet] route returned no response for event=${header.event}`,
             );
           }
         }

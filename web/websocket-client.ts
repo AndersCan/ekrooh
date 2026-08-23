@@ -235,6 +235,9 @@ export function createWebSocketTransport(
       if (size === 0) return;
       try {
         const message = protocol.decode(event.data as ArrayBuffer);
+        console.log(
+          `[f2][webview] recv type=${message.header.type} event=${message.header.event} requestId=${message.header.requestId}`,
+        );
         for (const listener of listeners) listener(message);
       } catch (err) {
         console.error('Failed to parse WS message:', err);
