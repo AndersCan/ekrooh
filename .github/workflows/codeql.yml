@@ -47,6 +47,20 @@ jobs:
         with:
           packages: tools platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
 
+      # The Bare Kit runtime (to.holepunch.bare.kit.IPC + Worklet) ships as a
+      # prebuilt jar in prebuilds/android/bare-kit/classes.jar (gitignored,
+      # fetched from holepunchto/bare-kit releases). The android host compiles
+      # against it via `api fileTree(...)`, so CodeQL's kotlin analysis must have
+      # the jar on its classpath or `IPC` (and its `write` method) won't resolve
+      # — which is exactly issue #137. The normal Test `android` job fetches it
+      # with `npm run prebuilds` first; this job skipped that step, so warm the
+      # prebuilds here, mirroring test.yml.
+      - name: Fetch Bare Kit prebuilds (kotlin)
+        if: matrix.language == 'kotlin'
+        run: npm run prebuilds
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Build Kotlin host for analysis (kotlin)
         if: matrix.language == 'kotlin'
         run: ./gradlew --no-daemon :bare-host:compileDebugKotlin
