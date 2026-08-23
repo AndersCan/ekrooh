@@ -72,6 +72,19 @@ export function attachWebSocketProtocol(
 
         buffer = concatBytes(buffer, data);
 
+        // [f2] frame analysis: what do the buffered bytes claim (headerLen from
+        // bytes 2-3) vs what actually arrived? If status=PARTIAL with bufLen <
+        // frameLen, the frame is incomplete on the wire (request-leg drop) — the
+        // roundtrip request's tail never reached the worklet. If COMPLETE but no
+        // recv follows, decode is throwing.
+        if (buffer.byteLength >= 4) {
+          const hl = (buffer[2] << 8) | buffer[3];
+          const fl = 4 + hl;
+          console.error(
+            `[f2][worklet] frame bufLen=${buffer.byteLength} headerLen=${hl} frameLen=${fl} status=${buffer.byteLength >= fl ? 'COMPLETE' : 'PARTIAL'}`,
+          );
+        }
+
         while (buffer.byteLength >= 4) {
           const headerLen = (buffer[2] << 8) | buffer[3];
           const frameLen = 4 + headerLen;
@@ -108,7 +121,12 @@ export function attachWebSocketProtocol(
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error('Error handling WebSocket message:', message);
+        const head = Array.from(buffer.subarray(0, Math.min(8, buffer.byteLength)))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(' ');
+        console.error(
+          `Error handling WebSocket message: ${message} | bufLen=${buffer.byteLength} head=${head}`,
+        );
       }
     });
 
