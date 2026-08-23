@@ -12,12 +12,15 @@ public enum BareProtocolError: Error, Equatable {
  * Envelope layout (identical bytes on every transport):
  *
  * ```
- * [version:1B][type:1B][headerLen:2B BE][header: UTF-8 JSON][payload: raw bytes]
+ * [version:1B][type:1B][headerLen:2B BE][payloadLen:3B BE]
+ * [header: UTF-8 JSON][payload: raw bytes]
  * ```
  *
- * Unknown header fields pass through decode untouched (the header is kept as
- * the original JSON string), so forward-compatible peers can relay envelopes
- * without losing data.
+ * The binary payload length keeps frames self-delimiting even when a transport
+ * re-serializes the JSON header (unknown header fields may be dropped, e.g. the
+ * webview→worklet relay); the raw frame bytes — including this prefix — are
+ * never altered. Header parsing keeps the JSON string untouched, so known
+ * fields always pass through.
  */
 public enum BareProtocol {
   /// Mirror of `VERSION` in `core/messages/constants.ts`.
@@ -55,8 +58,10 @@ public enum BareProtocol {
     }
     let payloadBytes = payload ?? Data()
 
-    // 1 (version) + 1 (type) + 2 (headerLen) + header + payload
-    let totalLength = 4 + headerBytes.count + payloadBytes.count
+    // [version][type][headerLen(2 BE)][payloadLen(3 BE)][header][payload]: the
+    // binary payload length keeps frames self-delimiting even when a transport
+    // re-serializes the JSON header (mirrors core wire-codec).
+    let totalLength = 7 + headerBytes.count + payloadBytes.count
     if totalLength > maxFrameBytes {
       throw BareProtocolError.frameTooLarge(totalLength)
     }
@@ -67,6 +72,9 @@ public enum BareProtocol {
     buffer.append(type)
     buffer.append(UInt8((headerBytes.count >> 8) & 0xff))
     buffer.append(UInt8(headerBytes.count & 0xff))
+    buffer.append(UInt8((payloadBytes.count >> 16) & 0xff))
+    buffer.append(UInt8((payloadBytes.count >> 8) & 0xff))
+    buffer.append(UInt8(payloadBytes.count & 0xff))
     buffer.append(headerBytes)
     buffer.append(payloadBytes)
     return buffer
@@ -90,15 +98,18 @@ public enum BareProtocol {
 
     let headerLen = Int(bytes[2]) << 8 | Int(bytes[3])
     if headerLen > maxHeaderBytes { return nil }
-    if bytes.count < 4 + headerLen { return nil }
+    let payloadLen =
+      (Int(bytes[4]) << 16) | (Int(bytes[5]) << 8) | Int(bytes[6])
+    if bytes.count < 7 + headerLen + payloadLen { return nil }
 
-    let headerBytes = bytes[4..<(4 + headerLen)]
+    let headerBytes = bytes[7..<(7 + headerLen)]
     guard let headerJson = String(data: Data(headerBytes), encoding: .utf8) else {
       return nil
     }
 
-    let payload: Data? = bytes.count > 4 + headerLen
-      ? Data(bytes[(4 + headerLen)...])
+    let payload: Data? =
+      payloadLen > 0 && bytes.count >= 7 + headerLen + payloadLen
+      ? Data(bytes[(7 + headerLen)..<(7 + headerLen + payloadLen)])
       : nil
 
     return WireMessage(type: typeByte, header: headerJson, payload: payload)

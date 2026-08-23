@@ -257,17 +257,17 @@ describe('MessageProtocol encode/decode', () => {
       null,
     );
     const bad = new Uint8Array(good);
-    bad[5] = 0xff;
-    bad[6] = 0xfe;
+    bad[7] = 0xff;
+    bad[8] = 0xfe;
     expect(() => protocol.decode(bad)).toThrow(/FRAME_INVALID/);
   });
 
   it('clamps an out-of-range maxFrameBytes to safe bounds', () => {
     expect(new MessageProtocol({ maxFrameBytes: 64 }).maxFrameBytes).toBe(
-      MAX_HEADER_BYTES + 4,
+      MAX_HEADER_BYTES + 7,
     );
     expect(new MessageProtocol({ maxFrameBytes: 0 }).maxFrameBytes).toBe(
-      MAX_HEADER_BYTES + 4,
+      MAX_HEADER_BYTES + 7,
     );
     expect(
       new MessageProtocol({ maxFrameBytes: Number.NEGATIVE_INFINITY })
@@ -347,18 +347,20 @@ describe('MessageProtocol encode/decode', () => {
     // headerLen=0xFFFF (the 16-bit maximum == MAX_HEADER_BYTES) with no header
     // bytes present. The explicit caps can only ever fire if the format grows;
     // the existing shorter-than-header check must still refuse the claim.
-    expect(() => protocol.decode(new Uint8Array([1, 1, 0xff, 0xff]))).toThrow(
-      /too short for header/,
-    );
+    expect(() =>
+      protocol.decode(new Uint8Array([1, 1, 0xff, 0xff, 0, 0, 0])),
+    ).toThrow(/too short for frame/);
   });
 
   it('rejects a header longer than a clamped maxFrameBytes on decode', () => {
-    // maxFrameBytes is clamped up to MAX_HEADER_BYTES + 4, so a legal 16-bit
+    // maxFrameBytes is clamped up to MAX_HEADER_BYTES + 7, so a legal 16-bit
     // header length can never exceed it; craft the claim directly instead. A
-    // full-size headerLen (4 + 0xFFFF = 65539) equals the clamped floor, so
-    // decode can at most report the header as incomplete.
+    // full-size headerLen (7 + 0xFFFF = 65542) exceeds the clamped floor, so
+    // decode rejects the frame as oversized.
     const protocol = new MessageProtocol({ maxFrameBytes: 0 });
-    expect(protocol.maxFrameBytes).toBe(MAX_HEADER_BYTES + 4);
-    expect(() => protocol.decode(new Uint8Array([1, 1, 0xff, 0xff]))).toThrow();
+    expect(protocol.maxFrameBytes).toBe(MAX_HEADER_BYTES + 7);
+    expect(() =>
+      protocol.decode(new Uint8Array([1, 1, 0xff, 0xff, 0, 0, 0])),
+    ).toThrow();
   });
 });

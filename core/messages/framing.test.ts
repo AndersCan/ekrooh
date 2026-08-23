@@ -146,7 +146,7 @@ describe('createFrameDecoder', () => {
     // instantly — the caller decides to drop the channel, the decoder buffers
     // nothing.
     expect(() =>
-      decoder.push(new Uint8Array([0xff, 0x00, 0x00, 0x00])),
+      decoder.push(new Uint8Array([0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])),
     ).toThrow(/Unsupported version/);
   });
 
@@ -169,24 +169,9 @@ describe('createFrameDecoder', () => {
       null,
     );
 
-    // A header that declares an impossible payload length pushes frameLen past
-    // the cap for this protocol.
-    const header = new TextEncoder().encode(
-      JSON.stringify({
-        type: 'INVOKE_REQUEST',
-        pluginId: 'a',
-        event: 'a.ping',
-        requestId: '9',
-        args: {},
-        payloadLength: 99999,
-      }),
-    );
-    const prefix = new Uint8Array(4 + header.byteLength);
-    prefix[0] = 1;
-    prefix[1] = MessageType.ENVELOPE;
-    prefix[2] = (header.byteLength >> 8) & 0xff;
-    prefix[3] = header.byteLength & 0xff;
-    prefix.set(header, 4);
+    // A binary payload length that pushes frameLen past the cap for this
+    // protocol (headerLen 0, payloadLen 0xFFFFFE).
+    const prefix = new Uint8Array([1, 1, 0, 0, 0xff, 0xff, 0xfe]);
 
     expect(() => decoder.push(prefix)).toThrow(/Frame too large/);
     expect(decoder.error).not.toBeNull();
