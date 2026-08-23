@@ -422,6 +422,34 @@ describe('loopback server HTTP', () => {
     expect(replay.status).toBe(401);
   });
 
+  it('re-login succeeds from a surviving session alone (reload path)', async () => {
+    // First load: normal login sets the session cookie.
+    const first = await request('/login', { method: 'POST', body: TOKEN });
+    expect(first.status).toBe(200);
+    const setCookie = firstHeader(first.headers, 'set-cookie');
+    if (!setCookie) throw new Error('expected a Set-Cookie session header');
+    const cookie = setCookie.split(';')[0]!;
+
+    // Reload: the shell re-runs and replays a now-spent/invalid bootstrap
+    // nonce, but the session cookie from the first load survives it →
+    // accepted. This is the "reload reconnects to the same instance"
+    // guarantee; no nonce is spent by this path.
+    const reload = await request('/login', {
+      method: 'POST',
+      body: 'spent-or-invalid-nonce',
+      headers: { cookie },
+    });
+    expect(reload.status).toBe(200);
+    expect(firstHeader(reload.headers, 'set-cookie')).toMatch(/^bare_session=/);
+
+    // The same invalid secret without a surviving session stays rejected.
+    const anon = await request('/login', {
+      method: 'POST',
+      body: 'spent-or-invalid-nonce',
+    });
+    expect(anon.status).toBe(401);
+  });
+
   it('accepts the X-Bare-Token header fallback', async () => {
     const r = await request('/media/sample.png', {
       headers: { 'X-Bare-Token': TOKEN },

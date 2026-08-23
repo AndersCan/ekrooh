@@ -14,7 +14,9 @@ test('in-app navigation between home and demo route', async ({ page }) => {
   await expect(page.getByText(/Path:/)).toBeVisible();
 
   await page.getByRole('link', { name: 'Health checks' }).click();
-  await expect(page.url()).not.toContain('/demo');
+  // page.url() is a synchronous string — assert it directly (awaiting it is
+  // a type error under the lint rules and pointless).
+  expect(page.url()).not.toContain('/demo');
   await expect(
     page.getByRole('heading', { name: 'Plugin Health Checks' }),
   ).toBeVisible();

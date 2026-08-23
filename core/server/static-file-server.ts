@@ -319,7 +319,14 @@ export function createLoopbackServer(
         const byToken = token !== null && secretEquals(trimmed, token);
         const byBootstrap =
           bootstrapNonce !== null && secretEquals(trimmed, bootstrapNonce);
-        const accepted = !authEnabled || byToken || byBootstrap;
+        // An already-authenticated page may re-login without fresh
+        // credentials: a reload re-runs the shell with the SAME (now spent)
+        // bootstrap nonce injected, but the session cookie from the first
+        // login survives it. Accepting the cookie here is what makes "reload
+        // reconnects to the same instance" work while keeping ADR 0003's
+        // guarantee intact — a replayed spent nonce alone still fails.
+        const bySession = authEnabled && isAuthorized(req.headers);
+        const accepted = !authEnabled || byToken || byBootstrap || bySession;
         if (!accepted) {
           writeError(res, 401, 'Unauthorized');
           return;
