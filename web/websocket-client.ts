@@ -339,6 +339,9 @@ export function createWebSocketTransport(
         socket.readyState === WebSocket.OPEN
       ) {
         socket.send(toArrayBuffer(encoded));
+        console.log(
+          `[f2][webview] send type=${type} event=${header.event} requestId=${header.requestId} len=${encoded.byteLength} (live)`,
+        );
         return;
       }
       if (machine.isGaveUp()) {
@@ -347,6 +350,9 @@ export function createWebSocketTransport(
       }
       // Queue while connecting (first open, backoff, login).
       queued.push({ bytes: encoded, header });
+      console.log(
+        `[f2][webview] send type=${type} event=${header.event} requestId=${header.requestId} len=${encoded.byteLength} (QUEUED; conn=${machine.isConnected()} state=${socket?.readyState})`,
+      );
     },
     subscribe(handler) {
       listeners.add(handler);

@@ -77,13 +77,13 @@ export function attachWebSocketProtocol(
 
           const parsed = protocol.decode(frame);
           const header = parsed.header;
+          console.log(
+            `[f2][worklet] recv type=${header.type} event=${header.event} requestId=${header.requestId} payloadLen=${parsed.payload.byteLength}`,
+          );
 
           const pluginResponse = await pluginRouter.route(
             header,
             parsed.payload,
-          );
-          console.log(
-            `[f2][worklet] recv type=${header.type} event=${header.event} requestId=${header.requestId}`,
           );
           if (pluginResponse) {
             const frame = protocol.encode(
