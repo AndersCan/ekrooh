@@ -91,7 +91,7 @@ dependencies {
   api fileTree(dir: "../prebuilds/android", include: ["bare-kit/classes.jar"])
   // Public API of the host surfaces these types (BareWebViewClient,
   // BarePortMessenger), so they are `api` for consumers.
-  api "androidx.webkit:webkit:1.15.0"
+  api "androidx.webkit:webkit:1.17.0"
   api "androidx.appcompat:appcompat:1.7.0"
   // ContextCompat for real runtime permission checks (core.permissions).
   implementation "androidx.core:core-ktx:1.13.1"
