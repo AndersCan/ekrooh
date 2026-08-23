@@ -51,6 +51,7 @@ export function attachWebSocketProtocol(
   const { protocol, pluginRouter } = context;
 
   server.onConnection((socket, _request) => {
+    console.error('[f2][worklet] connection accepted');
     // Per-socket receive buffer: a single frame may arrive split across several
     // TCP segments, or several frames may arrive coalesced into one chunk. The
     // wire format is `[version][type][headerLen hi][headerLen lo][header][payload]`
@@ -131,6 +132,7 @@ export function attachWebSocketProtocol(
     });
 
     socket.on('close', () => {
+      console.error('[f2][worklet] connection closed');
       buffer = new Uint8Array(0);
     });
   });
