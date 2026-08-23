@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { createHostIpcBridge, type BareIpcLike } from './host-ipc';
+import { createFrameDecoder } from './framing';
 import { MessageProtocol } from './wire-codec';
 import { MessageType } from './constants';
 import type { MessageHeader, RuntimeTarget } from './types';
@@ -144,5 +145,118 @@ describe('createHostIpcBridge', () => {
     const assertion = expect(promise).rejects.toThrow(/Host IPC timeout/);
     vi.advanceTimersByTime(30001);
     await assertion;
+  });
+
+  it('resolves a pending host call when its frame arrives split', async () => {
+    const ipc = new FakeIpc();
+    const protocol = new MessageProtocol();
+    const bridge = createHostIpcBridge({ ipc, protocol });
+    const decoder = createFrameDecoder(protocol);
+
+    const promise = bridge.queryCapabilities();
+    const sent = protocol.decode(ipc.writes[0]);
+    const frame = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'HOST_CAPABILITIES_RESPONSE',
+        requestId: (sent.header as { requestId: string }).requestId,
+        capabilities: CAPABILITIES,
+      } satisfies MessageHeader,
+      null,
+    );
+
+    // Host→worklet frames arrive over a Node-style Readable without message
+    // boundaries; chunk this one arbitrarily through the real frame decoder.
+    const pieces = [
+      frame.subarray(0, 4),
+      frame.subarray(4, 9),
+      frame.subarray(9),
+    ];
+    for (const piece of pieces) {
+      for (const parsed of decoder.push(piece)) {
+        expect(bridge.tryConsumeDownstream(parsed)).toBe(true);
+      }
+    }
+    expect(await promise).toEqual(CAPABILITIES);
+  });
+
+  it('resolves coalesced host frames delivered in one chunk', async () => {
+    const ipc = new FakeIpc();
+    const protocol = new MessageProtocol();
+    const bridge = createHostIpcBridge({ ipc, protocol });
+    const decoder = createFrameDecoder(protocol);
+
+    const p1 = bridge.invokeOnHost(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.permissions',
+        event: 'permissions.requestStorage',
+        requestId: 'coal-1',
+        args: {},
+      },
+      new Uint8Array(0),
+    );
+    const p2 = bridge.invokeOnHost(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.permissions',
+        event: 'permissions.requestStorage',
+        requestId: 'coal-2',
+        args: {},
+      },
+      new Uint8Array(0),
+    );
+
+    const r1 = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'HOST_INVOKE_RESPONSE',
+        requestId: 'coal-1',
+        pluginId: 'core.permissions',
+        event: 'permissions.requestStorage',
+        result: { ok: 1 },
+      } satisfies MessageHeader,
+      null,
+    );
+    const r2 = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'HOST_INVOKE_RESPONSE',
+        requestId: 'coal-2',
+        pluginId: 'core.permissions',
+        event: 'permissions.requestStorage',
+        result: { ok: 2 },
+      } satisfies MessageHeader,
+      null,
+    );
+    const coalesced = new Uint8Array(r1.byteLength + r2.byteLength);
+    coalesced.set(r1, 0);
+    coalesced.set(r2, r1.byteLength);
+
+    let consumed = 0;
+    for (const parsed of decoder.push(coalesced)) {
+      if (bridge.tryConsumeDownstream(parsed)) consumed++;
+    }
+    expect(consumed).toBe(2);
+    expect(await p1).toMatchObject({ type: 'INVOKE_RESPONSE' });
+    expect(await p2).toMatchObject({ type: 'INVOKE_RESPONSE' });
+  });
+
+  it('logs a debug trace when a host frame cannot be decoded', () => {
+    const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    try {
+      const ipc = new FakeIpc();
+      const protocol = new MessageProtocol();
+      const bridge = createHostIpcBridge({ ipc, protocol });
+      // Bad version byte — decode fails and the bridge swallows it.
+      expect(
+        bridge.tryConsumeDownstreamFromHost(
+          new Uint8Array([0xff, 0x00, 0x00, 0x00]),
+        ),
+      ).toBe(false);
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

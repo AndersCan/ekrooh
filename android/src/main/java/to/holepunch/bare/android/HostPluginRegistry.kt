@@ -62,10 +62,13 @@ class HostPluginRegistry {
         respond: (HostInvokeOutcome) -> Unit,
     ) {
         val h = handlers[Key(pluginId, event)]
+            // Fixed string only — never reflect caller-controlled pluginId/event
+            // back to page JS (would enable capability probing). Mirrors the
+            // iOS host's hardening (see f863ebf).
             ?: return respond(
                 HostInvokeOutcome.Fail(
                     ErrorCodes.UNSUPPORTED_CAPABILITY,
-                    "No host handler for $pluginId.$event",
+                    "No host handler for the requested capability",
                 ),
             )
         h.invoke(args, payload, respond)

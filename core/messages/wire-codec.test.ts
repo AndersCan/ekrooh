@@ -325,4 +325,40 @@ describe('MessageProtocol encode/decode', () => {
       protocol.decode(protocol.encode(MessageType.ENVELOPE, header, null)),
     ).toThrow(/FRAME_INVALID/);
   });
+
+  it('throws FRAME_INVALID on a wide args array (breadth bomb)', () => {
+    const protocol = new MessageProtocol();
+    // 16K+ zero elements serialize to a legal (<64KB) header but must not be
+    // materialized whole on decode.
+    const header = {
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      requestId: 'req-wide',
+      args: { items: Array.from({ length: 16385 }, () => 0) },
+    } as unknown as MessageHeader;
+    expect(() =>
+      protocol.decode(protocol.encode(MessageType.ENVELOPE, header, null)),
+    ).toThrow(/FRAME_INVALID/);
+  });
+
+  it('rejects a raw frame whose header length field claims a full header', () => {
+    const protocol = new MessageProtocol();
+    // headerLen=0xFFFF (the 16-bit maximum == MAX_HEADER_BYTES) with no header
+    // bytes present. The explicit caps can only ever fire if the format grows;
+    // the existing shorter-than-header check must still refuse the claim.
+    expect(() => protocol.decode(new Uint8Array([1, 1, 0xff, 0xff]))).toThrow(
+      /too short for header/,
+    );
+  });
+
+  it('rejects a header longer than a clamped maxFrameBytes on decode', () => {
+    // maxFrameBytes is clamped up to MAX_HEADER_BYTES + 4, so a legal 16-bit
+    // header length can never exceed it; craft the claim directly instead. A
+    // full-size headerLen (4 + 0xFFFF = 65539) equals the clamped floor, so
+    // decode can at most report the header as incomplete.
+    const protocol = new MessageProtocol({ maxFrameBytes: 0 });
+    expect(protocol.maxFrameBytes).toBe(MAX_HEADER_BYTES + 4);
+    expect(() => protocol.decode(new Uint8Array([1, 1, 0xff, 0xff]))).toThrow();
+  });
 });

@@ -132,7 +132,16 @@ export function createProtocolMessenger(
       child.on('done', () => {
         queueMicrotask(() => {
           const call = pending.get(requestId);
-          if (!call) return;
+          if (!call) {
+            try {
+              console.debug(
+                `[rpc-mantaq] pending call for ${requestId} was already reaped before done; nothing to reject`,
+              );
+            } catch {
+              // Observability only — never throw into the caller.
+            }
+            return;
+          }
           pending.delete(requestId);
           call.reject(
             new Error(`invoke timeout for ${call.requestType} (${requestId})`),
@@ -148,7 +157,16 @@ export function createProtocolMessenger(
     if (!doneE.is(e)) return;
     const { requestId, status, header } = e.payload;
     const call = pending.get(requestId);
-    if (!call) return;
+    if (!call) {
+      try {
+        console.debug(
+          `[rpc-mantaq] settled event for unknown/stale requestId (${requestId}); ignoring`,
+        );
+      } catch {
+        // Observability only — never throw into the caller.
+      }
+      return;
+    }
     pending.delete(requestId);
     if (status === 'answered' && header) {
       call.resolve(header);
@@ -185,7 +203,16 @@ export function createProtocolMessenger(
       });
     },
     handleIncoming(header) {
-      if (!header.requestId) return;
+      if (!header.requestId) {
+        try {
+          console.debug(
+            `[rpc-mantaq] incoming ${header.type} without a requestId; uncorrelatable, dropping`,
+          );
+        } catch {
+          // Observability only — never throw into the caller.
+        }
+        return;
+      }
       manager.send(respondE.create({ header }));
     },
   };

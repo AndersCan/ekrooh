@@ -37,5 +37,4 @@ if (!hasWebCrypto()) {
  * the framework's own reference running.
  */
 const runtime = createWorkletRuntime(resolveWorkletConfig());
-
 void runtime.start();

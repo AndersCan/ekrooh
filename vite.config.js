@@ -1,4 +1,8 @@
 import { defineConfig } from 'vite-plus';
+import { fileURLToPath } from 'node:url';
+
+const bareStub = (name) =>
+  fileURLToPath(new URL(`./test/bare-stubs/stub-${name}.mjs`, import.meta.url));
 
 export default defineConfig({
   staged: {
@@ -30,6 +34,18 @@ export default defineConfig({
   test: {
     root: '.',
     include: ['**/*.test.ts'],
+    // The `bare-*` builtins only exist in the Bare runtime; vitest runs in
+    // plain Node. Map them to Node equivalents once here so every suite can
+    // load (per-file vi.mock stubs remain valid and win where present).
+    alias: [
+      { find: 'bare-fs', replacement: 'node:fs' },
+      { find: 'bare-path', replacement: 'node:path' },
+      { find: 'bare-http1', replacement: 'node:http' },
+      { find: 'bare-os', replacement: 'node:os' },
+      { find: 'bare-encoding', replacement: 'node:util' },
+      { find: 'bare-crypto', replacement: bareStub('crypto') },
+      { find: 'bare-ws', replacement: bareStub('ws') },
+    ],
     coverage: {
       all: false,
       include: ['core/**', 'plugins/**', 'web/**'],

@@ -98,9 +98,9 @@ const PUBLIC_SURFACES: Record<string, { entry: string; exports: string[] }> = {
       'definePlugin',
       'dispatchEvent',
       'err',
+      'installWebConsoleCapture',
       'invokeEvent',
       'ok',
-      'installWebConsoleCapture',
     ],
   },
   plugins: {

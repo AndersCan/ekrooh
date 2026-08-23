@@ -1148,6 +1148,16 @@ describe('collectRequestBody (/login body decoding)', () => {
     await expect(pending).rejects.toThrow('too large');
   });
 
+  it('rejects a multi-byte body whose byte length exceeds maxBytes even when string.length would not', async () => {
+    const req = new EventEmitter() as unknown as HTTPIncomingMessage;
+    const pending = collectRequestBody(req, 4);
+    // 4 CJK chars = 12 UTF-8 bytes but only 4 UTF-16 code units — under the
+    // old string-length cap this slipped through; `maxBytes` is a byte cap.
+    req.emit('data', '漢字漢字');
+    req.emit('end');
+    await expect(pending).rejects.toThrow('too large');
+  });
+
   it('accepts a body within the maxBytes cap', async () => {
     const req = new EventEmitter() as unknown as HTTPIncomingMessage;
     const pending = collectRequestBody(req, 4);

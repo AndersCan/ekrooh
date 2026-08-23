@@ -240,7 +240,7 @@ describe('createPluginRouter', () => {
         },
       },
     });
-    const logger = { warn: vi.fn(), error: vi.fn() };
+    const logger = { warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     const router = createPluginRouter(registry, 'bare', { logger });
     const response = await router.route(
       { type: 'DISPATCH', pluginId: 'core.health', event: 'health.ping' },
@@ -380,6 +380,82 @@ describe('createPluginRouter', () => {
     expect(response?.error?.code).toBe(ErrorCode.UNSUPPORTED_EVENT);
   });
 
+  it('honors capabilities the host adds/withdraws after the first delegated invoke', async () => {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'core.permissions',
+      events: ['permissions.requestStorage', 'permissions.requestCamera'],
+      runtimes: {},
+    });
+    const delegated: PluginInvokeResponseHeader = {
+      type: 'INVOKE_RESPONSE',
+      pluginId: 'core.permissions',
+      event: 'permissions.requestStorage',
+      requestId: 'r11',
+      result: { granted: true },
+    };
+    const delegateToHost = vi.fn(
+      async (header: {
+        pluginId: string;
+        event: string;
+        requestId?: string;
+      }): Promise<PluginInvokeResponseHeader> => ({
+        type: 'INVOKE_RESPONSE',
+        pluginId: header.pluginId,
+        event: header.event,
+        requestId: header.requestId,
+        result: { granted: true },
+      }),
+    );
+    const announce = (events: string[]) => [
+      {
+        pluginId: 'core.permissions',
+        capabilities: ['permissions'],
+        events,
+        runtimes: ['android'],
+      },
+    ];
+    // The host announces nothing first, then storage, then only camera —
+    // a memoized snapshot would deny the newly-announced capability and keep
+    // delegating the withdrawn one.
+    const getHostCapabilities = vi
+      .fn()
+      .mockResolvedValueOnce(announce([]))
+      .mockResolvedValueOnce(announce(['permissions.requestStorage']))
+      .mockResolvedValue(announce(['permissions.requestCamera']));
+    const router = createPluginRouter(registry, 'bare', {
+      delegateToHost,
+      getHostCapabilities,
+    });
+    const invoke = (event: string, requestId: string) =>
+      router.route(
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.permissions',
+          event,
+          requestId,
+        },
+        new Uint8Array(0),
+      );
+
+    const denied = await invoke('permissions.requestStorage', 'r11');
+    expect(denied?.error?.code).toBe('UNSUPPORTED_CAPABILITY');
+
+    const granted = await invoke('permissions.requestStorage', 'r11');
+    expect(granted).toEqual(delegated);
+
+    const camera = await invoke('permissions.requestCamera', 'r12');
+    expect(camera).toEqual({
+      ...delegated,
+      event: 'permissions.requestCamera',
+      requestId: 'r12',
+    });
+
+    const withdrawn = await invoke('permissions.requestStorage', 'r13');
+    expect(withdrawn?.error?.code).toBe('UNSUPPORTED_CAPABILITY');
+    expect(getHostCapabilities).toHaveBeenCalledTimes(4);
+  });
+
   it('returns UNSUPPORTED_CAPABILITY when neither adapter nor host handles it', async () => {
     const registry = createPluginRegistry();
     registry.register({
@@ -506,6 +582,37 @@ describe('createPluginBus', () => {
     expect(result).toBeNull();
     expect(error?.code).toBe('app.photos/not-found');
     expect(error?.message).toBe('missing');
+  });
+
+  it('forwards a present payload unchanged to the messenger (framed wire supports payloads)', async () => {
+    const invoke = vi.fn<ProtocolMessenger['invoke']>(async () => ({
+      type: 'INVOKE_RESPONSE',
+      pluginId: 'core.health',
+      event: 'health.payloadEcho',
+      requestId: 'req-payload',
+      result: { size: 3 },
+    }));
+    const messenger: ProtocolMessenger = {
+      dispatch: () => 'id',
+      invoke,
+      handleIncoming: () => {},
+    };
+    const bus = createPluginBus(messenger);
+    const payload = new Uint8Array([1, 2, 3]);
+    const [error, result] = await bus.invoke({
+      kind: 'invoke',
+      pluginId: 'core.health',
+      event: 'health.payloadEcho',
+      args: {},
+      payload,
+    });
+    expect(error).toBeNull();
+    expect(result).toEqual({ size: 3 });
+    expect(invoke).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'INVOKE_REQUEST' }),
+      payload,
+      undefined,
+    );
   });
 
   it('invoke rejects unexpected response types', async () => {

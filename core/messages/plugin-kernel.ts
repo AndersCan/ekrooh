@@ -89,7 +89,7 @@ export type PluginRouterOptions = {
    * here — a deny-by-default allowlist. When omitted or empty, no
    * host-delegated invokes are allowed. */
   getHostCapabilities?: () => Promise<CapabilityDescriptor[]>;
-  logger?: Pick<Console, 'warn' | 'error'>;
+  logger?: Pick<Console, 'warn' | 'error' | 'debug'>;
 };
 
 /** Whether the router may synthesize an UNSUPPORTED_EVENT response. Events are
@@ -107,21 +107,22 @@ export function createPluginRouter(
   options?: PluginRouterOptions,
 ): PluginRouter {
   const logger = options?.logger ?? console;
-  /** Snapshot of the host-announced capabilities; loaded once on the first
-   * delegation decision. */
-  let hostCaps: CapabilityDescriptor[] | null = null;
 
+  /** Fresh host capabilities on every delegation decision — never memoized, so
+   * abilities the host announces/withdraws after the first delegated invoke
+   * take effect immediately. */
   async function hostCapabilities(): Promise<CapabilityDescriptor[]> {
-    if (hostCaps) return hostCaps;
-    hostCaps = (await options?.getHostCapabilities?.()) ?? [];
-    return hostCaps;
+    return (await options?.getHostCapabilities?.()) ?? [];
   }
 
   /** Deny-by-default host-delegation allowlist: an event can only be delegated
    * once the host has announced it via `HOST_CAPABILITIES_RESPONSE`. */
-  function isHostRegistered(pluginId: string, event: string): boolean {
-    if (!hostCaps) return false;
-    const row = hostCaps.find((c) => c.pluginId === pluginId);
+  function isHostRegistered(
+    pluginId: string,
+    event: string,
+    caps: CapabilityDescriptor[],
+  ): boolean {
+    const row = caps.find((c) => c.pluginId === pluginId);
     return row ? row.events.includes(event) : false;
   }
 
@@ -209,8 +210,8 @@ export function createPluginRouter(
           }
         }
         if (header.requestId && options?.delegateToHost) {
-          await hostCapabilities();
-          if (isHostRegistered(header.pluginId, header.event)) {
+          const caps = await hostCapabilities();
+          if (isHostRegistered(header.pluginId, header.event, caps)) {
             try {
               const delegated = await options.delegateToHost(header, payload);
               if (delegated) {

@@ -50,7 +50,10 @@ class HostPluginRegistryTest {
         assertTrue(outcome is HostPluginRegistry.HostInvokeOutcome.Fail)
         val fail = outcome as HostPluginRegistry.HostInvokeOutcome.Fail
         assertEquals("UNSUPPORTED_CAPABILITY", fail.code)
-        assertTrue(fail.message.contains("core.health.health.ping"))
+        // Hardening (f863ebf parity): error messages must not reflect
+        // caller-controlled pluginId/event back to page JS — fixed string,
+        // mirroring the iOS host (HostPluginRegistryTest.swift).
+        assertEquals("No host handler for the requested capability", fail.message)
     }
 
     @Test

@@ -99,6 +99,45 @@ describe('createProtocolMessenger', () => {
     await assertion;
   });
 
+  it('logs a debug trace at every uncorrelatable incoming-message skip', () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const messenger = createProtocolMessenger(send);
+    const promise = messenger.invoke({
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      args: {},
+    });
+    const request = send.mock.calls[0]?.[0];
+
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    // No requestId on the header → uncorrelatable.
+    messenger.handleIncoming({ type: 'INVOKE_RESPONSE' } as MessageHeader);
+    // No pending call for this requestId.
+    messenger.handleIncoming(response('unknown-id'));
+    // pluginId/event mismatch → spoofed response dropped.
+    messenger.handleIncoming({
+      type: 'INVOKE_RESPONSE',
+      pluginId: 'attacker.plugin',
+      event: 'evil.run',
+      requestId: request?.requestId,
+      result: { stolen: true },
+    });
+
+    const traces = debugSpy.mock.calls.map((args) => String(args[0]));
+    debugSpy.mockRestore();
+
+    // The spoofed response never resolved the still-pending invoke.
+    expect(send).toHaveBeenCalledTimes(1);
+    const joined = traces.join('\n');
+    expect(joined).toContain('[rpc]');
+    expect(joined).toContain('without a requestId');
+    expect(joined).toContain('unknown/stale requestId');
+    expect(joined).toContain('mismatches pending');
+    void promise;
+  });
+
   it('resolves only when pluginId and event match the pending request', async () => {
     const send = vi.fn();
     const messenger = createProtocolMessenger(send);

@@ -3,6 +3,7 @@ import path from 'bare-path';
 import { TextDecoder, TextEncoder } from 'bare-encoding';
 import { createDefaultPlugins } from '../plugins';
 import { getIPC } from './lib/get-ipc';
+import { createFrameDecoder } from './messages/framing';
 import { createHostIpcBridge } from './messages/host-ipc';
 import { MessageType, MessageProtocol, type PluginManifest } from './messages';
 import { createPluginRegistry, createPluginRouter } from './messages/protocol';
@@ -66,7 +67,11 @@ export function resolveWorkletConfig(): WorkletRuntimeOptions {
         }
         return { webAssets, storage, cache: cacheDir };
       }
-    } catch {
+    } catch (err) {
+      console.debug(
+        `[runtime] config dir check failed; not a device configuration: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
       // Fall through: not a device configuration.
     }
   }
@@ -235,7 +240,11 @@ export function createWorkletRuntime(
   let ipc: ReturnType<typeof getIPC> | undefined;
   try {
     ipc = getIPC();
-  } catch {
+  } catch (err) {
+    console.debug(
+      `[runtime] no host IPC channel available, running without a host: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
     ipc = undefined;
   }
 
@@ -279,25 +288,47 @@ export function createWorkletRuntime(
   });
 
   if (ipc) {
-    ipc.on('data', async (data) => {
+    // Host→worklet frames arrive over a Node-style Readable whose `data` events
+    // do not preserve message boundaries, so frames arrive split or coalesced.
+    // The per-runtime frame decoder drains synchronously and the downstream
+    // handling is serialized, so concurrent data events cannot interleave.
+    const ipcDecoder = createFrameDecoder(protocol);
+    let inflight: Promise<void> = Promise.resolve();
+
+    ipc.on('data', (data) => {
+      let messages;
       try {
-        const raw = toUint8Array(data as Uint8Array);
-        if (hostBridge?.tryConsumeDownstreamFromHost(raw)) {
-          return;
-        }
-        const parsed = protocol.decode(raw);
-        const header = parsed.header;
-        const pluginResponse = await pluginRouter.route(header, parsed.payload);
-        if (pluginResponse) {
-          writeIpc(
-            ipc,
-            protocol.encode(MessageType.ENVELOPE, pluginResponse, null),
-          );
-        }
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
+        messages = ipcDecoder.push(toUint8Array(data as Uint8Array));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         console.error(`Malformed IPC frame dropped: ${message}`);
+        ipcDecoder.clear();
+        return;
       }
+      if (messages.length === 0) return;
+
+      inflight = inflight
+        .then(async () => {
+          for (const parsed of messages) {
+            if (hostBridge?.tryConsumeDownstream(parsed)) {
+              continue;
+            }
+            const pluginResponse = await pluginRouter.route(
+              parsed.header,
+              parsed.payload,
+            );
+            if (pluginResponse) {
+              writeIpc(
+                ipc,
+                protocol.encode(MessageType.ENVELOPE, pluginResponse, null),
+              );
+            }
+          }
+        })
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(`Malformed IPC frame dropped: ${message}`);
+        });
     });
   }
 
@@ -308,6 +339,7 @@ export function createWorkletRuntime(
       try {
         fs.rmSync(path.join(options.storage, 'handoff.json'), { force: true });
       } catch {
+        console.debug('[runtime] no existing handoff file to remove');
         // Nothing to remove.
       }
     }
