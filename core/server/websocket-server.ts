@@ -69,7 +69,28 @@ export function attachWebSocketProtocol(
 
         while (buffer.byteLength >= 4) {
           const headerLen = (buffer[2] << 8) | buffer[3];
-          const frameLen = 4 + headerLen;
+          if (buffer.byteLength < 4 + headerLen) break;
+
+          // The header carries `payloadLength` (written by
+          // MessageProtocol.encode), so a frame is self-delimiting even when
+          // coalesced with the next frame in one chunk. Without it the parser
+          // leaves the payload bytes trailing and desyncs the following frame —
+          // this is the iOS health-check roundtrip failure (ekrooh#115): the
+          // payload-bearing payloadEcho request poisoned the next frame.
+          let payloadLen = 0;
+          try {
+            const headerObj = JSON.parse(
+              new TextDecoder().decode(buffer.subarray(4, 4 + headerLen)),
+            ) as { payloadLength?: number };
+            if (typeof headerObj.payloadLength === 'number') {
+              payloadLen = headerObj.payloadLength;
+            }
+          } catch {
+            // Malformed header: keep payloadLen at 0; decode() below rejects it
+            // and the frame is still consumed so parsing can't loop forever.
+          }
+
+          const frameLen = 4 + headerLen + payloadLen;
           if (buffer.byteLength < frameLen) break;
 
           const frame = buffer.subarray(0, frameLen);
