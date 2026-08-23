@@ -629,6 +629,15 @@ export function createLoopbackServer(
   server.on('upgrade', (req, socket, head) => {
     const headers = req.headers as Record<string, string | number>;
 
+    // Every rejection is logged with a stable `[loopback] upgrade rejected:`
+    // prefix — a silent `socket.destroy()` is indistinguishable on the client
+    // from "server unreachable", which cost a full device-only triage cycle.
+    // These lines are captured by the `core.logs` ring buffer.
+    const reject = (reason: string) => {
+      console.error(`[loopback] upgrade rejected: ${reason}`);
+      socket.destroy();
+    };
+
     const origin = headers['origin'];
     const allowed =
       typeof origin === 'string' &&
@@ -636,12 +645,16 @@ export function createLoopbackServer(
       origin === boundOrigin &&
       boundOrigin !== '';
     if (authEnabled && !allowed) {
-      socket.destroy();
+      reject(
+        `origin mismatch (got ${typeof origin === 'string' && origin ? `'${origin}'` : 'no Origin header'}, bound '${boundOrigin}')`,
+      );
       return;
     }
 
     if (!isAuthorized(headers)) {
-      socket.destroy();
+      reject(
+        `unauthorized (${headers['cookie'] ? 'cookie present but invalid' : 'no bare_session cookie'})`,
+      );
       return;
     }
 
@@ -649,13 +662,13 @@ export function createLoopbackServer(
     // socket never receives a 101 (a 101-then-close would look like an
     // established connection to the client's reconnect logic).
     if (activeSocket) {
-      socket.destroy();
+      reject('single-client policy (a protocol socket is already connected)');
       return;
     }
 
     ws.Server.handshake(req as never, socket, head, (err) => {
       if (err) {
-        socket.destroy(err);
+        reject(`handshake failed (${err.message})`);
         return;
       }
       const client = new ws.Socket({
