@@ -94,7 +94,7 @@ dependencies {
   api "androidx.webkit:webkit:1.17.0"
   api "androidx.appcompat:appcompat:1.7.0"
   // ContextCompat for real runtime permission checks (core.permissions).
-  implementation "androidx.core:core-ktx:1.13.1"
+  implementation "androidx.core:core-ktx:1.19.0"
 
   testImplementation "junit:junit:4.13.2"
   // Real org.json for unit tests (shadows the android.jar stub).
