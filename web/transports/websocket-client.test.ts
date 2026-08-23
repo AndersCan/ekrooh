@@ -224,6 +224,40 @@ describe('createWebSocketTransport /login bootstrap', () => {
     const header = headers[0] as PluginInvokeResponseHeader;
     expect(header.type).toBe('INVOKE_RESPONSE');
     expect(header.error?.code).toBe('TRANSPORT_ERROR');
+    expect(header.error?.message).toContain('session login rejected');
+    expect(FakeWebSocket.instances).toHaveLength(0);
+  });
+
+  it('fails queued invokes with TRANSPORT_ERROR when /login times out', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      loginTimeoutMs: 10,
+    });
+
+    const headers: unknown[] = [];
+    transport.subscribe((message) => headers.push(message.header));
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'lt1',
+      },
+      null,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const header = headers[0] as PluginInvokeResponseHeader;
+    expect(header.type).toBe('INVOKE_RESPONSE');
+    expect(header.error?.code).toBe('TRANSPORT_ERROR');
+    expect(header.error?.message).toContain('session login timed out');
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
@@ -325,6 +359,9 @@ describe('createWebSocketTransport messaging', () => {
     const header = headers[0] as PluginInvokeResponseHeader;
     expect(header.type).toBe('INVOKE_RESPONSE');
     expect(header.error?.code).toBe('TRANSPORT_ERROR');
+    expect(header.error?.message).toContain(
+      'socket never opened after 0 retries',
+    );
   });
 });
 
