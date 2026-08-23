@@ -440,9 +440,7 @@ describe('loopback server HTTP', () => {
       headers: { cookie },
     });
     expect(reload.status).toBe(200);
-    expect(firstHeader(reload.headers, 'set-cookie')).toMatch(
-      /^bare_session=/,
-    );
+    expect(firstHeader(reload.headers, 'set-cookie')).toMatch(/^bare_session=/);
 
     // The same invalid secret without a surviving session stays rejected.
     const anon = await request('/login', {
