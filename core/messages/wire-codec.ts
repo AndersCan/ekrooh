@@ -31,8 +31,10 @@ export interface ProtocolOptions {
 
 /** Smallest frame that can legally carry a maximum-size header. Below this the
  * decoder could never extract a header, so it is the effective floor for the
- * frame cap. */
-const MIN_FRAME_BYTES = MAX_HEADER_BYTES + 4;
+ * frame cap. The frame prefix is `[version][type][headerLenHi][headerLenLo]
+ * [payloadLenHi][payloadLenMid][payloadLenLo]`, so the floor is
+ * 7 + MAX_HEADER_BYTES. */
+const MIN_FRAME_BYTES = MAX_HEADER_BYTES + 7;
 
 function clampFrameBytes(value: number): number {
   const fallback = Number.isFinite(value) ? Math.floor(value) : MAX_FRAME_BYTES;
@@ -76,15 +78,15 @@ export class MessageProtocol {
     }
     const pLen = payloadBytes.byteLength;
 
-    // The frozen wire layout `[version][type][headerLen][header][payload]` has
-    // no payload-length field, so a receiver reassembling a byte stream cannot
-    // locate a payload-bearing frame's end from the prefix alone. When a frame
-    // carries a payload, mirror its byte length back inside the JSON header —
-    // an additive key (the decode-side allowlist drops it, so routed headers
-    // never expose it). Header-only frames are byte-identical to before.
-    const headerJson = JSON.stringify(
-      pLen > 0 ? { ...header, payloadLength: pLen } : header,
-    );
+    // Carry the payload length as a binary field in the frame prefix (bytes
+    // 4-6) so a frame is self-delimiting on any transport. The binary field is
+    // the frame-boundary source of truth: a peer may re-serialize the JSON
+    // header and drop unknown fields (ekrooh#115), but it never alters the raw
+    // frame bytes. The length is also mirrored in the JSON header for peers
+    // that look there; the decode-side allowlist drops it from routed headers.
+    const headerObj: Record<string, unknown> = { ...header };
+    if (pLen > 0) headerObj.payloadLength = pLen;
+    const headerJson = JSON.stringify(headerObj);
     const headerBytes = this.encodeStr(headerJson);
 
     if (headerBytes.byteLength > MAX_HEADER_BYTES) {
@@ -94,7 +96,7 @@ export class MessageProtocol {
     }
 
     const hLen = headerBytes.byteLength;
-    const totalLength = 4 + hLen + pLen;
+    const totalLength = 7 + hLen + pLen;
 
     if (totalLength > this.maxFrameBytes) {
       throw new Error(
@@ -116,9 +118,12 @@ export class MessageProtocol {
     buffer[1] = type;
     buffer[2] = (hLen >> 8) & 0xff;
     buffer[3] = hLen & 0xff;
-    buffer.set(headerBytes, 4);
+    buffer[4] = (pLen >> 16) & 0xff;
+    buffer[5] = (pLen >> 8) & 0xff;
+    buffer[6] = pLen & 0xff;
+    buffer.set(headerBytes, 7);
     if (pLen > 0) {
-      buffer.set(payloadBytes, 4 + hLen);
+      buffer.set(payloadBytes, 7 + hLen);
     }
 
     return buffer;
@@ -128,7 +133,7 @@ export class MessageProtocol {
     const view = data instanceof Uint8Array ? data : new Uint8Array(data);
     const byteLength = view.byteLength;
 
-    if (byteLength < 4) {
+    if (byteLength < 7) {
       throw new Error(`Message too short: ${byteLength} bytes`);
     }
 
@@ -148,6 +153,7 @@ export class MessageProtocol {
       throw new Error(`Unsupported message type: ${type}`);
     }
     const headerLen = (view[2] << 8) | view[3];
+    const payloadLen = (view[4] << 16) | (view[5] << 8) | view[6];
 
     // The 16-bit field already bounds headerLen at MAX_HEADER_BYTES on the
     // wire; the explicit checks are defense-in-depth (and would catch a future
@@ -157,21 +163,21 @@ export class MessageProtocol {
         `Header too large: ${headerLen} bytes, maximum is ${MAX_HEADER_BYTES}`,
       );
     }
-    if (4 + headerLen > this.maxFrameBytes) {
+    if (7 + headerLen + payloadLen > this.maxFrameBytes) {
       throw new Error(
-        `Frame too large: 4 + ${headerLen} bytes, maximum is ${this.maxFrameBytes}`,
+        `Frame too large: 7 + ${headerLen} + ${payloadLen} bytes, maximum is ${this.maxFrameBytes}`,
       );
     }
 
-    if (byteLength < 4 + headerLen) {
+    if (byteLength < 7 + headerLen + payloadLen) {
       throw new Error(
-        `Message too short for header: ${byteLength} bytes, expected at least ${4 + headerLen}`,
+        `Message too short for frame: ${byteLength} bytes, expected at least ${7 + headerLen + payloadLen}`,
       );
     }
 
     let headerStr: string;
     try {
-      headerStr = this.decodeStr(view.subarray(4, 4 + headerLen));
+      headerStr = this.decodeStr(view.subarray(7, 7 + headerLen));
     } catch {
       try {
         console.debug('[wire] header frame is not valid UTF-8');
@@ -184,7 +190,7 @@ export class MessageProtocol {
       );
     }
     const header = parseAndValidateHeader(headerStr);
-    const payload = view.subarray(4 + headerLen);
+    const payload = view.subarray(7 + headerLen, 7 + headerLen + payloadLen);
 
     return { type, header, payload };
   }

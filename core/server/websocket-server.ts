@@ -43,14 +43,15 @@ export function attachWebSocketProtocol(
   const { protocol, pluginRouter } = context;
 
   server.onConnection((socket, _request) => {
-    // The wire format is `[version][type][headerLen hi][headerLen lo][header]
-    // [payload]` with no payload-length field, so a reassembler reads the frame
-    // length from bytes 2-3 (`4 + headerLen`) plus the header-carried payload
-    // length written by `encode` when a frame carries a payload (`payloadEcho`
-    // invokes do). The per-socket frame decoder drains synchronously: a single
-    // frame may arrive split across chunks, or several frames coalesced into
-    // one, and the routing below is serialized per socket so concurrent data
-    // events can never interleave on a shared buffer.
+    // The wire format is `[version][type][headerLen(2)][payloadLen(3)]
+    // [header][payload]`: a reassembler reads the frame length from bytes 2-3
+    // (16-bit header) and bytes 4-6 (24-bit payload length), written by
+    // `encode` — payload-bearing invokes (e.g. `payloadEcho`) stay
+    // self-delimiting even when a peer transport strips unknown JSON header
+    // fields. The per-socket frame decoder drains synchronously: a single frame
+    // may arrive split across chunks, or several frames coalesced into one, and
+    // the routing below is serialized per socket so concurrent data events can
+    // never interleave on a shared buffer.
     const decoder = createFrameDecoder(protocol);
     let inflight: Promise<void> = Promise.resolve();
 

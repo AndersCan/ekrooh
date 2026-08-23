@@ -32,8 +32,10 @@ object BareProtocol {
         }
         val payloadBytes = payload ?: ByteArray(0)
 
-        // 1 (version) + 1 (type) + 2 (headerLen) + header + payload
-        val totalLength = 4 + headerBytes.size + payloadBytes.size
+        // [version][type][headerLen(2 BE)][payloadLen(3 BE)][header][payload]:
+        // the binary payload length keeps frames self-delimiting even when a
+        // transport re-serializes the JSON header (mirrors core wire-codec).
+        val totalLength = 7 + headerBytes.size + payloadBytes.size
         if (totalLength > MAX_FRAME_BYTES) {
             throw IllegalArgumentException(
                 "Frame too large: $totalLength bytes, maximum is $MAX_FRAME_BYTES"
@@ -44,6 +46,9 @@ object BareProtocol {
         buffer.put(VERSION)
         buffer.put(type)
         buffer.putShort(headerBytes.size.toShort())
+        buffer.put(((payloadBytes.size shr 16) and 0xff).toByte())
+        buffer.put(((payloadBytes.size shr 8) and 0xff).toByte())
+        buffer.put((payloadBytes.size and 0xff).toByte())
         buffer.put(headerBytes)
         buffer.put(payloadBytes)
 
@@ -52,7 +57,7 @@ object BareProtocol {
     }
 
     fun parseMessage(buffer: ByteBuffer): WireMessage? {
-        if (buffer.remaining() < 4) return null
+        if (buffer.remaining() < 7) return null
         if (buffer.remaining() > MAX_FRAME_BYTES) return null
 
         val version = buffer.get()
@@ -61,6 +66,10 @@ object BareProtocol {
         val type = buffer.get()
         if (type != MessageType.ENVELOPE) return null
         val headerLen = buffer.short.toInt() and 0xFFFF
+        val payloadLen =
+            ((buffer.get().toInt() and 0xff) shl 16) or
+                ((buffer.get().toInt() and 0xff) shl 8) or
+                (buffer.get().toInt() and 0xff)
 
         if (headerLen > MAX_HEADER_BYTES) return null
         if (buffer.remaining() < headerLen) return null
@@ -68,8 +77,8 @@ object BareProtocol {
         buffer.get(headerBytes)
         val headerJson = String(headerBytes, StandardCharsets.UTF_8)
 
-        val payload = if (buffer.hasRemaining()) {
-            val bytes = ByteArray(buffer.remaining())
+        val payload = if (buffer.remaining() >= payloadLen && payloadLen > 0) {
+            val bytes = ByteArray(payloadLen)
             buffer.get(bytes)
             bytes
         } else {

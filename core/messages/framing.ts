@@ -11,17 +11,19 @@ function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
   return out;
 }
 
-/** Receive-side frame decoder for a single channel. The frozen wire format
- * `[version][type][hLenHi][hLenLo][header][payload]` has no payload-length
- * field, so a frame's end must be derived from the header: `4 + headerLen`
- * for header-only frames, plus the header-carried `payloadLength` (written by
- * {@link MessageProtocol.encode} when a frame carries a payload) otherwise.
- * `push` is fully synchronous: it drains whatever complete frames a chunk
- * completes and leaves partial bytes buffered, so a channel that awaits
- * downstream routing cannot interleave reads/writes on a shared buffer.
- * Framing violations throw after clearing the internal buffer (self-resync);
- * the caller decides whether to drop the channel. Decode errors from
- * {@link MessageProtocol.decode} propagate unchanged. */
+/** Receive-side frame decoder for a single channel. The wire format is
+ * `[version][type][hLenHi][hLenLo][pLenHi][pLenMid][pLenLo][header][payload]`:
+ * bytes 2-3 carry the 16-bit header length and bytes 4-6 a 24-bit payload
+ * length (written by {@link MessageProtocol.encode}), so a frame's end is
+ * exactly `7 + headerLen + payloadLen`. The binary prefix is the frame boundary
+ * source of truth — a peer that re-serializes the JSON header (dropping
+ * unknown fields) cannot touch these bytes. `push` is fully synchronous: it
+ * drains whatever complete frames a chunk completes and leaves partial bytes
+ * buffered, so a channel that awaits downstream routing cannot interleave
+ * reads/writes on a shared buffer. Framing violations throw after clearing the
+ * internal buffer (self-resync); the caller decides whether to drop the
+ * channel. Decode errors from {@link MessageProtocol.decode} propagate
+ * unchanged. */
 export interface FrameDecoder {
   push(chunk: Uint8Array): WireMessage[];
   clear(): void;
@@ -38,37 +40,12 @@ export function createFrameDecoder(protocol: MessageProtocol): FrameDecoder {
     return err;
   }
 
-  /** Reads the header-carried payload length so a payload-bearing frame can be
-   * framed end-to-end. Falls back to 0 (header-only framing) when the header
-   * is unparseable or the field is absent/garbage — the caller then treats the
-   * bytes after the header as the next frame, exactly as the old format did. */
-  function declaredPayloadLen(headerLen: number): number {
-    if (headerLen === 0) return 0;
-    try {
-      const headerStr = new TextDecoder().decode(
-        buffer.subarray(4, 4 + headerLen),
-      );
-      const raw = JSON.parse(headerStr) as { payloadLength?: unknown };
-      if (
-        raw &&
-        typeof raw.payloadLength === 'number' &&
-        Number.isFinite(raw.payloadLength) &&
-        raw.payloadLength >= 0
-      ) {
-        return raw.payloadLength;
-      }
-    } catch {
-      /* unparseable header — treat as header-only */
-    }
-    return 0;
-  }
-
   function push(chunk: Uint8Array): WireMessage[] {
     if (error) return [];
     buffer = concatBytes(buffer, chunk);
 
     const out: WireMessage[] = [];
-    while (buffer.byteLength >= 4) {
+    while (buffer.byteLength >= 7) {
       const headerLen = (buffer[2] << 8) | buffer[3];
       if (headerLen > MAX_HEADER_BYTES) {
         throw fail(
@@ -77,7 +54,8 @@ export function createFrameDecoder(protocol: MessageProtocol): FrameDecoder {
           ),
         );
       }
-      const frameLen = 4 + headerLen + declaredPayloadLen(headerLen);
+      const payloadLen = (buffer[4] << 16) | (buffer[5] << 8) | buffer[6];
+      const frameLen = 7 + headerLen + payloadLen;
       if (frameLen > protocol.maxFrameBytes) {
         throw fail(
           new Error(

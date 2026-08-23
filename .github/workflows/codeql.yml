@@ -26,12 +26,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: 21
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           languages: ${{ matrix.language }}
 
-      - name: Autobuild
+      # Kotlin analysis needs a real compile of the Android host, which the
+      # Stock autobuild cannot do (no Android SDK on PATH, and its gradle run
+      # shells out to `npm` for the example web assets). Build the host module
+      # explicitly, mirroring the `android` job in test.yml.
+      - name: Set up Android SDK (kotlin)
+        if: matrix.language == 'kotlin'
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          packages: tools platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
+
+      - name: Build Kotlin host for analysis (kotlin)
+        if: matrix.language == 'kotlin'
+        run: ./gradlew --no-daemon :bare-host:compileDebugKotlin
+
+      - name: Autobuild (javascript-typescript)
+        if: matrix.language == 'javascript-typescript'
         uses: github/codeql-action/autobuild@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
 
       - name: Perform CodeQL Analysis

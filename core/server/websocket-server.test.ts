@@ -224,7 +224,10 @@ describe('attachWebSocketProtocol', () => {
 
     // A ≥4-byte chunk (one full frame under the header-length framing) with an
     // unsupported version byte — decoded and rejected, not left buffered.
-    socket.emit('data', new Uint8Array([0xff, 0x00, 0x00, 0x00]));
+    socket.emit(
+      'data',
+      new Uint8Array([0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+    );
     expect(socket.write).not.toHaveBeenCalled();
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
