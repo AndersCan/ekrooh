@@ -335,6 +335,9 @@ describe('createWebSocketTransport messaging', () => {
   });
 
   it('fails queued invokes with TRANSPORT_ERROR once retries are exhausted', async () => {
+    // Default fetch stub answers `{ ok: true }` with no body reader, so the
+    // log-tail enrichment fails gracefully and the plain give-up message
+    // survives.
     const transport = createWebSocketTransport({
       url: 'ws://test',
       maxRetries: 0,
@@ -356,11 +359,93 @@ describe('createWebSocketTransport messaging', () => {
     );
     socket.close();
 
+    // Give-up failure is now async by one log-tail round-trip.
+    await vi.waitFor(() => {
+      expect(headers).toHaveLength(1);
+    });
     const header = headers[0] as PluginInvokeResponseHeader;
     expect(header.type).toBe('INVOKE_RESPONSE');
     expect(header.error?.code).toBe('TRANSPORT_ERROR');
     expect(header.error?.message).toContain(
       'socket never opened after 0 retries',
+    );
+  });
+
+  it('folds [loopback] rejection lines from the server log tail into the give-up error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        text: async () =>
+          '2026-08-23T00:00:00Z INFO backend boot ok\n' +
+          '[loopback] upgrade rejected: origin mismatch (no Origin header)\n' +
+          '[loopback] upgrade rejected: unauthorized (no bare_session cookie)',
+      })),
+    );
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+    });
+    await nextTick();
+    const socket = lastSocket();
+    const headers: unknown[] = [];
+    transport.subscribe((message) => headers.push(message.header));
+
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'q3',
+      },
+      null,
+    );
+    socket.close();
+
+    await vi.waitFor(() => {
+      expect(headers).toHaveLength(1);
+    });
+    const header = headers[0] as PluginInvokeResponseHeader;
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      'http://test/logs?tail=50&format=text',
+    );
+    expect(header.error?.message).toContain('origin mismatch');
+    expect(header.error?.message).toContain('unauthorized');
+  });
+
+  it('names the auth path when the log tail route itself is rejected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 401 })),
+    );
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+    });
+    await nextTick();
+    const socket = lastSocket();
+    const headers: unknown[] = [];
+    transport.subscribe((message) => headers.push(message.header));
+
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'q4',
+      },
+      null,
+    );
+    socket.close();
+
+    await vi.waitFor(() => {
+      expect(headers).toHaveLength(1);
+    });
+    const header = headers[0] as PluginInvokeResponseHeader;
+    expect(header.error?.message).toContain(
+      'server log tail unavailable (HTTP 401)',
     );
   });
 });
@@ -476,6 +561,10 @@ describe('createWebSocketTransport reconnect', () => {
     );
     first.close(); // rejected → retry cap (0) reached → give up
 
+    // Give-up failure is now async by one log-tail round-trip.
+    await vi.waitFor(() => {
+      expect(headers).toHaveLength(1);
+    });
     const header = headers[0] as PluginInvokeResponseHeader;
     expect(header.type).toBe('INVOKE_RESPONSE');
     expect(header.error?.code).toBe('TRANSPORT_ERROR');
@@ -509,6 +598,10 @@ describe('createWebSocketTransport reconnect', () => {
     );
     second.close();
 
+    // Give-up failure is now async by one log-tail round-trip.
+    await vi.waitFor(() => {
+      expect(headers).toHaveLength(1);
+    });
     const header = headers[0] as PluginInvokeResponseHeader;
     expect(header.type).toBe('INVOKE_RESPONSE');
     expect(header.error?.code).toBe('TRANSPORT_ERROR');

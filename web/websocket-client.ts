@@ -82,6 +82,55 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   ) as ArrayBuffer;
 }
 
+/** Upper bound on server-log lines folded into a give-up error (it lands in
+ * an XCTest accessibility label, so it must stay short). */
+const LOG_TAIL_LINES = 3;
+/** Per-line character cap for the folded log tail. */
+const LOG_TAIL_LINE_CHARS = 200;
+/** How long to wait for the log-tail fetch before giving up on enrichment. */
+const LOG_TAIL_TIMEOUT_MS = 2000;
+
+/**
+ * Fetches the loopback server's recent `[loopback]` rejection lines over HTTP.
+ * This works precisely because the failure class is upgrade-only: the page
+ * itself loads from the same server, so the auth-gated `GET /logs` route still
+ * answers when every WebSocket handshake dies. Returns null when nothing can
+ * be learned (no fetch available, network error, timeout).
+ */
+async function serverRejectionTail(wsUrl: string): Promise<string | null> {
+  if (typeof fetch !== 'function') return null;
+  const httpBase = wsUrl.startsWith('wss://')
+    ? `https://${wsUrl.slice('wss://'.length)}`
+    : wsUrl.startsWith('ws://')
+      ? `http://${wsUrl.slice('ws://'.length)}`
+      : wsUrl;
+  try {
+    const response = await Promise.race([
+      fetch(`${httpBase}/logs?tail=50&format=text`),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), LOG_TAIL_TIMEOUT_MS),
+      ),
+    ]);
+    if (response === null) return null;
+    // A non-200 is itself diagnostic: `/logs` inherits the session gate, so a
+    // 401/403 here points straight at the auth path.
+    if (!response.ok) {
+      return `server log tail unavailable (HTTP ${response.status})`;
+    }
+    const text = await response.text();
+    const lines = text
+      .split('\n')
+      .filter((line) => line.includes('[loopback]'))
+      .slice(-LOG_TAIL_LINES)
+      .map((line) => line.slice(0, LOG_TAIL_LINE_CHARS));
+    return lines.length > 0
+      ? lines.join(' | ')
+      : 'no [loopback] rejection lines in server log tail';
+  } catch {
+    return null;
+  }
+}
+
 export interface MessageTransport {
   send(
     type: MessageTypeValue,
@@ -208,9 +257,22 @@ export function createWebSocketTransport(
     if (state === 'opening') {
       openSocket();
     } else if (state === 'gaveUp') {
-      failQueuedMessages(gaveUpMessage());
+      void failWithServerDetail();
     }
   });
+
+  /** Terminal give-up: when we have no better name for the failure, fold the
+   * server's own view (its `[loopback]` upgrade rejections) into the surfaced
+   * error. Async by one localhost round-trip — queued requests are already
+   * terminally lost, so a short delay changes nothing semantically. */
+  async function failWithServerDetail(): Promise<void> {
+    let message = gaveUpMessage();
+    if (loginFailureDetail === null) {
+      const tail = await serverRejectionTail(url);
+      if (tail !== null) message = `${message}; server: ${tail}`;
+    }
+    failQueuedMessages(message);
+  }
 
   /** One `/login` attempt, classified for the bootstrap race. `spent` means
    * the server recognized our nonce as already consumed by a sibling
