@@ -86,10 +86,19 @@ export function attachWebSocketProtocol(
           // this is the iOS health-check roundtrip failure (ekrooh#115): the
           // payload-bearing payloadEcho request poisoned the next frame.
           let payloadLen = 0;
+          let headerHasPayloadLength = false;
           try {
-            const headerObj = JSON.parse(
-              new TextDecoder().decode(buffer.subarray(4, 4 + headerLen)),
-            ) as { payloadLength?: number };
+            const headerJson = new TextDecoder().decode(
+              buffer.subarray(4, 4 + headerLen),
+            );
+            const headerObj = JSON.parse(headerJson) as {
+              payloadLength?: number;
+            };
+            // [f2] confirm whether the header the worklet actually RECEIVED
+            // carries payloadLength. Client embeds it (web [f2][client] log);
+            // if this is false while the client log is true, the webview→worklet
+            // transport altered/dropped the field (ekrooh#115).
+            headerHasPayloadLength = 'payloadLength' in headerObj;
             if (typeof headerObj.payloadLength === 'number') {
               payloadLen = headerObj.payloadLength;
             }
@@ -110,7 +119,7 @@ export function attachWebSocketProtocol(
             .map((b) => b.toString(16).padStart(2, '0'))
             .join(' ');
           console.error(
-            `[f2][worklet] frame bufLen=${buffer.byteLength} headerLen=${headerLen} payloadLen=${payloadLen} frameLen=${frameLen} status=${status} head=${head}`,
+            `[f2][worklet] frame bufLen=${buffer.byteLength} headerLen=${headerLen} payloadLen=${payloadLen} rxHasPayloadLength=${headerHasPayloadLength} frameLen=${frameLen} status=${status} head=${head}`,
           );
           if (buffer.byteLength < frameLen) break;
 
