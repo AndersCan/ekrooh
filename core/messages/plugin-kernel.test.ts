@@ -538,6 +538,47 @@ describe('createPluginBus', () => {
     expect(typeof id).toBe('string');
     expect(id.length).toBeGreaterThan(0);
   });
+
+  it('maps a messenger timeout rejection into a TIMEOUT Either error', async () => {
+    const messenger: ProtocolMessenger = {
+      dispatch: () => 'req_1',
+      invoke: () =>
+        Promise.reject(new Error('invoke timeout for INVOKE_REQUEST (req_1)')),
+      handleIncoming: () => {},
+    };
+    const bus = createPluginBus(messenger);
+
+    const [error, result] = await bus.invoke({
+      kind: 'invoke',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      args: {},
+    });
+    expect(result).toBeNull();
+    expect(error?.code).toBe('TIMEOUT');
+    expect(error?.message).toContain('invoke timeout');
+  });
+
+  it('maps other messenger rejections into INVALID_RESPONSE Either errors', async () => {
+    const messenger: ProtocolMessenger = {
+      dispatch: () => 'req_2',
+      invoke: () =>
+        Promise.reject(
+          new Error('invoke dropped: too many concurrent invokes (req_2)'),
+        ),
+      handleIncoming: () => {},
+    };
+    const bus = createPluginBus(messenger);
+
+    const [error, result] = await bus.invoke({
+      kind: 'invoke',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      args: {},
+    });
+    expect(result).toBeNull();
+    expect(error?.code).toBe('INVALID_RESPONSE');
+  });
 });
 
 describe('integration: messenger + protocol + bus over an encoded channel', () => {

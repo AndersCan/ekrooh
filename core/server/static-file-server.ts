@@ -263,6 +263,9 @@ export function createLoopbackServer(
   const connectionHandlers: LoopbackConnectionHandler[] = [];
   let token: string | null = options.token ?? null;
   let bootstrapNonce: string | null = null;
+  /** The most recently spent bootstrap nonce, kept only to answer replays of
+   * it with 409 (valid-once-but-consumed) instead of 401 (bad credential). */
+  let spentBootstrapNonce: string | null = null;
   let boundOrigin = '';
   let originPromise: Promise<string> | null = null;
   let activeSocket: WebSocketLike | null = null;
@@ -327,14 +330,28 @@ export function createLoopbackServer(
         // guarantee intact — a replayed spent nonce alone still fails.
         const bySession = authEnabled && isAuthorized(req.headers);
         const accepted = !authEnabled || byToken || byBootstrap || bySession;
+        const bySpentBootstrap =
+          bootstrapNonce === null &&
+          spentBootstrapNonce !== null &&
+          secretEquals(trimmed, spentBootstrapNonce);
         if (!accepted) {
-          writeError(res, 401, 'Unauthorized');
+          // A replay of the already-spent bootstrap nonce is not a bad
+          // credential: it means another document logged in first with the
+          // nonce this document was also given, and that document's session
+          // cookie is on its way. The 409 tells the shell to retry once
+          // rather than treat it as terminal, while granting nothing — no
+          // cookie is set and no session is created.
+          writeError(res, bySpentBootstrap ? 409 : 401, 'Unauthorized');
           return;
         }
         // A bootstrap nonce is single-use: once the page exchanges it for the
         // session cookie it is spent, so a script that later reads it (or copies
-        // it) cannot mint any further requests.
-        if (byBootstrap) bootstrapNonce = null;
+        // it) cannot mint any further requests. The value is remembered only so
+        // replays can be answered with the honest 409 above.
+        if (byBootstrap && bootstrapNonce !== null) {
+          spentBootstrapNonce = bootstrapNonce;
+          bootstrapNonce = null;
+        }
         // Dev mode (auth off) has no real token — still answer the login so the
         // page transport proceeds, but set no cookie.
         const headers: Record<string, string | number> = {
@@ -612,6 +629,15 @@ export function createLoopbackServer(
   server.on('upgrade', (req, socket, head) => {
     const headers = req.headers as Record<string, string | number>;
 
+    // Every rejection is logged with a stable `[loopback] upgrade rejected:`
+    // prefix — a silent `socket.destroy()` is indistinguishable on the client
+    // from "server unreachable", which cost a full device-only triage cycle.
+    // These lines are captured by the `core.logs` ring buffer.
+    const reject = (reason: string) => {
+      console.error(`[loopback] upgrade rejected: ${reason}`);
+      socket.destroy();
+    };
+
     const origin = headers['origin'];
     const allowed =
       typeof origin === 'string' &&
@@ -619,12 +645,16 @@ export function createLoopbackServer(
       origin === boundOrigin &&
       boundOrigin !== '';
     if (authEnabled && !allowed) {
-      socket.destroy();
+      reject(
+        `origin mismatch (got ${typeof origin === 'string' && origin ? `'${origin}'` : 'no Origin header'}, bound '${boundOrigin}')`,
+      );
       return;
     }
 
     if (!isAuthorized(headers)) {
-      socket.destroy();
+      reject(
+        `unauthorized (${headers['cookie'] ? 'cookie present but invalid' : 'no bare_session cookie'})`,
+      );
       return;
     }
 
@@ -632,13 +662,13 @@ export function createLoopbackServer(
     // socket never receives a 101 (a 101-then-close would look like an
     // established connection to the client's reconnect logic).
     if (activeSocket) {
-      socket.destroy();
+      reject('single-client policy (a protocol socket is already connected)');
       return;
     }
 
     ws.Server.handshake(req as never, socket, head, (err) => {
       if (err) {
-        socket.destroy(err);
+        reject(`handshake failed (${err.message})`);
         return;
       }
       const client = new ws.Socket({

@@ -67,11 +67,16 @@ export function createProtocolMessenger(
       const { requestId, pluginId, event } = requestWithId;
 
       return new Promise<MessageHeader>((resolvePromise, rejectPromise) => {
+        const fail = async (reason: string): Promise<void> => {
+          console.error(`[invoke] ${reason}`);
+          const tail = await serverLogTail();
+          rejectPromise(
+            new Error(tail ? `${reason}; recent logs: ${tail}` : reason),
+          );
+        };
         const timer = setTimeout(() => {
           pending.delete(requestId);
-          rejectPromise(
-            new Error(`invoke timeout for ${request.type} (${requestId})`),
-          );
+          void fail(`invoke timeout for ${request.type} (${requestId})`);
         }, timeoutMs);
 
         if (pending.size >= MAX_CONCURRENT_INVOKES) {
@@ -133,4 +138,40 @@ function withRequestId<T extends object>(
   request: T,
 ): T & { requestId: string } {
   return { ...request, requestId: createRequestId() };
+}
+
+/** Cap on log lines appended to an invoke-timeout rejection. The string can
+ * land in an XCTest accessibility label, so keep it bounded. */
+const INVOKE_TAIL_LINES = 20;
+const INVOKE_TAIL_TIMEOUT_MS = 2000;
+
+/**
+ * Fetches a short tail of the loopback server's log (worklet + webview console)
+ * to enrich an invoke timeout with whatever the peer just saw. Best-effort:
+ * only attempted in a browser/webview context where `fetch` and a same-origin
+ * `/logs` route exist; never throws into the caller. Returns null when nothing
+ * can be learned.
+ */
+async function serverLogTail(): Promise<string | null> {
+  if (typeof fetch !== 'function' || typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const response = await Promise.race([
+      fetch('/logs?tail=50&format=text'),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), INVOKE_TAIL_TIMEOUT_MS),
+      ),
+    ]);
+    if (response === null || !response.ok) return null;
+    const text = await response.text();
+    const lines = text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .slice(-INVOKE_TAIL_LINES);
+    return lines.length > 0 ? lines.join(' | ') : null;
+  } catch {
+    return null;
+  }
 }

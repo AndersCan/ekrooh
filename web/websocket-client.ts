@@ -35,6 +35,9 @@ const DEFAULT_RETRIES = 5;
 const DEFAULT_BACKOFF_MS = 250;
 const MAX_BACKOFF_MS = 2000;
 const LOGIN_TIMEOUT_MS = 2000;
+/** Wait before the single retry after a 409 (`bootstrap` nonce already
+ * spent): long enough for the sibling document's `Set-Cookie` to land. */
+const SPENT_NONCE_RETRY_MS = 250;
 
 /** Same-origin default: on-device the page is served by the loopback server,
  * so `ws://<location.host>` is the protocol socket with no mixed content and
@@ -62,6 +65,9 @@ export interface CreateWebSocketTransportOptions {
   maxRetries?: number;
   /** Initial reconnect backoff in ms, doubling to a 2s cap. Default 250. */
   backoffMs?: number;
+  /** How long to wait for `/login` before treating it as failed. Default
+   * 2000ms. Exposed so tests can exercise the timeout without waiting. */
+  loginTimeoutMs?: number;
 }
 
 /**
@@ -74,6 +80,55 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
     bytes.byteOffset,
     bytes.byteOffset + bytes.byteLength,
   ) as ArrayBuffer;
+}
+
+/** Upper bound on server-log lines folded into a give-up error (it lands in
+ * an XCTest accessibility label, so it must stay short). */
+const LOG_TAIL_LINES = 3;
+/** Per-line character cap for the folded log tail. */
+const LOG_TAIL_LINE_CHARS = 200;
+/** How long to wait for the log-tail fetch before giving up on enrichment. */
+const LOG_TAIL_TIMEOUT_MS = 2000;
+
+/**
+ * Fetches the loopback server's recent `[loopback]` rejection lines over HTTP.
+ * This works precisely because the failure class is upgrade-only: the page
+ * itself loads from the same server, so the auth-gated `GET /logs` route still
+ * answers when every WebSocket handshake dies. Returns null when nothing can
+ * be learned (no fetch available, network error, timeout).
+ */
+async function serverRejectionTail(wsUrl: string): Promise<string | null> {
+  if (typeof fetch !== 'function') return null;
+  const httpBase = wsUrl.startsWith('wss://')
+    ? `https://${wsUrl.slice('wss://'.length)}`
+    : wsUrl.startsWith('ws://')
+      ? `http://${wsUrl.slice('ws://'.length)}`
+      : wsUrl;
+  try {
+    const response = await Promise.race([
+      fetch(`${httpBase}/logs?tail=50&format=text`),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), LOG_TAIL_TIMEOUT_MS),
+      ),
+    ]);
+    if (response === null) return null;
+    // A non-200 is itself diagnostic: `/logs` inherits the session gate, so a
+    // 401/403 here points straight at the auth path.
+    if (!response.ok) {
+      return `server log tail unavailable (HTTP ${response.status})`;
+    }
+    const text = await response.text();
+    const lines = text
+      .split('\n')
+      .filter((line) => line.includes('[loopback]'))
+      .slice(-LOG_TAIL_LINES)
+      .map((line) => line.slice(0, LOG_TAIL_LINE_CHARS));
+    return lines.length > 0
+      ? lines.join(' | ')
+      : 'no [loopback] rejection lines in server log tail';
+  } catch {
+    return null;
+  }
 }
 
 export interface MessageTransport {
@@ -93,6 +148,7 @@ export function createWebSocketTransport(
   const url = options.url ?? defaultWsUrl();
   const maxRetries = options.maxRetries ?? DEFAULT_RETRIES;
   const initialBackoff = options.backoffMs ?? DEFAULT_BACKOFF_MS;
+  const loginTimeoutMs = options.loginTimeoutMs ?? LOGIN_TIMEOUT_MS;
   // `bootstrap` (the one-time nonce) is preferred; `token` remains a legacy
   // login fallback for consumers that inject it. Neither is ever placed in a
   // URL — the transport exchanges the credential for the HttpOnly cookie.
@@ -106,6 +162,19 @@ export function createWebSocketTransport(
   const listeners = new Set<(message: WireMessage) => void>();
   const queued: QueuedMessage[] = [];
   let socket: WebSocket | null = null;
+  /** Human-readable reason when the give-up was caused by the `/login`
+   * exchange. The surfaced transport error is the only telemetry CI gets
+   * from an on-device WebView, so it must say which path fired instead of
+   * collapsing login rejection, login timeout and retry exhaustion into a
+   * single string. */
+  let loginFailureDetail: string | null = null;
+
+  /** Error text for requests lost to a terminal give-up. */
+  function gaveUpMessage(): string {
+    return loginFailureDetail === null
+      ? `${WS_DISCONNECTED_MESSAGE} (socket never opened after ${maxRetries} retries)`
+      : `${WS_DISCONNECTED_MESSAGE} (${loginFailureDetail})`;
+  }
 
   const machine = createConnectionMachine({
     url,
@@ -188,31 +257,67 @@ export function createWebSocketTransport(
     if (state === 'opening') {
       openSocket();
     } else if (state === 'gaveUp') {
-      failQueuedMessages(WS_DISCONNECTED_MESSAGE);
+      void failWithServerDetail();
     }
   });
 
+  /** Terminal give-up: when we have no better name for the failure, fold the
+   * server's own view (its `[loopback]` upgrade rejections) into the surfaced
+   * error. Async by one localhost round-trip — queued requests are already
+   * terminally lost, so a short delay changes nothing semantically. */
+  async function failWithServerDetail(): Promise<void> {
+    let message = gaveUpMessage();
+    if (loginFailureDetail === null) {
+      const tail = await serverRejectionTail(url);
+      if (tail !== null) message = `${message}; server: ${tail}`;
+    }
+    failQueuedMessages(message);
+  }
+
+  /** One `/login` attempt, classified for the bootstrap race. `spent` means
+   * the server recognized our nonce as already consumed by a sibling
+   * document whose session cookie is on its way — worth exactly one retry. */
+  function postLogin(): Promise<'ok' | 'spent' | 'rejected' | 'timeout'> {
+    const loginTimeout = new Promise<'timeout'>((resolve) => {
+      setTimeout(() => resolve('timeout'), loginTimeoutMs);
+    });
+    const attempt = fetch('/login', {
+      method: 'POST',
+      body: credential,
+    }).then((response) => {
+      if (response.ok) return 'ok';
+      return response.status === 409 ? 'spent' : 'rejected';
+    });
+    return Promise.race([attempt, loginTimeout]);
+  }
+
   async function bootstrap() {
     if (shouldLogin) {
-      const loginTimeout = new Promise<'timeout'>((resolve) => {
-        setTimeout(() => resolve('timeout'), LOGIN_TIMEOUT_MS);
-      });
       try {
-        const outcome = await Promise.race([
-          fetch('/login', { method: 'POST', body: credential }).then(
-            (response) => (response.ok ? 'ok' : 'rejected'),
-          ),
-          loginTimeout,
-        ]);
+        let outcome = await postLogin();
+        if (outcome === 'spent') {
+          // A sibling document spent the shared nonce first; give its
+          // session cookie a beat to land, then retry once — the server's
+          // by-session path will accept it.
+          await new Promise((resolve) => {
+            setTimeout(resolve, SPENT_NONCE_RETRY_MS);
+          });
+          outcome = await postLogin();
+        }
         if (outcome === 'ok') {
           machine.sendLoginOk();
         } else {
           // Login rejected or timed out; the machine may retry the socket, but
           // there is no token-URL fallback — a token must never be placed in a
           // URL (the loopback server rejects `?token=`).
+          loginFailureDetail =
+            outcome === 'timeout'
+              ? `session login timed out after ${loginTimeoutMs}ms`
+              : 'session login rejected';
           machine.sendLoginFail();
         }
       } catch {
+        loginFailureDetail = 'session login request failed';
         machine.sendLoginFail();
       }
     } else {
@@ -234,7 +339,7 @@ export function createWebSocketTransport(
         return;
       }
       if (machine.isGaveUp()) {
-        emitTransportError(header, WS_DISCONNECTED_MESSAGE);
+        emitTransportError(header, gaveUpMessage());
         return;
       }
       // Queue while connecting (first open, backoff, login).

@@ -144,6 +144,45 @@ describe('createWebSocketTransport /login bootstrap', () => {
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
+  it('retries once after a spent-nonce 409 and opens when it succeeds', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 409 })
+        .mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+
+      createWebSocketTransport('ws://test');
+      await vi.advanceTimersByTimeAsync(500);
+
+      // Exactly one retry after the 409, then the socket opens.
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(lastSocket().url).toBe('ws://test');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not open when the spent-nonce retry also fails', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+      const fetchMock = vi.fn(async () => ({ ok: false, status: 409 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      createWebSocketTransport('ws://test');
+      await vi.advanceTimersByTimeAsync(500);
+
+      // One retry at most — never a loop against a server that keeps saying 409.
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(FakeWebSocket.instances).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not open a socket when /login throws', async () => {
     vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
     vi.stubGlobal(
@@ -185,6 +224,40 @@ describe('createWebSocketTransport /login bootstrap', () => {
     const header = headers[0] as PluginInvokeResponseHeader;
     expect(header.type).toBe('INVOKE_RESPONSE');
     expect(header.error?.code).toBe('TRANSPORT_ERROR');
+    expect(header.error?.message).toContain('session login rejected');
+    expect(FakeWebSocket.instances).toHaveLength(0);
+  });
+
+  it('fails queued invokes with TRANSPORT_ERROR when /login times out', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      loginTimeoutMs: 10,
+    });
+
+    const headers: unknown[] = [];
+    transport.subscribe((message) => headers.push(message.header));
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'lt1',
+      },
+      null,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const header = headers[0] as PluginInvokeResponseHeader;
+    expect(header.type).toBe('INVOKE_RESPONSE');
+    expect(header.error?.code).toBe('TRANSPORT_ERROR');
+    expect(header.error?.message).toContain('session login timed out');
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
@@ -262,6 +335,9 @@ describe('createWebSocketTransport messaging', () => {
   });
 
   it('fails queued invokes with TRANSPORT_ERROR once retries are exhausted', async () => {
+    // Default fetch stub answers `{ ok: true }` with no body reader, so the
+    // log-tail enrichment fails gracefully and the plain give-up message
+    // survives.
     const transport = createWebSocketTransport({
       url: 'ws://test',
       maxRetries: 0,
@@ -283,9 +359,94 @@ describe('createWebSocketTransport messaging', () => {
     );
     socket.close();
 
+    // Give-up failure is now async by one log-tail round-trip.
+    await vi.waitFor(() => {
+      expect(headers).toHaveLength(1);
+    });
     const header = headers[0] as PluginInvokeResponseHeader;
     expect(header.type).toBe('INVOKE_RESPONSE');
     expect(header.error?.code).toBe('TRANSPORT_ERROR');
+    expect(header.error?.message).toContain(
+      'socket never opened after 0 retries',
+    );
+  });
+
+  it('folds [loopback] rejection lines from the server log tail into the give-up error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        text: async () =>
+          '2026-08-23T00:00:00Z INFO backend boot ok\n' +
+          '[loopback] upgrade rejected: origin mismatch (no Origin header)\n' +
+          '[loopback] upgrade rejected: unauthorized (no bare_session cookie)',
+      })),
+    );
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+    });
+    await nextTick();
+    const socket = lastSocket();
+    const headers: unknown[] = [];
+    transport.subscribe((message) => headers.push(message.header));
+
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'q3',
+      },
+      null,
+    );
+    socket.close();
+
+    await vi.waitFor(() => {
+      expect(headers).toHaveLength(1);
+    });
+    const header = headers[0] as PluginInvokeResponseHeader;
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      'http://test/logs?tail=50&format=text',
+    );
+    expect(header.error?.message).toContain('origin mismatch');
+    expect(header.error?.message).toContain('unauthorized');
+  });
+
+  it('names the auth path when the log tail route itself is rejected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 401 })),
+    );
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+    });
+    await nextTick();
+    const socket = lastSocket();
+    const headers: unknown[] = [];
+    transport.subscribe((message) => headers.push(message.header));
+
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'q4',
+      },
+      null,
+    );
+    socket.close();
+
+    await vi.waitFor(() => {
+      expect(headers).toHaveLength(1);
+    });
+    const header = headers[0] as PluginInvokeResponseHeader;
+    expect(header.error?.message).toContain(
+      'server log tail unavailable (HTTP 401)',
+    );
   });
 });
 
@@ -400,6 +561,10 @@ describe('createWebSocketTransport reconnect', () => {
     );
     first.close(); // rejected → retry cap (0) reached → give up
 
+    // Give-up failure is now async by one log-tail round-trip.
+    await vi.waitFor(() => {
+      expect(headers).toHaveLength(1);
+    });
     const header = headers[0] as PluginInvokeResponseHeader;
     expect(header.type).toBe('INVOKE_RESPONSE');
     expect(header.error?.code).toBe('TRANSPORT_ERROR');
@@ -433,6 +598,10 @@ describe('createWebSocketTransport reconnect', () => {
     );
     second.close();
 
+    // Give-up failure is now async by one log-tail round-trip.
+    await vi.waitFor(() => {
+      expect(headers).toHaveLength(1);
+    });
     const header = headers[0] as PluginInvokeResponseHeader;
     expect(header.type).toBe('INVOKE_RESPONSE');
     expect(header.error?.code).toBe('TRANSPORT_ERROR');

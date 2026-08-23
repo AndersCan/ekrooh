@@ -162,7 +162,7 @@ final class BareRuntime {
       }
       webView.configuration.userContentController.addUserScript(
         WKUserScript(
-          source: "window.__ekrooh={bootstrap:\(bootstrapJSON(bootstrap))};window.BareShell=true;",
+          source: "window.__ekrooh=\(bridgePayloadJSON(bootstrap));window.BareShell=true;",
           injectionTime: .atDocumentStart,
           forMainFrameOnly: true
         )
@@ -176,11 +176,16 @@ final class BareRuntime {
     }
   }
 
-  /// JSON-encodes the bootstrap so an arbitrary value cannot break out of the
-  /// injected JS string literal (quotes, backslashes and control chars escaped).
-  private func bootstrapJSON(_ value: String) -> String {
-    let data = (try? JSONSerialization.data(withJSONObject: [value])) ?? Data()
-    return String(data: data, encoding: .utf8) ?? "\"\""
+  /// JSON-encodes the bridge payload (`{"bootstrap":"…"}`) so an arbitrary
+  /// bootstrap value cannot break out of the script string literal (quotes,
+  /// backslashes and control chars escaped). The page transport requires
+  /// `bootstrap` to be a *string* — serializing a bare value here would need
+  /// an array wrapper, and `bootstrap:["…"]` silently skips the page login.
+  private func bridgePayloadJSON(_ bootstrap: String) -> String {
+    let data =
+      (try? JSONSerialization.data(withJSONObject: ["bootstrap": bootstrap]))
+      ?? Data()
+    return String(data: data, encoding: .utf8) ?? "{}"
   }
 
   /// Removes the injected bootstrap user script so the single-use nonce cannot
