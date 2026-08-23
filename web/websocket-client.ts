@@ -35,6 +35,9 @@ const DEFAULT_RETRIES = 5;
 const DEFAULT_BACKOFF_MS = 250;
 const MAX_BACKOFF_MS = 2000;
 const LOGIN_TIMEOUT_MS = 2000;
+/** Wait before the single retry after a 409 (`bootstrap` nonce already
+ * spent): long enough for the sibling document's `Set-Cookie` to land. */
+const SPENT_NONCE_RETRY_MS = 250;
 
 /** Same-origin default: on-device the page is served by the loopback server,
  * so `ws://<location.host>` is the protocol socket with no mixed content and
@@ -192,18 +195,36 @@ export function createWebSocketTransport(
     }
   });
 
+  /** One `/login` attempt, classified for the bootstrap race. `spent` means
+   * the server recognized our nonce as already consumed by a sibling
+   * document whose session cookie is on its way — worth exactly one retry. */
+  function postLogin(): Promise<'ok' | 'spent' | 'rejected' | 'timeout'> {
+    const loginTimeout = new Promise<'timeout'>((resolve) => {
+      setTimeout(() => resolve('timeout'), LOGIN_TIMEOUT_MS);
+    });
+    const attempt = fetch('/login', {
+      method: 'POST',
+      body: credential,
+    }).then((response) => {
+      if (response.ok) return 'ok';
+      return response.status === 409 ? 'spent' : 'rejected';
+    });
+    return Promise.race([attempt, loginTimeout]);
+  }
+
   async function bootstrap() {
     if (shouldLogin) {
-      const loginTimeout = new Promise<'timeout'>((resolve) => {
-        setTimeout(() => resolve('timeout'), LOGIN_TIMEOUT_MS);
-      });
       try {
-        const outcome = await Promise.race([
-          fetch('/login', { method: 'POST', body: credential }).then(
-            (response) => (response.ok ? 'ok' : 'rejected'),
-          ),
-          loginTimeout,
-        ]);
+        let outcome = await postLogin();
+        if (outcome === 'spent') {
+          // A sibling document spent the shared nonce first; give its
+          // session cookie a beat to land, then retry once — the server's
+          // by-session path will accept it.
+          await new Promise((resolve) => {
+            setTimeout(resolve, SPENT_NONCE_RETRY_MS);
+          });
+          outcome = await postLogin();
+        }
         if (outcome === 'ok') {
           machine.sendLoginOk();
         } else {

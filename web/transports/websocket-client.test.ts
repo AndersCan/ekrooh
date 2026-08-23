@@ -144,6 +144,45 @@ describe('createWebSocketTransport /login bootstrap', () => {
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
+  it('retries once after a spent-nonce 409 and opens when it succeeds', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 409 })
+        .mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+
+      createWebSocketTransport('ws://test');
+      await vi.advanceTimersByTimeAsync(500);
+
+      // Exactly one retry after the 409, then the socket opens.
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(lastSocket().url).toBe('ws://test');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not open when the spent-nonce retry also fails', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+      const fetchMock = vi.fn(async () => ({ ok: false, status: 409 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      createWebSocketTransport('ws://test');
+      await vi.advanceTimersByTimeAsync(500);
+
+      // One retry at most — never a loop against a server that keeps saying 409.
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(FakeWebSocket.instances).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not open a socket when /login throws', async () => {
     vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
     vi.stubGlobal(

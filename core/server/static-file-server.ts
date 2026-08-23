@@ -263,6 +263,9 @@ export function createLoopbackServer(
   const connectionHandlers: LoopbackConnectionHandler[] = [];
   let token: string | null = options.token ?? null;
   let bootstrapNonce: string | null = null;
+  /** The most recently spent bootstrap nonce, kept only to answer replays of
+   * it with 409 (valid-once-but-consumed) instead of 401 (bad credential). */
+  let spentBootstrapNonce: string | null = null;
   let boundOrigin = '';
   let originPromise: Promise<string> | null = null;
   let activeSocket: WebSocketLike | null = null;
@@ -327,14 +330,28 @@ export function createLoopbackServer(
         // guarantee intact — a replayed spent nonce alone still fails.
         const bySession = authEnabled && isAuthorized(req.headers);
         const accepted = !authEnabled || byToken || byBootstrap || bySession;
+        const bySpentBootstrap =
+          bootstrapNonce === null &&
+          spentBootstrapNonce !== null &&
+          secretEquals(trimmed, spentBootstrapNonce);
         if (!accepted) {
-          writeError(res, 401, 'Unauthorized');
+          // A replay of the already-spent bootstrap nonce is not a bad
+          // credential: it means another document logged in first with the
+          // nonce this document was also given, and that document's session
+          // cookie is on its way. The 409 tells the shell to retry once
+          // rather than treat it as terminal, while granting nothing — no
+          // cookie is set and no session is created.
+          writeError(res, bySpentBootstrap ? 409 : 401, 'Unauthorized');
           return;
         }
         // A bootstrap nonce is single-use: once the page exchanges it for the
         // session cookie it is spent, so a script that later reads it (or copies
-        // it) cannot mint any further requests.
-        if (byBootstrap) bootstrapNonce = null;
+        // it) cannot mint any further requests. The value is remembered only so
+        // replays can be answered with the honest 409 above.
+        if (byBootstrap && bootstrapNonce !== null) {
+          spentBootstrapNonce = bootstrapNonce;
+          bootstrapNonce = null;
+        }
         // Dev mode (auth off) has no real token — still answer the login so the
         // page transport proceeds, but set no cookie.
         const headers: Record<string, string | number> = {

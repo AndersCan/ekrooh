@@ -417,9 +417,12 @@ describe('loopback server HTTP', () => {
     const setCookie = firstHeader(first.headers, 'set-cookie');
     expect(setCookie).toMatch(/^bare_session=/);
 
-    // Single-use: a replay of the same nonce is rejected.
+    // Single-use: a replay of the same nonce is not "bad credentials" but
+    // "already consumed" — an honest 409 the shell can retry from, granting
+    // nothing (no session cookie is set).
     const replay = await request('/login', { method: 'POST', body: nonce });
-    expect(replay.status).toBe(401);
+    expect(replay.status).toBe(409);
+    expect(firstHeader(replay.headers, 'set-cookie')).toBeNull();
   });
 
   it('re-login succeeds from a surviving session alone (reload path)', async () => {
