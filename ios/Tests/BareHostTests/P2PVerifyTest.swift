@@ -15,7 +15,7 @@ final class P2PVerifyTest: XCTestCase {
     try FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: storageDir) }
 
-    let worklet = Worklet(
+    let worklet = try Worklet(
       configuration: Worklet.Configuration(
         memoryLimit: 128 << 20,
         assets: storageDir.appendingPathComponent("asset-cache").path
