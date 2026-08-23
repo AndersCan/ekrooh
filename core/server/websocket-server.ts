@@ -61,8 +61,13 @@ export function attachWebSocketProtocol(
     let buffer: Uint8Array = new Uint8Array(0);
 
     socket.on('data', async (raw) => {
+      const data = toUint8Array(raw);
+      // [f2] raw byte-count at the very top, before any decode, so we can tell
+      // whether the roundtrip INVOKE_REQUEST frame even reaches the worklet
+      // (discovery/Ping/Payload requests do; roundtrip's may be dropped on the
+      // webview→worklet leg on iOS).
+      console.error(`[f2][worklet] on('data') bytes=${data.byteLength}`);
       try {
-        const data = toUint8Array(raw);
         if (data.byteLength === 0) return;
 
         buffer = concatBytes(buffer, data);
