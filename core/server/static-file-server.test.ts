@@ -422,6 +422,32 @@ describe('loopback server HTTP', () => {
     expect(replay.status).toBe(401);
   });
 
+  it('re-login with a spent nonce succeeds when the session cookie survives (reload)', async () => {
+    const creds3 = await server!.credentials();
+    const nonce3 = creds3.bootstrap;
+
+    // First load: bootstrap nonce exchanged for the session cookie.
+    const first = await request('/login', { method: 'POST', body: nonce3 });
+    expect(first.status).toBe(200);
+    const setCookie = firstHeader(first.headers, 'set-cookie');
+    expect(setCookie).toMatch(/^bare_session=/);
+    const cookie = setCookie.split(';')[0]!;
+
+    // Reload: the shell re-runs with the SAME spent nonce injected, but the
+    // session cookie from the first login is still in the jar → accepted.
+    // This is the "reload reconnects to the same instance" guarantee.
+    const reload = await request('/login', {
+      method: 'POST',
+      body: nonce3,
+      headers: { cookie },
+    });
+    expect(reload.status).toBe(200);
+
+    // The spent nonce alone (no cookie) remains rejected.
+    const spent = await request('/login', { method: 'POST', body: nonce3 });
+    expect(spent.status).toBe(401);
+  });
+
   it('accepts the X-Bare-Token header fallback', async () => {
     const r = await request('/media/sample.png', {
       headers: { 'X-Bare-Token': TOKEN },
