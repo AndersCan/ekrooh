@@ -106,16 +106,43 @@ export function createProtocolMessenger(
       });
     },
     handleIncoming(header) {
-      if (!header.requestId) return;
+      if (!header.requestId) {
+        try {
+          console.debug(
+            `[rpc] incoming ${header.type} without a requestId; uncorrelatable, dropping`,
+          );
+        } catch {
+          // Observability only — never throw into the caller.
+        }
+        return;
+      }
 
       const pendingCall = pending.get(header.requestId);
-      if (!pendingCall) return;
+      if (!pendingCall) {
+        try {
+          console.debug(
+            `[rpc] ${header.type} for unknown/stale requestId (${header.requestId}); dropping`,
+          );
+        } catch {
+          // Observability only — never throw into the caller.
+        }
+        return;
+      }
 
       if (
         header.type === 'INVOKE_RESPONSE' &&
         (header.pluginId !== pendingCall.pluginId ||
           header.event !== pendingCall.event)
       ) {
+        try {
+          console.debug(
+            `[rpc] RESPONSE for ${header.requestId} mismatches pending ` +
+              `${pendingCall.pluginId}.${pendingCall.event} ` +
+              `(got ${header.pluginId}.${header.event}); dropping`,
+          );
+        } catch {
+          // Observability only — never throw into the caller.
+        }
         return;
       }
 

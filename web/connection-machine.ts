@@ -106,7 +106,16 @@ export function createConnectionMachine(
           capped * Math.max(0, Math.min(1, (options.random ?? Math.random)())),
         );
         clock.setTimeout(delay, () => {
-          if (signal.aborted) return;
+          if (signal.aborted) {
+            try {
+              console.debug(
+                `[ws-machine] backoff aborted by signal; dropping pending retry (retries=${s.retries})`,
+              );
+            } catch {
+              // Observability only — never throw into the caller.
+            }
+            return;
+          }
           emit({ type: 'RETRY_TIMER' });
         });
       });

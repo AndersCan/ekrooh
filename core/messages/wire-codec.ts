@@ -76,13 +76,15 @@ export class MessageProtocol {
     }
     const pLen = payloadBytes.byteLength;
 
-    // Embed the payload length so any consumer framing a raw byte stream can
-    // locate frame boundaries without guessing: the header JSON is the single
-    // source of truth for `4 + headerLen + payloadLen`. Clients deriving the
-    // payload from the frame tail ignore the extra field.
-    const headerObj: Record<string, unknown> = { ...header };
-    if (pLen > 0) headerObj.payloadLength = pLen;
-    const headerJson = JSON.stringify(headerObj);
+    // The frozen wire layout `[version][type][headerLen][header][payload]` has
+    // no payload-length field, so a receiver reassembling a byte stream cannot
+    // locate a payload-bearing frame's end from the prefix alone. When a frame
+    // carries a payload, mirror its byte length back inside the JSON header —
+    // an additive key (the decode-side allowlist drops it, so routed headers
+    // never expose it). Header-only frames are byte-identical to before.
+    const headerJson = JSON.stringify(
+      pLen > 0 ? { ...header, payloadLength: pLen } : header,
+    );
     const headerBytes = this.encodeStr(headerJson);
 
     if (headerBytes.byteLength > MAX_HEADER_BYTES) {
@@ -147,6 +149,20 @@ export class MessageProtocol {
     }
     const headerLen = (view[2] << 8) | view[3];
 
+    // The 16-bit field already bounds headerLen at MAX_HEADER_BYTES on the
+    // wire; the explicit checks are defense-in-depth (and would catch a future
+    // format change).
+    if (headerLen > MAX_HEADER_BYTES) {
+      throw new Error(
+        `Header too large: ${headerLen} bytes, maximum is ${MAX_HEADER_BYTES}`,
+      );
+    }
+    if (4 + headerLen > this.maxFrameBytes) {
+      throw new Error(
+        `Frame too large: 4 + ${headerLen} bytes, maximum is ${this.maxFrameBytes}`,
+      );
+    }
+
     if (byteLength < 4 + headerLen) {
       throw new Error(
         `Message too short for header: ${byteLength} bytes, expected at least ${4 + headerLen}`,
@@ -157,6 +173,11 @@ export class MessageProtocol {
     try {
       headerStr = this.decodeStr(view.subarray(4, 4 + headerLen));
     } catch {
+      try {
+        console.debug('[wire] header frame is not valid UTF-8');
+      } catch {
+        // The debug trace must never mask the FRAME_INVALID error.
+      }
       throw new CoreError(
         ErrorCode.FRAME_INVALID,
         'FRAME_INVALID: header frame is not valid UTF-8',
@@ -296,9 +317,16 @@ function asOptionalRecord(value: unknown): Record<string, unknown> | undefined {
 
 /** Recursively copy an attacker-controlled value onto a `null`-prototype object,
  * dropping prototype-polluting keys (`__proto__`/`constructor`/`prototype`) and
- * rejecting excessive nesting (depth bombs carried inside the 64KB header
- * budget). Throws {@link ErrorCode.FRAME_INVALID} on over-deep structures. */
+ * rejecting excessive nesting or breadth (depth/array bombs carried inside the
+ * 64KB header budget). Throws {@link ErrorCode.FRAME_INVALID} on over-deep
+ * structures. */
 const MAX_VALUE_DEPTH = 16;
+
+/** Ceiling on array elements / object keys at any one level of a sanitized
+ * value. Together with {@link MAX_VALUE_DEPTH} and the 64KB header budget this
+ * bounds total allocation: a wide-but-shallow structure can still be
+ * serialized into a legal header, so it must be rejected, not materialized. */
+const MAX_VALUE_CARDINALITY = 16384;
 
 function sanitizeValue(value: unknown, depth: number): unknown {
   if (depth > MAX_VALUE_DEPTH) {
@@ -309,10 +337,23 @@ function sanitizeValue(value: unknown, depth: number): unknown {
   }
   if (value === null || typeof value !== 'object') return value;
   if (Array.isArray(value)) {
+    if (value.length > MAX_VALUE_CARDINALITY) {
+      throw new CoreError(
+        ErrorCode.FRAME_INVALID,
+        `FRAME_INVALID: array longer than ${MAX_VALUE_CARDINALITY} elements`,
+      );
+    }
     return value.map((item) => sanitizeValue(item, depth + 1));
   }
+  const keys = Object.keys(value as Record<string, unknown>);
+  if (keys.length > MAX_VALUE_CARDINALITY) {
+    throw new CoreError(
+      ErrorCode.FRAME_INVALID,
+      `FRAME_INVALID: object with more than ${MAX_VALUE_CARDINALITY} keys`,
+    );
+  }
   const out: Record<string, unknown> = Object.create(null);
-  for (const key of Object.keys(value as Record<string, unknown>)) {
+  for (const key of keys) {
     if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
       continue;
     }

@@ -48,7 +48,7 @@ async function boot() {
   main();
 }
 
-boot();
+void boot();
 
 function main() {
   // The Android shell serves the app from /assets/index.html and the iOS shell

@@ -8,7 +8,7 @@ import type {
 import ws from 'bare-ws';
 import crypto from 'bare-crypto';
 import path from 'bare-path';
-import { TextDecoder } from 'bare-encoding';
+import { TextDecoder, TextEncoder } from 'bare-encoding';
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   html: 'text/html',
@@ -117,6 +117,7 @@ export function collectRequestBody(
   return new Promise((resolve, reject) => {
     const decoder = new TextDecoder();
     let body = '';
+    let byteCount = 0;
     let exceeded = false;
     req.on('data', (chunk: unknown) => {
       const str =
@@ -124,11 +125,17 @@ export function collectRequestBody(
           ? chunk
           : decoder.decode(chunk as Uint8Array, { stream: true });
       body += str;
-      if (body.length > maxBytes) exceeded = true;
+      // `maxBytes` is a BYTE cap (anti-OOM DoS guard) — `body.length` counts
+      // UTF-16 code units, so multi-byte UTF-8 would slide ~3× under it.
+      byteCount +=
+        typeof chunk === 'string'
+          ? new TextEncoder().encode(chunk).byteLength
+          : (chunk as Uint8Array).byteLength;
+      if (byteCount > maxBytes) exceeded = true;
     });
     req.on('end', () => {
       const final = body + decoder.decode(new Uint8Array(0));
-      if (exceeded || final.length > maxBytes) {
+      if (exceeded || byteCount > maxBytes) {
         reject(new Error('Request body too large'));
         return;
       }
@@ -269,6 +276,17 @@ export function createLoopbackServer(
   let boundOrigin = '';
   let originPromise: Promise<string> | null = null;
   let activeSocket: WebSocketLike | null = null;
+
+  /** Non-fatal, never-throwing debug for skipped work (a missing file, a failed
+   * write) — observable in the `core.logs` ring buffer, never able to alter
+   * control flow. */
+  function debugSkip(message: string) {
+    try {
+      console.debug(message);
+    } catch {
+      // Logging must never throw.
+    }
+  }
 
   function isAuthorized(headers: Record<string, string | number>) {
     if (!authEnabled) return true;
@@ -415,7 +433,9 @@ export function createLoopbackServer(
       const stat = fs.statSync(candidate);
       if (stat.isFile()) return candidate;
     } catch {
-      // Not a file — fall through to the directory index / SPA fallback.
+      debugSkip(
+        `[static-server] resolveDirFile: stat failed for ${candidate} — falling through to the directory index / SPA fallback`,
+      );
     }
     // The mount root serves its `index.html` directly.
     if (mount.rel === '') {
@@ -438,7 +458,9 @@ export function createLoopbackServer(
       const stat = fs.statSync(index);
       if (stat.isFile()) return index;
     } catch {
-      // No index.html — 404.
+      debugSkip(
+        `[static-server] indexHtmlIfPresent: no index.html under ${dirPath} — 404`,
+      );
     }
     return null;
   }
@@ -460,6 +482,7 @@ export function createLoopbackServer(
     try {
       stat = fs.statSync(filePath);
     } catch {
+      debugSkip(`[static-server] serveFile: stat failed for ${filePath} — 404`);
       writeError(res, 404, 'Not found');
       return;
     }
@@ -737,6 +760,7 @@ export function createLoopbackServer(
         activeSocket.write(frame);
         return true;
       } catch {
+        debugSkip('[static-server] push: socket.write failed — frame dropped');
         return false;
       }
     },
@@ -745,7 +769,9 @@ export function createLoopbackServer(
         try {
           activeSocket.destroy();
         } catch {
-          // Already closed.
+          debugSkip(
+            '[static-server] close: socket.destroy failed — already closed',
+          );
         }
       }
       server.close(cb);

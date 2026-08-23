@@ -106,4 +106,36 @@ describe('createProtocolMessenger (mantaq prototype)', () => {
       messenger.handleIncoming(response('unknown-id')),
     ).not.toThrow();
   });
+
+  it('logs a debug trace for an incoming response with no requestId', () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const send = vi.fn();
+    const messenger = createProtocolMessenger(send);
+    messenger.handleIncoming({ type: 'INVOKE_RESPONSE' } as MessageHeader);
+
+    const traces = debugSpy.mock.calls.map((args) => String(args[0]));
+    debugSpy.mockRestore();
+    const joined = traces.join('\n');
+    expect(joined).toContain('[rpc-mantaq]');
+    expect(joined).toContain('without a requestId');
+  });
+
+  it('logs a debug trace when an answered call is reaped before the done handler', async () => {
+    const clock = new VirtualClock();
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const send = vi.fn();
+    const messenger = createProtocolMessenger(send, { clock });
+    const promise = messenger.invoke(invokeRequest(), null, 1000);
+    const request = send.mock.calls[0]?.[0];
+    messenger.handleIncoming(response(request?.requestId));
+    await promise;
+    // Let the reaper's 'done' microtask run after the settlement drains.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const traces = debugSpy.mock.calls.map((args) => String(args[0]));
+    debugSpy.mockRestore();
+    const joined = traces.join('\n');
+    expect(joined).toContain('[rpc-mantaq]');
+    expect(joined).toContain('reaped before done');
+  });
 });

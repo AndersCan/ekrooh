@@ -47,6 +47,13 @@ function resolveStorageDir(): string {
     try {
       return fs.statSync(p).isDirectory();
     } catch {
+      try {
+        console.debug(
+          `[p2p-verify] statSync(${p}) failed; treating as not a directory`,
+        );
+      } catch {
+        // Observability only — never throw.
+      }
       return false;
     }
   };
@@ -78,7 +85,6 @@ function resolveMode(): 'full' | 'self' {
 const verifyMode = resolveMode();
 
 const P2P_TOPIC = Buffer.alloc(32, 7);
-const P2P_TIMEOUT = 30_000;
 /** On-device DHT + Noise handshake budget: the in-process DHT runs 5-10x
  * slower under a software-rendered CI emulator (x86_64 + swiftshader) than on
  * a desktop; a 30s budget made the handshake flaky there (issue #41 PR). */
@@ -205,7 +211,13 @@ async function verifyP2PHandshake(bootstrapPort: number): Promise<number> {
         try {
           clientJoin.destroy();
         } catch {
-          // Already destroyed.
+          try {
+            console.debug(
+              `[p2p-verify] clientJoin.destroy() threw; join already destroyed`,
+            );
+          } catch {
+            // Observability only — never throw.
+          }
         }
         clientJoin = client.join(P2P_TOPIC, { server: true, client: true });
         await clientJoin.flushed().catch(() => undefined);
@@ -432,7 +444,13 @@ void run()
     try {
       fs.writeFileSync(failMarker, message);
     } catch {
-      // Marker dir missing; the exit code still signals failure.
+      try {
+        console.debug(
+          `[p2p-verify] failed to write fail marker ${failMarker}; exit code still signals failure`,
+        );
+      } catch {
+        // Observability only — never throw.
+      }
     }
     Bare.exit(1);
   });

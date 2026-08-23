@@ -7,6 +7,7 @@ import type {
   MessageHeader,
   PluginInvokeRequestHeader,
   PluginInvokeResponseHeader,
+  WireMessage,
 } from './types';
 
 function toUint8Array(data: Uint8Array | ArrayBuffer | Buffer): Uint8Array {
@@ -111,31 +112,43 @@ export function createHostIpcBridge(config: {
     });
   }
 
+  /** Classifies a pre-decoded downstream message: resolves the matching pending
+   * host call when it is a `HOST_CAPABILITIES_RESPONSE` or `HOST_INVOKE_RESPONSE`
+   * for a known `requestId`; otherwise returns false so the caller can route the
+   * message through the plugin router (host responses never reach plugins). */
+  function consumeDownstream(parsed: WireMessage): boolean {
+    const h = parsed.header;
+    if (
+      h.type !== 'HOST_CAPABILITIES_RESPONSE' &&
+      h.type !== 'HOST_INVOKE_RESPONSE'
+    ) {
+      return false;
+    }
+    const id = h.requestId;
+    if (!id) return false;
+    const slot = pending.get(id);
+    if (!slot) return false;
+    clearTimeout(slot.timer);
+    pending.delete(id);
+    slot.resolve(h);
+    return true;
+  }
+
   return {
+    tryConsumeDownstream: consumeDownstream,
+
     tryConsumeDownstreamFromHost(
       raw: Uint8Array | ArrayBuffer | Buffer,
     ): boolean {
-      let msg;
+      let msg: WireMessage;
       try {
         msg = protocol.decode(toUint8Array(raw));
-      } catch {
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.debug(`[ipc] dropped undecodable host frame: ${message}`);
         return false;
       }
-      const h = msg.header;
-      if (
-        h.type !== 'HOST_CAPABILITIES_RESPONSE' &&
-        h.type !== 'HOST_INVOKE_RESPONSE'
-      ) {
-        return false;
-      }
-      const id = h.requestId;
-      if (!id) return false;
-      const slot = pending.get(id);
-      if (!slot) return false;
-      clearTimeout(slot.timer);
-      pending.delete(id);
-      slot.resolve(h);
-      return true;
+      return consumeDownstream(msg);
     },
 
     async queryCapabilities(timeoutMs = 5000): Promise<CapabilityDescriptor[]> {
