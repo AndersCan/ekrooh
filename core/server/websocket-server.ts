@@ -78,7 +78,7 @@ export function attachWebSocketProtocol(
           const parsed = protocol.decode(frame);
           const header = parsed.header;
           console.log(
-            `[f2][worklet] recv type=${header.type} event=${header.event} requestId=${header.requestId} payloadLen=${parsed.payload.byteLength}`,
+            `[f2][worklet] recv type=${header.type} event=${'event' in header ? header.event : '-'} requestId=${header.requestId} payloadLen=${parsed.payload.byteLength}`,
           );
 
           const pluginResponse = await pluginRouter.route(
@@ -97,7 +97,7 @@ export function attachWebSocketProtocol(
             socket.write(frame);
           } else {
             console.log(
-              `[f2][worklet] route returned no response for event=${header.event}`,
+              `[f2][worklet] route returned no response for event=${'event' in header ? header.event : '-'}`,
             );
           }
         }

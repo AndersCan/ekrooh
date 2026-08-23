@@ -236,7 +236,7 @@ export function createWebSocketTransport(
       try {
         const message = protocol.decode(event.data as ArrayBuffer);
         console.log(
-          `[f2][webview] recv type=${message.header.type} event=${message.header.event} requestId=${message.header.requestId}`,
+          `[f2][webview] recv type=${message.header.type} event=${'event' in message.header ? message.header.event : '-'} requestId=${message.header.requestId}`,
         );
         for (const listener of listeners) listener(message);
       } catch (err) {
@@ -340,7 +340,7 @@ export function createWebSocketTransport(
       ) {
         socket.send(toArrayBuffer(encoded));
         console.log(
-          `[f2][webview] send type=${type} event=${header.event} requestId=${header.requestId} len=${encoded.byteLength} (live)`,
+          `[f2][webview] send type=${type} event=${'event' in header ? header.event : '-'} requestId=${header.requestId} len=${encoded.byteLength} (live)`,
         );
         return;
       }
@@ -351,7 +351,7 @@ export function createWebSocketTransport(
       // Queue while connecting (first open, backoff, login).
       queued.push({ bytes: encoded, header });
       console.log(
-        `[f2][webview] send type=${type} event=${header.event} requestId=${header.requestId} len=${encoded.byteLength} (QUEUED; conn=${machine.isConnected()} state=${socket?.readyState})`,
+        `[f2][webview] send type=${type} event=${'event' in header ? header.event : '-'} requestId=${header.requestId} len=${encoded.byteLength} (QUEUED; conn=${machine.isConnected()} state=${socket?.readyState})`,
       );
     },
     subscribe(handler) {
