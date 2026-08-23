@@ -261,16 +261,34 @@ export function createPluginBus(messenger: ProtocolMessenger): PluginBus {
     async invoke<TResult>(
       envelope: InvokeEnvelope<string, Record<string, unknown>, TResult>,
     ) {
-      const response = await messenger.invoke(
-        {
-          type: 'INVOKE_REQUEST',
-          pluginId: envelope.pluginId,
-          event: envelope.event,
-          args: envelope.args,
-        } as InvokeRequest,
-        envelope.payload ?? null,
-        envelope.timeoutMs,
-      );
+      let response: MessageHeader;
+      try {
+        response = await messenger.invoke(
+          {
+            type: 'INVOKE_REQUEST',
+            pluginId: envelope.pluginId,
+            event: envelope.event,
+            args: envelope.args,
+          } as InvokeRequest,
+          envelope.payload ?? null,
+          envelope.timeoutMs,
+        );
+      } catch (error) {
+        // Transport-level failures (invoke timeout, backpressure drop) reject
+        // rather than answer. They must honor the Either contract like any
+        // other failed call — throwing past callers leaves their UI state on
+        // the initial "not run yet" text with nothing rendered or logged.
+        const message = error instanceof Error ? error.message : String(error);
+        return [
+          new CoreError(
+            message.startsWith('invoke timeout')
+              ? ErrorCode.TIMEOUT
+              : ErrorCode.INVALID_RESPONSE,
+            message,
+          ),
+          null,
+        ];
+      }
 
       if (isPluginInvokeResponseHeader(response)) {
         if (response.error) {
