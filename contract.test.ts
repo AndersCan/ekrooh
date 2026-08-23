@@ -100,6 +100,7 @@ const PUBLIC_SURFACES: Record<string, { entry: string; exports: string[] }> = {
       'err',
       'invokeEvent',
       'ok',
+      'installWebConsoleCapture',
     ],
   },
   plugins: {
