@@ -330,6 +330,24 @@ export function createWebSocketTransport(
   return {
     send(type, header, payload) {
       const encoded = protocol.encode(type, header, payload);
+      // [f2] client-side mirror of the worklet's [f2][worklet] log: confirm
+      // the webview actually embeds payloadLength in the frame it ships. If a
+      // payload-bearing request (health.payloadEcho) logs embedsPayloadLength=false
+      // here while the server logs payloadLen=0, the client encode is the
+      // desync source, not the loopback framing (ekrooh#115).
+      if (
+        payload != null &&
+        (payload as Uint8Array).byteLength > 0 &&
+        encoded.byteLength >= 4
+      ) {
+        const hLen = (encoded[2] << 8) | encoded[3];
+        const headerJson = new TextDecoder().decode(
+          encoded.subarray(4, 4 + hLen),
+        );
+        console.error(
+          `[f2][client] send type=${type} event=${'event' in header ? header.event : '-'} payloadLen=${(payload as Uint8Array).byteLength} embedsPayloadLength=${headerJson.includes('payloadLength')}`,
+        );
+      }
       if (
         machine.isConnected() &&
         socket &&

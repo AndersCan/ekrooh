@@ -64,15 +64,6 @@ export class MessageProtocol {
     header: MessageHeader,
     payload?: Uint8Array | ArrayBuffer | string | null,
   ): Uint8Array {
-    const headerJson = JSON.stringify(header);
-    const headerBytes = this.encodeStr(headerJson);
-
-    if (headerBytes.byteLength > MAX_HEADER_BYTES) {
-      throw new Error(
-        `Header too large: ${headerBytes.byteLength} bytes, maximum is ${MAX_HEADER_BYTES}`,
-      );
-    }
-
     let payloadBytes: Uint8Array;
     if (payload == null) {
       payloadBytes = new Uint8Array(0);
@@ -83,9 +74,24 @@ export class MessageProtocol {
     } else {
       payloadBytes = payload;
     }
+    const pLen = payloadBytes.byteLength;
+
+    // Embed the payload length so any consumer framing a raw byte stream can
+    // locate frame boundaries without guessing: the header JSON is the single
+    // source of truth for `4 + headerLen + payloadLen`. Clients deriving the
+    // payload from the frame tail ignore the extra field.
+    const headerObj: Record<string, unknown> = { ...header };
+    if (pLen > 0) headerObj.payloadLength = pLen;
+    const headerJson = JSON.stringify(headerObj);
+    const headerBytes = this.encodeStr(headerJson);
+
+    if (headerBytes.byteLength > MAX_HEADER_BYTES) {
+      throw new Error(
+        `Header too large: ${headerBytes.byteLength} bytes, maximum is ${MAX_HEADER_BYTES}`,
+      );
+    }
 
     const hLen = headerBytes.byteLength;
-    const pLen = payloadBytes.byteLength;
     const totalLength = 4 + hLen + pLen;
 
     if (totalLength > this.maxFrameBytes) {
