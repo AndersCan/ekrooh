@@ -58,7 +58,9 @@ final class HostPluginRegistryTest: XCTestCase {
       return XCTFail("expected Fail outcome")
     }
     XCTAssertEqual("UNSUPPORTED_CAPABILITY", code)
-    XCTAssertTrue(message.contains("core.health.health.ping"))
+    // Hardening (f863ebf): error messages must not reflect caller-controlled
+    // pluginId/event back to page JS — the message is a fixed string.
+    XCTAssertTrue(message.contains("No host handler"))
   }
 
   func testGroupsCapabilityRowsByPluginAndSortsEvents() throws {
