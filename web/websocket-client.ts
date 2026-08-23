@@ -337,6 +337,21 @@ export function createWebSocketTransport(
   return {
     send(type, header, payload) {
       const encoded = protocol.encode(type, header, payload);
+      const dbg = Array.from(
+        encoded.subarray(0, Math.min(16, encoded.byteLength)),
+      )
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join(' ');
+      console.log(
+        '[f2-raw][client] send type=' +
+          String(type) +
+          ' event=' +
+          String(header.event ?? '-') +
+          ' len=' +
+          encoded.byteLength +
+          ' head=' +
+          dbg,
+      );
       if (
         machine.isConnected() &&
         socket &&

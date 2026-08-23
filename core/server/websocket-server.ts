@@ -59,11 +59,18 @@ export function attachWebSocketProtocol(
       let messages;
       try {
         const data = toUint8Array(raw);
+        const dbg = Array.from(data.subarray(0, Math.min(16, data.byteLength)))
+          .map((x) => x.toString(16).padStart(2, '0'))
+          .join(' ');
+        console.log(
+          '[f2-raw][server] on(data) len=' + data.byteLength + ' head=' + dbg,
+        );
         if (data.byteLength === 0) {
           console.debug('[ws] received empty data chunk, ignoring');
           return;
         }
         messages = decoder.push(data);
+        console.log('[f2-raw][server] decoded messages=' + messages.length);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error('Error handling WebSocket message: ' + message);
