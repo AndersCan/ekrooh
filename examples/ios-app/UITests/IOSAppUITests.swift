@@ -15,7 +15,7 @@ final class IOSAppUITests: XCTestCase {
     let discovery = app.staticTexts.matching(
       NSPredicate(
         format: "label CONTAINS %@",
-        "Discovery v1: 4 plugin(s) — core.health, core.discovery, core.permissions, vendor.media"
+        "Discovery v1: 5 plugin(s) — core.health, core.discovery, core.permissions, vendor.media, core.logs"
       )
     ).firstMatch
     XCTAssertTrue(
