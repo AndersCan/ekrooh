@@ -81,8 +81,17 @@ export function attachWebSocketProtocol(
         if (buffer.byteLength >= 4) {
           const hl = (buffer[2] << 8) | buffer[3];
           const fl = 4 + hl;
+          const status = buffer.byteLength >= fl ? 'COMPLETE' : 'PARTIAL';
+          // Dump the raw head so we can see stray/desync bytes that precede a
+          // frame (e.g. the 13 bytes left after payloadEcho) and confirm whether
+          // they are ASCII (a server-response echo) or binary garbage.
+          const head = Array.from(
+            buffer.subarray(0, Math.min(32, buffer.byteLength)),
+          )
+            .map((b) => b.toString(16).padStart(2, '0'))
+            .join(' ');
           console.error(
-            `[f2][worklet] frame bufLen=${buffer.byteLength} headerLen=${hl} frameLen=${fl} status=${buffer.byteLength >= fl ? 'COMPLETE' : 'PARTIAL'}`,
+            `[f2][worklet] frame bufLen=${buffer.byteLength} headerLen=${hl} frameLen=${fl} status=${status} head=${head}`,
           );
         }
 
@@ -122,7 +131,9 @@ export function attachWebSocketProtocol(
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        const head = Array.from(buffer.subarray(0, Math.min(8, buffer.byteLength)))
+        const head = Array.from(
+          buffer.subarray(0, Math.min(8, buffer.byteLength)),
+        )
           .map((b) => b.toString(16).padStart(2, '0'))
           .join(' ');
         console.error(
