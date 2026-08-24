@@ -1165,4 +1165,18 @@ describe('collectRequestBody (/login body decoding)', () => {
     req.emit('end');
     await expect(pending).resolves.toBe('toke');
   });
+
+  it('stops buffering once the cap is exceeded and rejects on the oversize chunk', async () => {
+    const req = new EventEmitter() as unknown as HTTPIncomingMessage;
+    const pending = collectRequestBody(req, 4);
+    // First chunk already exceeds the 4-byte cap.
+    req.emit('data', new Uint8Array([116, 111, 107, 101, 110])); // 'token' = 5 bytes
+    // A malicious client keeps streaming arbitrarily large data. The guard must
+    // not retain it or hang — it rejects on the oversize chunk and discards
+    // everything after (ekrooh#144, anti-OOM DoS).
+    for (let i = 0; i < 10000; i++) {
+      req.emit('data', new Uint8Array(1024).fill(120));
+    }
+    await expect(pending).rejects.toThrow('too large');
+  });
 });
