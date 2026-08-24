@@ -140,6 +140,51 @@ describe('createFrameDecoder', () => {
     expect(requests(decoder.push(coalesced))).toEqual(['a.echo', 'a.ping']);
   });
 
+  it('does not alias decoded payloads to a reused caller-owned receive buffer', () => {
+    const decoder = createFrameDecoder(protocol);
+    const payload = new TextEncoder().encode('AAAA');
+    const fA = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'a',
+        event: 'a.ping',
+        requestId: '9',
+        args: {},
+      },
+      payload,
+    );
+    const fB = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'a',
+        event: 'a.ping',
+        requestId: '9',
+        args: {},
+      },
+      new TextEncoder().encode('BBBB'),
+    );
+    // A single-frame-sized buffer the caller reuses for every read — the normal
+    // socket/stream loop pattern. Sizing it to exactly one frame keeps the
+    // decoder's internal buffer empty at the start of each push, which is the
+    // exact condition under which concatBytes returns the caller's chunk by
+    // reference.
+    const reusable = new Uint8Array(fA.byteLength);
+
+    reusable.set(fA);
+    const [a] = decoder.push(reusable);
+
+    // Reuse the same buffer for the next read before reading a's payload back.
+    reusable.set(fB);
+    const [b] = decoder.push(reusable);
+
+    // a.payload must still read 'AAAA', not the bytes the caller wrote for the
+    // next frame. Before the fix a.payload aliased `reusable` and read 'BBBB'.
+    expect(new TextDecoder().decode(a.payload)).toBe('AAAA');
+    expect(new TextDecoder().decode(b.payload)).toBe('BBBB');
+  });
+
   it('propagates decode errors for malformed frames', () => {
     const decoder = createFrameDecoder(protocol);
     // A ≥4-byte chunk whose version byte is invalid: the frame decodes (fails)
