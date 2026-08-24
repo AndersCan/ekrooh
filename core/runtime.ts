@@ -4,6 +4,7 @@ import { TextDecoder, TextEncoder } from 'bare-encoding';
 import { createDefaultPlugins } from '../plugins';
 import { getIPC } from './lib/get-ipc';
 import { createFrameDecoder } from './messages/framing';
+import { ChannelHealth } from './messages/channel-health';
 import { createHostIpcBridge } from './messages/host-ipc';
 import { MessageType, MessageProtocol, type PluginManifest } from './messages';
 import { createPluginRegistry, createPluginRouter } from './messages/protocol';
@@ -293,18 +294,32 @@ export function createWorkletRuntime(
     // The per-runtime frame decoder drains synchronously and the downstream
     // handling is serialized, so concurrent data events cannot interleave.
     const ipcDecoder = createFrameDecoder(protocol);
+    const ipcHealth = new ChannelHealth();
     let inflight: Promise<void> = Promise.resolve();
 
     ipc.on('data', (data) => {
+      // A permanently desynced IPC pipe has no reconnect seam, so once a
+      // sustained run of malformed frames proves the byte stream is lost, stop
+      // parsing rather than silently eating garbage for the rest of the session.
+      if (ipcHealth.isFatal) return;
       let messages;
       try {
         messages = ipcDecoder.push(toUint8Array(data as Uint8Array));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`Malformed IPC frame dropped: ${message}`);
+        // One bad chunk may legitimately desync the byte stream; allow a short
+        // burst of recoverable failures but treat a sustained run as fatal.
+        if (ipcHealth.noteFailure()) {
+          console.error(
+            'IPC channel permanently desynced after repeated malformed frames; stopping host→worklet frame parsing',
+          );
+          return;
+        }
         ipcDecoder.clear();
         return;
       }
+      ipcHealth.noteSuccess();
       if (messages.length === 0) return;
 
       inflight = inflight
