@@ -87,7 +87,10 @@ public enum BareProtocol {
    */
   public static func parseMessage(_ buffer: Data) -> WireMessage? {
     let bytes = [UInt8](buffer)
-    if bytes.count < 4 { return nil }
+    // Minimum envelope is [version][type][headerLen:2][payloadLen:3] = 7 bytes.
+    // A shorter buffer must be rejected here, before the payloadLen read below
+    // indexes bytes[4..6]; otherwise a 4–6 byte frame fatally traps.
+    if bytes.count < 7 { return nil }
     if bytes.count > maxFrameBytes { return nil }
 
     let versionByte = bytes[0]
