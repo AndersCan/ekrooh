@@ -108,6 +108,7 @@ Binary frame:
 - `version` (1 byte)
 - `type` (1 byte)
 - `headerLen` (2 bytes, big-endian)
+- `payloadLen` (3 bytes, big-endian)
 - `header` (UTF-8 JSON)
 - `payload` (optional)
 
