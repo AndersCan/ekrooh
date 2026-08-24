@@ -60,6 +60,15 @@ final class BareProtocolTest: XCTestCase {
     XCTAssertNil(BareProtocol.parseMessage(full.dropLast(1)))
   }
 
+  func testRejectsASubSevenByteFrame() {
+    // The envelope is [version][type][headerLen:2][payloadLen:3] = 7 bytes at
+    // minimum. Shorter buffers must be rejected, not trapped by an out-of-bounds
+    // read of bytes[4..6] when deriving payloadLen.
+    XCTAssertNil(BareProtocol.parseMessage(Data([1, 2, 3, 4])))
+    XCTAssertNil(BareProtocol.parseMessage(Data([1, 2, 3, 4, 5])))
+    XCTAssertNil(BareProtocol.parseMessage(Data([1, 2, 3, 4, 5, 6])))
+  }
+
   func testRejectsHeaderLargerThanThe16BitLengthField() {
     let bigHeader =
       #"{"type":"DISPATCH","pluginId":"core.health","event":"e","args":{"x":"# +
