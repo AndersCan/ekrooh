@@ -120,22 +120,29 @@ export function collectRequestBody(
     let byteCount = 0;
     let exceeded = false;
     req.on('data', (chunk: unknown) => {
+      // `maxBytes` is a BYTE cap (anti-OOM DoS guard) — `body.length` counts
+      // UTF-16 code units, so multi-byte UTF-8 would slide ~3× under it.
+      // Once the cap is breached we stop retaining chunks: discarding the rest
+      // bounds memory instead of buffering an arbitrarily large body.
+      if (exceeded) return;
       const str =
         typeof chunk === 'string'
           ? chunk
           : decoder.decode(chunk as Uint8Array, { stream: true });
       body += str;
-      // `maxBytes` is a BYTE cap (anti-OOM DoS guard) — `body.length` counts
-      // UTF-16 code units, so multi-byte UTF-8 would slide ~3× under it.
       byteCount +=
         typeof chunk === 'string'
           ? new TextEncoder().encode(chunk).byteLength
           : (chunk as Uint8Array).byteLength;
-      if (byteCount > maxBytes) exceeded = true;
+      if (byteCount > maxBytes) {
+        exceeded = true;
+        reject(new Error('Request body too large'));
+      }
     });
     req.on('end', () => {
+      if (exceeded) return; // already rejected on the oversize chunk
       const final = body + decoder.decode(new Uint8Array(0));
-      if (exceeded || byteCount > maxBytes) {
+      if (byteCount > maxBytes) {
         reject(new Error('Request body too large'));
         return;
       }

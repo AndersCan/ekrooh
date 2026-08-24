@@ -140,14 +140,75 @@ describe('createFrameDecoder', () => {
     expect(requests(decoder.push(coalesced))).toEqual(['a.echo', 'a.ping']);
   });
 
-  it('propagates decode errors for malformed frames', () => {
+  it('does not alias decoded payloads to a reused caller-owned receive buffer', () => {
     const decoder = createFrameDecoder(protocol);
-    // A ≥4-byte chunk whose version byte is invalid: the frame decodes (fails)
-    // instantly — the caller decides to drop the channel, the decoder buffers
-    // nothing.
-    expect(() =>
+    const payload = new TextEncoder().encode('AAAA');
+    const fA = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'a',
+        event: 'a.ping',
+        requestId: '9',
+        args: {},
+      },
+      payload,
+    );
+    const fB = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'a',
+        event: 'a.ping',
+        requestId: '9',
+        args: {},
+      },
+      new TextEncoder().encode('BBBB'),
+    );
+    // A single-frame-sized buffer the caller reuses for every read — the normal
+    // socket/stream loop pattern. Sizing it to exactly one frame keeps the
+    // decoder's internal buffer empty at the start of each push, which is the
+    // exact condition under which concatBytes returns the caller's chunk by
+    // reference.
+    const reusable = new Uint8Array(fA.byteLength);
+
+    reusable.set(fA);
+    const [a] = decoder.push(reusable);
+
+    // Reuse the same buffer for the next read before reading a's payload back.
+    reusable.set(fB);
+    const [b] = decoder.push(reusable);
+
+    // a.payload must still read 'AAAA', not the bytes the caller wrote for the
+    // next frame. Before the fix a.payload aliased `reusable` and read 'BBBB'.
+    expect(new TextDecoder().decode(a.payload)).toBe('AAAA');
+    expect(new TextDecoder().decode(b.payload)).toBe('BBBB');
+  });
+
+  it('records a decode error, goes inert, and clears on clear()', () => {
+    const decoder = createFrameDecoder(protocol);
+    // A ≥7-byte chunk whose version byte is invalid: the frame fails to decode
+    // instantly. The decoder goes inert and returns nothing (no throw), so the
+    // caller checks `error` to decide whether to drop the channel.
+    expect(
       decoder.push(new Uint8Array([0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])),
-    ).toThrow(/Unsupported version/);
+    ).toEqual([]);
+    expect(decoder.error).not.toBeNull();
+    // After failure the decoder stays inert until cleared.
+    const frame = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'a',
+        event: 'a.ping',
+        requestId: '8',
+        args: {},
+      },
+      null,
+    );
+    expect(decoder.push(frame)).toEqual([]);
+    decoder.clear();
+    expect(decoder.push(frame).length).toBe(1);
   });
 
   it('records a framing error, goes inert, and clears on clear()', () => {
@@ -173,11 +234,37 @@ describe('createFrameDecoder', () => {
     // protocol (headerLen 0, payloadLen 0xFFFFFE).
     const prefix = new Uint8Array([1, 1, 0, 0, 0xff, 0xff, 0xfe]);
 
-    expect(() => decoder.push(prefix)).toThrow(/Frame too large/);
+    expect(decoder.push(prefix)).toEqual([]);
     expect(decoder.error).not.toBeNull();
     // After failure the decoder stays inert until cleared.
     expect(decoder.push(frame)).toEqual([]);
     decoder.clear();
     expect(decoder.push(frame).length).toBe(1);
+  });
+
+  it('does not discard already-decoded frames when a later frame in the same chunk fails', () => {
+    const decoder = createFrameDecoder(protocol);
+    const good = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'a',
+        event: 'a.one',
+        requestId: '10',
+        args: {},
+      },
+      null,
+    );
+    const bad = new Uint8Array([0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+
+    const coalesced = new Uint8Array(good.byteLength + bad.byteLength);
+    coalesced.set(good, 0);
+    coalesced.set(bad, good.byteLength);
+
+    // The good frame must be returned before the decoder goes inert on the bad
+    // frame — it must not be discarded by the later failure in the same chunk.
+    const decoded = decoder.push(coalesced);
+    expect(requests(decoded)).toEqual(['a.one']);
+    expect(decoder.error).not.toBeNull();
   });
 });

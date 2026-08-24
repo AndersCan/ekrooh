@@ -96,3 +96,70 @@ class BareProtocolTest {
         assertNull(err.payload)
     }
 }
+
+class FrameDecoderTest {
+    private val header = """{"type":"DISPATCH","pluginId":"core.health","event":"health.ping"}"""
+
+    private fun frame(payload: ByteArray? = null): ByteArray {
+        val buffer = BareProtocol.buildMessage(BareProtocol.MessageType.ENVELOPE, header, payload)
+        val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes)
+        return bytes
+    }
+
+    @Test
+    fun `reassembles a frame split across chunks`() {
+        val f = frame(byteArrayOf(1, 2, 3, 4))
+        val decoder = FrameDecoder()
+        val decoded = mutableListOf<BareProtocol.WireMessage>()
+        for (i in f.indices) {
+            decoded += decoder.push(f.copyOfRange(i, i + 1))
+        }
+        assertEquals(1, decoded.size)
+        assertArrayEquals(byteArrayOf(1, 2, 3, 4), decoded[0].payload)
+    }
+
+    @Test
+    fun `drains coalesced frames in order`() {
+        val f1 = frame(null)
+        val f2 = frame(byteArrayOf(9))
+        val both = f1 + f2
+        val decoder = FrameDecoder()
+        val decoded = decoder.push(both)
+        assertEquals(2, decoded.size)
+        assertArrayEquals(byteArrayOf(9), decoded[1].payload)
+    }
+
+    @Test
+    fun `skips a corrupt complete frame without desyncing the rest`() {
+        val f1 = frame(null)
+        val bad = frame(null).also { it[0] = 99 }
+        val f2 = frame(byteArrayOf(7))
+        val both = f1 + bad + f2
+        val decoder = FrameDecoder()
+        val decoded = decoder.push(both)
+        // The corrupt frame is skipped; the two good frames still parse.
+        assertEquals(2, decoded.size)
+        assertArrayEquals(byteArrayOf(7), decoded[1].payload)
+    }
+
+    @Test
+    fun `goes inert after a frame too large and resyncs on clear`() {
+        val decoder = FrameDecoder()
+        // headerLen 0, payloadLen 0xffffff: frameLen exceeds the cap (a framing
+        // violation).
+        val oversized = byteArrayOf(
+            BareProtocol.VERSION,
+            BareProtocol.MessageType.ENVELOPE,
+            0, 0, 0xff.toByte(), 0xff.toByte(), 0xff.toByte(),
+        )
+        val first = decoder.push(oversized)
+        assertEquals(0, first.size)
+        assertTrue(decoder.error != null)
+
+        decoder.clear()
+        val good = decoder.push(frame(null))
+        assertEquals(1, good.size)
+        assertTrue(decoder.error == null)
+    }
+}

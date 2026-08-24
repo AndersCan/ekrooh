@@ -75,6 +75,18 @@ export function createHostIpcBridge(config: {
         pending.delete(oldest);
       }
     }
+    const existing = pending.get(requestId);
+    if (existing) {
+      // A live call with the same requestId is being superseded (a reused or
+      // colliding id). Its response would now resolve the new call, so reject
+      // the old promise and clear its timer — otherwise the timer leaks and the
+      // old promise hangs forever (unhandled rejection on GC).
+      clearTimeout(existing.timer);
+      existing.reject(
+        new Error(`host invoke superseded by a new call (${requestId})`),
+      );
+      pending.delete(requestId);
+    }
     pending.set(requestId, slot);
   }
 

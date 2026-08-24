@@ -56,17 +56,19 @@ export function attachWebSocketProtocol(
     let inflight: Promise<void> = Promise.resolve();
 
     socket.on('data', (raw) => {
-      let messages;
-      try {
-        const data = toUint8Array(raw);
-        if (data.byteLength === 0) {
-          console.debug('[ws] received empty data chunk, ignoring');
-          return;
-        }
-        messages = decoder.push(data);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error('Error handling WebSocket message: ' + message);
+      const data = toUint8Array(raw);
+      if (data.byteLength === 0) {
+        console.debug('[ws] received empty data chunk, ignoring');
+        return;
+      }
+      const messages = decoder.push(data);
+      // A frame-level failure marks the decoder inert but still returns the
+      // frames decoded before it; a peer that emits a malformed frame is not
+      // recoverable on this socket, so tear it down.
+      if (decoder.error) {
+        console.error(
+          'Error handling WebSocket message: ' + decoder.error.message,
+        );
         socket.destroy();
         return;
       }
@@ -97,6 +99,17 @@ export function attachWebSocketProtocol(
 
     socket.on('close', () => {
       decoder.clear();
+    });
+
+    // Contain transport errors (peer reset, ECONNRESET, TLS failure) instead of
+    // letting an unhandled 'error' throw out of the EventEmitter and crash the
+    // whole runtime. A single dropped peer must not take down every other
+    // connection.
+    socket.on('error', (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('WebSocket connection error:', message);
+      decoder.clear();
+      socket.destroy();
     });
   });
 }
