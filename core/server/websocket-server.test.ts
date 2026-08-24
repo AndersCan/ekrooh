@@ -205,6 +205,22 @@ describe('attachWebSocketProtocol', () => {
     );
   });
 
+  it('contains a socket error instead of crashing the runtime (#145)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const harness = serverHarness();
+    attachWebSocketProtocol(harness.server as never, healthContext() as never);
+    const socket = fakeSocket();
+    harness.handler!(socket as never, { headers: {} });
+
+    // A peer reset / ECONNRESET must be contained: the handler logs and closes
+    // the socket rather than letting an unhandled 'error' throw out of the
+    // EventEmitter and take down the whole worklet.
+    expect(() => socket.emit('error', new Error('ECONNRESET'))).not.toThrow();
+    expect(spy).toHaveBeenCalled();
+    expect(socket.destroy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
   it('ignores empty frames', async () => {
     const harness = serverHarness();
     attachWebSocketProtocol(harness.server as never, healthContext() as never);

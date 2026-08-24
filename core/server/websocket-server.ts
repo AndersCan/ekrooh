@@ -98,5 +98,16 @@ export function attachWebSocketProtocol(
     socket.on('close', () => {
       decoder.clear();
     });
+
+    // Contain transport errors (peer reset, ECONNRESET, TLS failure) instead of
+    // letting an unhandled 'error' throw out of the EventEmitter and crash the
+    // whole runtime. A single dropped peer must not take down every other
+    // connection.
+    socket.on('error', (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('WebSocket connection error:', message);
+      decoder.clear();
+      socket.destroy();
+    });
   });
 }
