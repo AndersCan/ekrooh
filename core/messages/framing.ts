@@ -65,7 +65,12 @@ export function createFrameDecoder(protocol: MessageProtocol): FrameDecoder {
       }
       if (buffer.byteLength < frameLen) break;
 
-      const frame = buffer.subarray(0, frameLen);
+      // Copy the frame out of the internal buffer before decoding: `buffer`
+      // may alias the caller-supplied `chunk` (concatBytes returns `chunk`
+      // directly when the buffer was empty), so a `subarray` view would let
+      // `decode`'s header/payload views point back at caller-owned memory that
+      // the caller reuses on its next read — silently corrupting decoded data.
+      const frame = buffer.slice(0, frameLen);
       buffer = buffer.subarray(frameLen);
       out.push(protocol.decode(frame));
     }
