@@ -1,6 +1,7 @@
 import { Actor, RealClock, event, type Clock } from '@mantaq/core';
 import { ActorMap, onOutput, states } from '@mantaq/sugar';
 import { createPendingCall, respondE, settledE, startE } from './pending-call';
+import { createRequestId } from './request-id';
 import type {
   MessageHeader,
   PluginDispatchHeader,
@@ -216,10 +217,6 @@ export function createProtocolMessenger(
       manager.send(respondE.create({ header }));
     },
   };
-}
-
-function createRequestId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function withRequestId<T extends object>(

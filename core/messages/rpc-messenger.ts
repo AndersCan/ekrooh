@@ -3,6 +3,7 @@ import {
   PluginDispatchHeader,
   PluginInvokeRequestHeader,
 } from './types';
+import { createRequestId } from './request-id';
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
   ? Omit<T, K>
@@ -151,14 +152,6 @@ export function createProtocolMessenger(
       pendingCall.resolve(header);
     },
   };
-}
-
-function createRequestId() {
-  // CSPRNG-backed (not Math.random): unguessable, collision-resistant ids.
-  const bytes = new Uint8Array(16);
-  globalThis.crypto.getRandomValues(bytes);
-  const rand = bytes.reduce((acc, b) => acc + b.toString(36), '').slice(0, 22);
-  return `${Date.now().toString(36)}-${rand}`;
 }
 
 function withRequestId<T extends object>(
