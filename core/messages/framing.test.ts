@@ -185,14 +185,30 @@ describe('createFrameDecoder', () => {
     expect(new TextDecoder().decode(b.payload)).toBe('BBBB');
   });
 
-  it('propagates decode errors for malformed frames', () => {
+  it('records a decode error, goes inert, and clears on clear()', () => {
     const decoder = createFrameDecoder(protocol);
-    // A ≥4-byte chunk whose version byte is invalid: the frame decodes (fails)
-    // instantly — the caller decides to drop the channel, the decoder buffers
-    // nothing.
-    expect(() =>
+    // A ≥7-byte chunk whose version byte is invalid: the frame fails to decode
+    // instantly. The decoder goes inert and returns nothing (no throw), so the
+    // caller checks `error` to decide whether to drop the channel.
+    expect(
       decoder.push(new Uint8Array([0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])),
-    ).toThrow(/Unsupported version/);
+    ).toEqual([]);
+    expect(decoder.error).not.toBeNull();
+    // After failure the decoder stays inert until cleared.
+    const frame = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'a',
+        event: 'a.ping',
+        requestId: '8',
+        args: {},
+      },
+      null,
+    );
+    expect(decoder.push(frame)).toEqual([]);
+    decoder.clear();
+    expect(decoder.push(frame).length).toBe(1);
   });
 
   it('records a framing error, goes inert, and clears on clear()', () => {
@@ -218,11 +234,37 @@ describe('createFrameDecoder', () => {
     // protocol (headerLen 0, payloadLen 0xFFFFFE).
     const prefix = new Uint8Array([1, 1, 0, 0, 0xff, 0xff, 0xfe]);
 
-    expect(() => decoder.push(prefix)).toThrow(/Frame too large/);
+    expect(decoder.push(prefix)).toEqual([]);
     expect(decoder.error).not.toBeNull();
     // After failure the decoder stays inert until cleared.
     expect(decoder.push(frame)).toEqual([]);
     decoder.clear();
     expect(decoder.push(frame).length).toBe(1);
+  });
+
+  it('does not discard already-decoded frames when a later frame in the same chunk fails', () => {
+    const decoder = createFrameDecoder(protocol);
+    const good = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'a',
+        event: 'a.one',
+        requestId: '10',
+        args: {},
+      },
+      null,
+    );
+    const bad = new Uint8Array([0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+
+    const coalesced = new Uint8Array(good.byteLength + bad.byteLength);
+    coalesced.set(good, 0);
+    coalesced.set(bad, good.byteLength);
+
+    // The good frame must be returned before the decoder goes inert on the bad
+    // frame — it must not be discarded by the later failure in the same chunk.
+    const decoded = decoder.push(coalesced);
+    expect(requests(decoded)).toEqual(['a.one']);
+    expect(decoder.error).not.toBeNull();
   });
 });

@@ -22,13 +22,21 @@ public final class HostIpcCoordinator {
   public func start() {
     Task {
       do {
+        var decoder = FrameDecoder()
         for try await chunk in ipc {
-          do {
-            try await handle(data: chunk)
-          } catch {
-            // Log, never silently swallow: one bad frame must not kill the loop.
-            // No interpolated error value — keep the message static.
-            BareHostLogger.log("Error handling IPC frame")
+          let messages = decoder.push(chunk)
+          // A framing violation marks the decoder inert but still returns the
+          // frames decoded before it; drop the corrupt byte stream and resync.
+          if decoder.error != nil {
+            BareHostLogger.log("IPC frame decoder desynced; resetting")
+            decoder.clear()
+          }
+          for message in messages {
+            do {
+              try await dispatch(message: message)
+            } catch {
+              BareHostLogger.log("Error handling IPC frame")
+            }
           }
         }
       } catch {
@@ -37,8 +45,7 @@ public final class HostIpcCoordinator {
     }
   }
 
-  private func handle(data: Data) async throws {
-    guard let message = BareProtocol.parseMessage(data) else { return }
+  private func dispatch(message: BareProtocol.WireMessage) async throws {
     let header = try jsonObject(message.header)
     switch header["type"] as? String ?? "" {
     case "HOST_CAPABILITIES_QUERY":

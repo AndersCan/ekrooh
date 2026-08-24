@@ -118,3 +118,83 @@ final class BareProtocolTest: XCTestCase {
     XCTAssertNil(error.payload)
   }
 }
+
+final class FrameDecoderTest: XCTestCase {
+  private let header =
+    #"{"type":"DISPATCH","pluginId":"core.health","event":"health.ping"}"#
+
+  private func frame(payload: Data? = nil) throws -> Data {
+    try BareProtocol.buildMessage(
+      type: BareProtocol.MessageType.envelope,
+      headerJson: header,
+      payload: payload
+    )
+  }
+
+  func testReassemblesAFrameSplitAcrossChunks() throws {
+    let f = try frame(payload: Data([1, 2, 3, 4]))
+    var decoder = FrameDecoder()
+    // Feed the frame one byte at a time; no complete frame until the last byte.
+    var decoded: [BareProtocol.WireMessage] = []
+    for i in 0..<f.count {
+      decoded.append(contentsOf: decoder.push(f.subdata(in: i..<(i + 1))))
+    }
+    XCTAssertEqual(decoded.count, 1)
+    XCTAssertEqual(decoded.first?.payload, Data([1, 2, 3, 4]))
+  }
+
+  func testDrainsCoalescedFramesInOrder() throws {
+    let f1 = try frame()
+    let f2 = try frame(payload: Data([9]))
+    var both = Data()
+    both.append(f1)
+    both.append(f2)
+
+    var decoder = FrameDecoder()
+    let decoded = decoder.push(both)
+    XCTAssertEqual(decoded.count, 2)
+    XCTAssertEqual(decoded.last?.payload, Data([9]))
+  }
+
+  func testSkipsACorruptCompleteFrameWithoutDesyncingTheRest() throws {
+    let f1 = try frame()
+    // A complete but invalid frame (unsupported version) that the decoder must
+    // drop, not let desync the stream.
+    var bad = try frame()
+    bad[0] = 99
+    let f2 = try frame(payload: Data([7]))
+
+    var both = Data()
+    both.append(f1)
+    both.append(bad)
+    both.append(f2)
+
+    var decoder = FrameDecoder()
+    let decoded = decoder.push(both)
+    // The corrupt frame is skipped; the two good frames still parse.
+    XCTAssertEqual(decoded.count, 2)
+    XCTAssertEqual(decoded.last?.payload, Data([7]))
+  }
+
+  func testGoesInertAfterAFrameTooLargeAndResyncsOnClear() throws {
+    var decoder = FrameDecoder()
+    // headerLen 0, payloadLen 0xffffff: frameLen exceeds the cap (a framing
+    // violation).
+    var oversized = Data()
+    oversized.append(BareProtocol.version)
+    oversized.append(BareProtocol.MessageType.envelope)
+    oversized.append(0)
+    oversized.append(0)
+    oversized.append(0xff)
+    oversized.append(0xff)
+    oversized.append(0xff)
+    let first = decoder.push(oversized)
+    XCTAssertEqual(first.count, 0)
+    XCTAssertNotNil(decoder.error)
+
+    decoder.clear()
+    let good = decoder.push(try frame())
+    XCTAssertEqual(good.count, 1)
+    XCTAssertNil(decoder.error)
+  }
+}

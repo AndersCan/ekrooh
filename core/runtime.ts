@@ -302,14 +302,15 @@ export function createWorkletRuntime(
       // sustained run of malformed frames proves the byte stream is lost, stop
       // parsing rather than silently eating garbage for the rest of the session.
       if (ipcHealth.isFatal) return;
-      let messages;
-      try {
-        messages = ipcDecoder.push(toUint8Array(data as Uint8Array));
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(`Malformed IPC frame dropped: ${message}`);
-        // One bad chunk may legitimately desync the byte stream; allow a short
-        // burst of recoverable failures but treat a sustained run as fatal.
+      const messages = ipcDecoder.push(toUint8Array(data as Uint8Array));
+      // A frame-level failure marks the decoder inert but still returns the
+      // frames decoded before it in the same chunk. Treat it as a malformed
+      // frame: log, allow a short burst of recoverable failures, and treat a
+      // sustained run as a fatal desync.
+      if (ipcDecoder.error) {
+        console.error(
+          `Malformed IPC frame dropped: ${ipcDecoder.error.message}`,
+        );
         if (ipcHealth.noteFailure()) {
           console.error(
             'IPC channel permanently desynced after repeated malformed frames; stopping host→worklet frame parsing',
