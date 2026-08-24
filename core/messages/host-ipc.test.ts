@@ -242,6 +242,57 @@ describe('createHostIpcBridge', () => {
     expect(await p2).toMatchObject({ type: 'INVOKE_RESPONSE' });
   });
 
+  it('rejects a superseded in-flight call instead of leaking its timer', async () => {
+    vi.useFakeTimers();
+    const ipc = new FakeIpc();
+    const protocol = new MessageProtocol();
+    const bridge = createHostIpcBridge({ ipc, protocol });
+
+    const first = bridge.invokeOnHost(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.permissions',
+        event: 'permissions.requestStorage',
+        requestId: 'dup-1',
+        args: {},
+      },
+      new Uint8Array(0),
+    );
+    const second = bridge.invokeOnHost(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.permissions',
+        event: 'permissions.requestStorage',
+        requestId: 'dup-1',
+        args: {},
+      },
+      new Uint8Array(0),
+    );
+
+    // The second call supersedes the first: the first promise must reject
+    // (its timer is cleared, so advancing time must not also time it out).
+    await expect(first).rejects.toThrow(/superseded/);
+    expect(second).toBeDefined();
+
+    const response = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'HOST_INVOKE_RESPONSE',
+        requestId: 'dup-1',
+        pluginId: 'core.permissions',
+        event: 'permissions.requestStorage',
+        result: { ok: true },
+      } satisfies MessageHeader,
+      null,
+    );
+    bridge.tryConsumeDownstreamFromHost(response);
+    await expect(second).resolves.toMatchObject({ type: 'INVOKE_RESPONSE' });
+
+    // The superseded call's timer must be gone: advancing past the default
+    // timeout must not trigger a second rejection.
+    vi.advanceTimersByTime(30001);
+  });
+
   it('logs a debug trace when a host frame cannot be decoded', () => {
     const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
     try {
