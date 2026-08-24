@@ -62,8 +62,16 @@ export function createHarnessRegistry<T = unknown>(): HarnessRegistry<T> {
           reaped.push(instance.id);
         }
       }
+      // Tear down each reaped instance on its own. One instance's teardown
+      // throwing must not abort the rest of the batch or surface as an
+      // unhandled rejection: `destroy` already removed the instance from the
+      // map before awaiting, so a failed teardown is not reaped again.
       for (const id of reaped) {
-        await this.destroy(id);
+        try {
+          await this.destroy(id);
+        } catch {
+          /* teardown failure: instance already removed, batch continues */
+        }
       }
       return reaped;
     },

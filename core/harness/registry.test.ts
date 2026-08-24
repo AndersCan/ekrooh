@@ -49,4 +49,26 @@ describe('createHarnessRegistry', () => {
     expect(r.get('fresh')).toBeDefined();
     expect(destroyed).toEqual(['idle']);
   });
+
+  it('reapDue keeps reaping the batch when one teardown throws', async () => {
+    const destroyed: string[] = [];
+    const r = createHarnessRegistry();
+    r.register(instance('ok', 0, destroyed));
+    r.register({
+      id: 'boom',
+      createdAt: 0,
+      lastActiveAt: 0,
+      runtime: {},
+      destroy: () => {
+        destroyed.push('boom');
+        throw new Error('teardown failed');
+      },
+    });
+    r.register(instance('ok2', 0, destroyed));
+    const reaped = await r.reapDue(1001, 1000);
+    expect(reaped).toEqual(['ok', 'boom', 'ok2']);
+    expect(destroyed).toEqual(['ok', 'boom', 'ok2']);
+    expect(r.get('ok')).toBeUndefined();
+    expect(r.get('ok2')).toBeUndefined();
+  });
 });
