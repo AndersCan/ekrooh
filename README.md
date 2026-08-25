@@ -5,6 +5,9 @@ across every platform at once — the same app, state, and soul on Android, iOS,
 web, and desktop.
 
 [![CI](https://github.com/AndersCan/ekrooh/actions/workflows/test.yml/badge.svg)](https://github.com/AndersCan/ekrooh/actions/workflows/test.yml)
+[![Docs](https://img.shields.io/badge/docs-anderscan.github.io%2Fekrooh-blue)](https://anderscan.github.io/ekrooh/)
+
+📚 **Documentation:** <https://anderscan.github.io/ekrooh>
 
 The **boring bootstrap** for cross-platform apps on the Bare runtime
 (holepunch): a binary wire protocol, plugin kernel, RPC messenger, transports,
@@ -12,7 +15,8 @@ and native host bridges — plus a reference app that demonstrates all of it.
 
 > Read `vision.md` for what this project is and is not, `AGENTS.md` for how to
 > develop it, `CONTRIBUTING.md` for how to contribute, and `RELEASING.md` for
-> how to cut a release.
+> how to cut a release. **Public docs: [anderscan.github.io/ekrooh](https://anderscan.github.io/ekrooh).**
+> internal ADRs and agent ops live in `docs/`.
 
 ## The model (UI perspective)
 
@@ -52,12 +56,19 @@ the runtime that implements it.
   coordinator, host plugin registry, WebView client.
 - `ios/` — framework: iOS host **Swift package** (`BareHost`) — IPC
   coordinator, host plugin registry.
-- `examples/` — reference app: `web/` (lit-html + nanostores + Tailwind UI),
-  `android-app/` (the Android shell that embeds the backend and WebView), and
-  `ios-app/` (the iOS shell).
+- `examples/` — reference apps: `web/` (lit-html + nanostores + Tailwind UI),
+  `android-app/` (the Android shell that embeds the backend and WebView),
+  `ios-app/` (the iOS shell), and `consumer-basic/` (a minimal consuming app).
 - `e2e/` — Playwright tests against the browser runtime on the mock transport.
 - `scripts/` — dev backend runner, Playwright browser wrapper, prebuilds
   fetcher, loopback smoke test.
+- `docs/` — internal docs: ADRs (`docs/adr/`) and agent operations
+  (`docs/agents/`); not the public site.
+- `apps/docs/` — public documentation site (Astro Starlight) published to
+  GitHub Pages at `https://anderscan.github.io/ekrooh`.
+- `templates/` — shared build/deploy templates.
+- `research/` — design notes and investigations (e.g. device runners, Maestro,
+  P2P folder stack).
 - `prebuilds/` — Bare Kit prebuilds (build output, gitignored).
 
 The framework's public surface is the `exports` map of the root `package.json`
