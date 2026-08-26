@@ -175,16 +175,16 @@ web → worklet → host → worklet → web roundtrip is otherwise identical to
 
 ## Framework-provided vs consumer-owned
 
-| Concern | Owner | Where |
-| --- | --- | --- |
-| Wire protocol, framing, requestId matching | Framework | `createProtocolMessenger`, `createPluginBus` |
-| Transport (WebSocket loopback) | Framework | `createWebSocketTransport` ([Transports](../core-concepts/transports.mdx)) |
-| Worklet runtime + config resolution | Framework | `createWorkletRuntime`, `resolveWorkletConfig` |
-| Backend → web push seam | Framework | `LoopbackPush` / `createLoopbackPush` |
-| Plugin ID + event names + arg/result types | **You** | `EventSpec` (shared) |
-| Handler logic / native integration | **You** | `definePlugin` invoke handlers |
-| Worklet entry wiring | **You** | `runtime.pluginRegistry.register(...)` |
-| Web UI + invoke calls | **You** | `bus.invoke(...)` |
+| Concern                                    | Owner     | Where                                                                      |
+| ------------------------------------------ | --------- | -------------------------------------------------------------------------- |
+| Wire protocol, framing, requestId matching | Framework | `createProtocolMessenger`, `createPluginBus`                               |
+| Transport (WebSocket loopback)             | Framework | `createWebSocketTransport` ([Transports](../core-concepts/transports.mdx)) |
+| Worklet runtime + config resolution        | Framework | `createWorkletRuntime`, `resolveWorkletConfig`                             |
+| Backend → web push seam                    | Framework | `LoopbackPush` / `createLoopbackPush`                                      |
+| Plugin ID + event names + arg/result types | **You**   | `EventSpec` (shared)                                                       |
+| Handler logic / native integration         | **You**   | `definePlugin` invoke handlers                                             |
+| Worklet entry wiring                       | **You**   | `runtime.pluginRegistry.register(...)`                                     |
+| Web UI + invoke calls                      | **You**   | `bus.invoke(...)`                                                          |
 
 ## Try it
 
