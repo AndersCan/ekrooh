@@ -32,6 +32,7 @@ export default defineConfig({
           items: [
             { label: 'Introduction', slug: 'getting-started/introduction' },
             { label: 'Installation', slug: 'getting-started/installation' },
+            { label: 'Web Quickstart', slug: 'getting-started/web-quickstart' },
             { label: 'Architecture', slug: 'getting-started/architecture' },
           ],
         },

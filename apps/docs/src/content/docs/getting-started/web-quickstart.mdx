@@ -1,0 +1,100 @@
+---
+title: Web Quickstart
+description: A browser-only hello world on @ekrooh/bare — run the web dev loop and ping the backend with zero native code.
+---
+
+This page is the **browser-only** path. You get a running, pinging app with a
+plain Node + browser setup — no Android AAR, no iOS embedding, no `bare` CLI
+incantations. It is the fastest way to feel the model before you wire a host
+(see [End-to-End Quickstart](./end-to-end) for the native side).
+
+The repo ships a runnable reference web app at
+[`examples/web/`](https://github.com/AndersCan/ekrooh/tree/main/examples/web).
+This quickstart starts it and then shows the few lines that make the ping work.
+
+## 1. Prerequisites
+
+- Node ≥ 22 (the repo uses modern ESM + `import.meta.env`).
+- A desktop browser.
+- A clone of the framework repo (the dev loop builds the core bundle for you).
+
+```bash
+git clone https://github.com/anderscan/ekrooh
+cd ekrooh
+npm install
+```
+
+## 2. Run the web dev loop
+
+```bash
+npm run dev
+```
+
+This starts two things together:
+
+- the **loopback Bare backend** — it builds `core/main.core.ts` and runs it on
+  the Bare runtime, serving a WebSocket protocol socket on port **8080** (the web
+  transport defaults to `ws://localhost:8080` in dev), and
+- the **Vite dev server** for `examples/web`.
+
+Open the localhost URL Vite prints (typically `http://localhost:5173`). You are
+looking at the reference app, served cross-origin from the Vite dev server and
+connected to the loopback backend.
+
+> No `esbuild` or `bare` CLI steps are required — `npm run dev` builds the core
+> bundle and restarts the Bare process on change.
+
+## 3. See it ping
+
+The reference app already talks to the backend. Click **Ping** on the page and
+you'll see `PING ok: hello` — a full web → WebSocket → worklet → web round-trip,
+with no native host involved.
+
+## 4. How the ping is wired (minimal)
+
+If you want to see the smallest version of the same call, this is the whole
+client surface:
+
+```ts
+import {
+  MessageType,
+  createPluginBus,
+  createProtocolMessenger,
+} from '@ekrooh/bare/core';
+import { healthEvents } from '@ekrooh/bare/plugins/health/events';
+import { createWebSocketTransport } from '@ekrooh/bare/transports';
+
+// In browser dev the transport defaults to ws://localhost:8080.
+const transport = await createWebSocketTransport();
+
+const messenger = createProtocolMessenger((request, payload) => {
+  transport.send(MessageType.ENVELOPE, request, payload);
+});
+const bus = createPluginBus(messenger);
+transport.subscribe((message) => messenger.handleIncoming(message.header));
+
+const [err, result] = await bus.invoke(healthEvents.health.ping('hello'));
+console.log(
+  err ? `PING failed: ${err.message}` : `PING ok: ${result?.message}`,
+);
+```
+
+`createWebSocketTransport()` takes **no arguments** here: in dev,
+`import.meta.env.DEV` is true, so it points at the loopback backend for you. On
+device the page is served by the loopback server, so the socket defaults to the
+page's own origin — you only ever pass an explicit `{ url }` in browser dev.
+
+## 5. Render the result
+
+`@ekrooh/bare` is **not** a UI framework — it owns the wire protocol, plugin
+kernel, and transports, not your DOM. Render `result` with whatever UI layer you
+already use. The reference app uses lit-html + nanostores; the full rendering
+contract (one root `render()`, `useStore` bindings, `cache()` for routes,
+teardown) is in [Web Rendering](./rendering).
+
+## Next steps
+
+- Add your own capability: [Authoring a Plugin](./authoring-plugins) and the
+  [call-a-native-function tutorial](./call-native-function).
+- Go cross-platform: [End-to-End Quickstart](./end-to-end) for the Android/iOS
+  host side.
