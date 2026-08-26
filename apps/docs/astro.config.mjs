@@ -54,6 +54,7 @@ export default defineConfig({
           items: [
             { label: 'Media (Out-of-Band Bytes)', slug: 'guides/media' },
             { label: 'Permissions', slug: 'guides/permissions' },
+            { label: 'Calling a Native Function', slug: 'guides/call-native-function' },
           ],
         },
         {
