@@ -98,9 +98,22 @@ export type PluginRouterOptions = {
   /** Plugin ids whose calls must run one at a time, in arrival order. Every
    * other plugin's calls run concurrently, so a slow call never delays them. */
   serialPlugins?: readonly string[];
+  /** How long (ms) the host's announced capabilities are reused before the
+   * host is asked again. Delegating an invoke otherwise costs an IPC round
+   * trip per call. Capabilities the host adds are still picked up within
+   * `NEGATIVE_REFRESH_MS`, and a failed delegation drops the cache at once.
+   * `0` disables caching (ask the host on every delegation). Defaults to
+   * `DEFAULT_HOST_CAPABILITIES_TTL_MS`. */
+  hostCapabilitiesTtlMs?: number;
 };
 
 const DEFAULT_MAX_INFLIGHT = 64;
+const DEFAULT_HOST_CAPABILITIES_TTL_MS = 30_000;
+/** An event the cached snapshot does not list triggers a fresh query only once
+ * the snapshot is at least this old, so a host that announces a capability
+ * late is honored quickly while a stream of calls to an unsupported event
+ * cannot turn into a stream of capability queries. */
+const NEGATIVE_REFRESH_MS = 2000;
 
 /** Whether the router may synthesize an UNSUPPORTED_EVENT response. Events are
  * only gated when the manifest declares them; a plugin with no manifest/owner
@@ -122,11 +135,44 @@ export function createPluginRouter(
   const serialTails = new Map<string, Promise<unknown>>();
   let inflight = 0;
 
-  /** Fresh host capabilities on every delegation decision — never memoized, so
-   * abilities the host announces/withdraws after the first delegated invoke
-   * take effect immediately. */
-  async function hostCapabilities(): Promise<CapabilityDescriptor[]> {
-    return (await options?.getHostCapabilities?.()) ?? [];
+  const capsTtlMs =
+    options?.hostCapabilitiesTtlMs ?? DEFAULT_HOST_CAPABILITIES_TTL_MS;
+  let capsCache: { caps: CapabilityDescriptor[]; at: number } | null = null;
+  let capsInflight: Promise<CapabilityDescriptor[]> | null = null;
+
+  /** Asks the host for its capabilities. Concurrent callers share one query
+   * (calls now overlap, so each would otherwise send its own). A failed query
+   * rejects every waiter and is not cached. */
+  function queryHostCapabilities(): Promise<CapabilityDescriptor[]> {
+    if (capsInflight) return capsInflight;
+    const query: Promise<CapabilityDescriptor[]> = (async () =>
+      (await options?.getHostCapabilities?.()) ?? [])()
+      .then((caps) => {
+        capsCache = { caps, at: Date.now() };
+        return caps;
+      })
+      .finally(() => {
+        if (capsInflight === query) capsInflight = null;
+      });
+    capsInflight = query;
+    return query;
+  }
+
+  /** Whether the host currently announces `pluginId.event`. Served from the
+   * cached snapshot while it is fresh; re-queried when it has expired, or when
+   * it does not list the event and is old enough to have changed. */
+  async function hostAnnounces(
+    pluginId: string,
+    event: string,
+  ): Promise<boolean> {
+    if (capsTtlMs > 0 && capsCache) {
+      const age = Date.now() - capsCache.at;
+      if (age < capsTtlMs) {
+        if (isHostRegistered(pluginId, event, capsCache.caps)) return true;
+        if (age < NEGATIVE_REFRESH_MS) return false;
+      }
+    }
+    return isHostRegistered(pluginId, event, await queryHostCapabilities());
   }
 
   /** Deny-by-default host-delegation allowlist: an event can only be delegated
@@ -239,14 +285,23 @@ export function createPluginRouter(
         }
       }
       if (header.requestId && options?.delegateToHost) {
-        const caps = await hostCapabilities();
-        if (isHostRegistered(header.pluginId, header.event, caps)) {
+        if (await hostAnnounces(header.pluginId, header.event)) {
           try {
             const delegated = await options.delegateToHost(header, payload);
             if (delegated) {
+              // The host disowning the event means our snapshot is stale.
+              const code = delegated.error?.code;
+              if (
+                code === ErrorCode.UNSUPPORTED_CAPABILITY ||
+                code === ErrorCode.UNSUPPORTED_EVENT
+              ) {
+                capsCache = null;
+              }
               return delegated;
             }
+            capsCache = null;
           } catch (e) {
+            capsCache = null;
             return invokeErrorResponse(
               header,
               new CoreError(
