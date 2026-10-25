@@ -9,9 +9,12 @@ import { PassThrough } from 'node:stream';
 import type { HashOptions } from 'node:crypto';
 import type { HTTPIncomingMessage } from 'bare-http1';
 import {
+  cachePolicyFor,
   collectRequestBody,
   cookieSession,
   createLoopbackServer,
+  etagFor,
+  etagMatches,
   mimeTypeFor,
   parseRange,
   sessionNonce,
@@ -650,6 +653,96 @@ describe('loopback server HTTP', () => {
       headers: { cookie },
     });
     expect(back.status).toBe(200);
+  });
+});
+
+describe('static caching', () => {
+  it('cachePolicyFor: only hashed assets under a public mount are immutable', () => {
+    expect(cachePolicyFor('assets/main-DkY3x9qZ.js', true)).toBe('immutable');
+    expect(cachePolicyFor('assets/style-a1B2c3D4.css', true)).toBe('immutable');
+    expect(cachePolicyFor('assets/main.js', true)).toBe('revalidate');
+    expect(cachePolicyFor('index.html', true)).toBe('revalidate');
+    expect(cachePolicyFor('other/main-DkY3x9qZ.js', true)).toBe('revalidate');
+    expect(cachePolicyFor('assets/main-DkY3x9qZ.js', false)).toBe('no-store');
+  });
+
+  it('etagFor is weak and changes with size or mtime', () => {
+    const a = etagFor({ size: 10, mtimeMs: 1000 });
+    expect(a).toMatch(/^W\/"[0-9a-f]+-[0-9a-f]+"$/);
+    expect(etagFor({ size: 11, mtimeMs: 1000 })).not.toBe(a);
+    expect(etagFor({ size: 10, mtimeMs: 2000 })).not.toBe(a);
+  });
+
+  it('etagMatches handles lists and the wildcard', () => {
+    expect(etagMatches('W/"a-1"', 'W/"a-1"')).toBe(true);
+    expect(etagMatches('W/"x-1", W/"a-1"', 'W/"a-1"')).toBe(true);
+    expect(etagMatches('*', 'W/"a-1"')).toBe(true);
+    expect(etagMatches('W/"b-2"', 'W/"a-1"')).toBe(false);
+    expect(etagMatches(undefined, 'W/"a-1"')).toBe(false);
+  });
+
+  it('serves a hashed asset as immutable with an ETag', async () => {
+    fs.writeFileSync(
+      path.join(dir, 'assets', 'main-AbCd1234.js'),
+      'export const h = 1',
+    );
+    const r = await request('/assets/main-AbCd1234.js');
+    expect(r.status).toBe(200);
+    expect(firstHeader(r.headers, 'cache-control')).toBe(
+      'max-age=31536000, immutable',
+    );
+    expect(firstHeader(r.headers, 'etag')).toMatch(/^W\//);
+  });
+
+  it('serves index.html and unhashed assets with no-cache and revalidates with 304', async () => {
+    const first = await request('/');
+    expect(firstHeader(first.headers, 'cache-control')).toBe('no-cache');
+    const etag = firstHeader(first.headers, 'etag')!;
+    expect(etag).toMatch(/^W\//);
+
+    const again = await request('/', { headers: { 'If-None-Match': etag } });
+    expect(again.status).toBe(304);
+    expect(again.body).toBe('');
+    expect(firstHeader(again.headers, 'etag')).toBe(etag);
+
+    const stale = await request('/', {
+      headers: { 'If-None-Match': 'W/"stale"' },
+    });
+    expect(stale.status).toBe(200);
+    expect(stale.body).toBe('<html>index</html>');
+
+    const unhashed = await request('/assets/main.js');
+    expect(firstHeader(unhashed.headers, 'cache-control')).toBe('no-cache');
+  });
+
+  it('revalidates an SPA fallback like index.html, not as a hashed asset', async () => {
+    const r = await request('/some/route', {
+      headers: { Accept: 'text/html' },
+    });
+    expect(r.status).toBe(200);
+    expect(firstHeader(r.headers, 'cache-control')).toBe('no-cache');
+  });
+
+  it('keeps mounted session files uncacheable', async () => {
+    const r = await request('/media/sample.png', {
+      headers: { Cookie: cookie },
+    });
+    expect(r.status).toBe(200);
+    expect(firstHeader(r.headers, 'cache-control')).toBe('no-store');
+    expect(firstHeader(r.headers, 'etag')).toBeNull();
+  });
+
+  it('stats a directory-mounted file once per request', async () => {
+    const target = path.join(dir, 'app.js');
+    const spy = vi.spyOn(fs, 'statSync');
+    try {
+      const r = await request('/app.js');
+      expect(r.status).toBe(200);
+      const hits = spy.mock.calls.filter(([p]) => String(p) === target);
+      expect(hits).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

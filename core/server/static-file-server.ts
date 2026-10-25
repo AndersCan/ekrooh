@@ -36,6 +36,47 @@ export function mimeTypeFor(filePath: string): string {
   return MIME_BY_EXTENSION[ext] ?? 'application/octet-stream';
 }
 
+/** A file located on disk plus the `stat` taken while locating it, so the
+ * response path does not stat the same file a second time. */
+type ResolvedFile = { filePath: string; stat: ReturnType<typeof fs.statSync> };
+
+/** How a response may be cached by the WebView:
+ * - `immutable`: content-addressed bundle, safe to keep for a year;
+ * - `revalidate`: bootstrap content, reusable only after an ETag check;
+ * - `no-store`: session-gated or replaceable files (e.g. mounted media). */
+export type CachePolicy = 'immutable' | 'revalidate' | 'no-store';
+
+/** Files under `assets/` whose name ends in an 8-character content hash before
+ * the extension (the Vite/Rolldown default, e.g. `assets/main-DkY3x9qZ.js`)
+ * are treated as content-addressed. Anything else — including `index.html` —
+ * must be revalidated. */
+const HASHED_ASSET = /^assets\/[^/]+-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$/;
+
+export function cachePolicyFor(
+  rel: string,
+  mountIsPublic: boolean,
+): CachePolicy {
+  if (!mountIsPublic) return 'no-store';
+  return HASHED_ASSET.test(rel) ? 'immutable' : 'revalidate';
+}
+
+/** Weak validator from size and mtime. Weak because the same bytes can be
+ * re-written with a new mtime, which only costs one extra full response. */
+export function etagFor(stat: { size: number; mtimeMs: number }): string {
+  return `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+}
+
+/** Whether an `If-None-Match` header (a list of validators, or `*`) matches. */
+export function etagMatches(
+  header: string | string[] | number | undefined,
+  etag: string,
+): boolean {
+  if (typeof header !== 'string') return false;
+  return header
+    .split(',')
+    .some((candidate) => candidate.trim() === etag || candidate.trim() === '*');
+}
+
 /** Reads the token from the `X-Bare-Token` request header (parser-lowercased).
  * `fetch`-based non-browser clients that cannot carry cookies use this.
  * Security note: like the `bare_session` cookie, this credential travels the
@@ -295,11 +336,26 @@ export function createLoopbackServer(
     }
   }
 
+  /** The session cookie value derived from `token`, hashed once per token
+   * instead of on every request (the token is fixed after bind). */
+  let nonceToken: string | null = null;
+  let nonceValue = '';
+  function sessionCookieValue(forToken: string): string {
+    if (nonceToken !== forToken) {
+      nonceValue = sessionNonce(forToken);
+      nonceToken = forToken;
+    }
+    return nonceValue;
+  }
+
   function isAuthorized(headers: Record<string, string | string[] | number>) {
     if (!authEnabled) return true;
     if (token === null) return false;
     if (secretEquals(tokenFromHeaders(headers) ?? '', token)) return true;
-    return secretEquals(cookieSession(headers) ?? '', sessionNonce(token));
+    return secretEquals(
+      cookieSession(headers) ?? '',
+      sessionCookieValue(token),
+    );
   }
 
   /** DNS-rebinding and cross-origin defense for plain HTTP. In auth (device)
@@ -388,7 +444,7 @@ export function createLoopbackServer(
         };
         if (authEnabled && token !== null) {
           headers['Set-Cookie'] =
-            `bare_session=${sessionNonce(token)}; HttpOnly; SameSite=Lax; Path=/`;
+            `bare_session=${sessionCookieValue(token)}; HttpOnly; SameSite=Lax; Path=/`;
         }
         res.writeHead(200, headers);
         res.end('ok');
@@ -435,12 +491,12 @@ export function createLoopbackServer(
   function resolveDirFile(
     mount: { kind: 'dir'; dirPath: string; rel: string; public: boolean },
     headers: Record<string, string | number>,
-  ): string | null {
+  ): ResolvedFile | null {
     const candidate =
       mount.rel === '' ? mount.dirPath : path.join(mount.dirPath, mount.rel);
     try {
       const stat = fs.statSync(candidate);
-      if (stat.isFile()) return candidate;
+      if (stat.isFile()) return { filePath: candidate, stat };
     } catch {
       debugSkip(
         `[static-server] resolveDirFile: stat failed for ${candidate} — falling through to the directory index / SPA fallback`,
@@ -461,11 +517,11 @@ export function createLoopbackServer(
     return indexHtmlIfPresent(mount.dirPath);
   }
 
-  function indexHtmlIfPresent(dirPath: string): string | null {
+  function indexHtmlIfPresent(dirPath: string): ResolvedFile | null {
     try {
       const index = path.join(dirPath, 'index.html');
       const stat = fs.statSync(index);
-      if (stat.isFile()) return index;
+      if (stat.isFile()) return { filePath: index, stat };
     } catch {
       debugSkip(
         `[static-server] indexHtmlIfPresent: no index.html under ${dirPath} — 404`,
@@ -486,14 +542,22 @@ export function createLoopbackServer(
     req: HTTPIncomingMessage,
     res: HTTPServerResponse,
     filePath: string,
+    knownStat?: ResolvedFile['stat'],
+    cache: CachePolicy = 'no-store',
   ) {
     let stat: ReturnType<typeof fs.statSync>;
-    try {
-      stat = fs.statSync(filePath);
-    } catch {
-      debugSkip(`[static-server] serveFile: stat failed for ${filePath} — 404`);
-      writeError(res, 404, 'Not found');
-      return;
+    if (knownStat) {
+      stat = knownStat;
+    } else {
+      try {
+        stat = fs.statSync(filePath);
+      } catch {
+        debugSkip(
+          `[static-server] serveFile: stat failed for ${filePath} — 404`,
+        );
+        writeError(res, 404, 'Not found');
+        return;
+      }
     }
     if (!stat.isFile()) {
       writeError(res, 404, 'Not found');
@@ -521,13 +585,34 @@ export function createLoopbackServer(
       pipeFile(res, filePath, range);
       return;
     }
+    const cacheHeaders: Record<string, string> =
+      cache === 'no-store'
+        ? { 'Cache-Control': 'no-store' }
+        : {
+            'Cache-Control':
+              cache === 'immutable'
+                ? 'max-age=31536000, immutable'
+                : 'no-cache',
+            ETag: etagFor(stat),
+          };
+    if (
+      cache !== 'no-store' &&
+      etagMatches(req.headers['if-none-match'], cacheHeaders.ETag)
+    ) {
+      res.writeHead(304, {
+        ...cacheHeaders,
+        'Referrer-Policy': 'no-referrer',
+      });
+      res.end();
+      return;
+    }
     res.writeHead(200, {
       'Content-Type': contentType,
       'Content-Length': stat.size,
       'Accept-Ranges': 'bytes',
       ...cspHeader,
       'Referrer-Policy': 'no-referrer',
-      'Cache-Control': 'no-store',
+      ...cacheHeaders,
     });
     (res as unknown as { flushHeaders(): void }).flushHeaders();
     pipeFile(res, filePath);
@@ -618,17 +703,34 @@ export function createLoopbackServer(
         return;
       }
 
-      const filePath =
-        mount === null
-          ? null
-          : mount.kind === 'file'
-            ? mount.filePath
-            : resolveDirFile(mount, headers);
-      if (filePath === null) {
+      if (mount === null) {
         writeError(res, 404, 'Not found');
         return;
       }
-      serveFile(req, res, filePath);
+      if (mount.kind === 'file') {
+        // Mounted files (e.g. media) can be replaced under the same URL and
+        // are session-gated: never cacheable.
+        serveFile(req, res, mount.filePath);
+        return;
+      }
+      const resolved = resolveDirFile(mount, headers);
+      if (resolved === null) {
+        writeError(res, 404, 'Not found');
+        return;
+      }
+      // Policy is decided from the file actually served, so an SPA fallback to
+      // `index.html` is revalidated rather than mistaken for a hashed asset.
+      const servedRel = resolved.filePath
+        .slice(mount.dirPath.length)
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '');
+      serveFile(
+        req,
+        res,
+        resolved.filePath,
+        resolved.stat,
+        cachePolicyFor(servedRel, mount.public),
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       res.writeHead(500, { 'Content-Type': 'text/plain' });
