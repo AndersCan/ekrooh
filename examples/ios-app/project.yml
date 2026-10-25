@@ -47,6 +47,8 @@ targets:
         embed: true
       - framework: addons/bare-fs.4.8.4.xcframework
         embed: true
+      - framework: addons/bare-hrtime.2.1.2.xcframework
+        embed: true
       - framework: addons/bare-inspect.3.1.10.xcframework
         embed: true
       - framework: addons/bare-os.3.9.3.xcframework
