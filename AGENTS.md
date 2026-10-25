@@ -59,21 +59,21 @@ Notes:
 
 ## Repo map (ownership)
 
-| Path                                                                                                            | Owner        | Contents                                                                                                                             |
-| --------------------------------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `core/messages`                                                                                                 | framework    | Wire protocol: codec, plugin kernel, RPC messenger, host IPC, types                                                                  |
-| `core/server`, `core/lib`, `core/main.core.ts`                                                                  | framework    | Unified loopback HTTP+WS server (web app + media + protocol socket, cookie auth) + Bare worklet entry                                |
-| `plugins`                                                                                                       | framework    | Canonical plugins (`core.health`, `core.discovery`, `core.permissions`, `vendor.media`) + typed event builders                       |
-| `web/transports`, `web/websocket-client.ts`, `web/connection-machine.ts`                                        | framework    | `MessageTransport` + WebSocket (same-origin, cookie login, reconnect — the connection lifecycle is a mantaq actor) / mock transports |
-| `android`                                                                                                       | framework    | Android host library (`:bare-host`): IPC coordinator, host plugin registry, WebView client                                           |
-| `ios`                                                                                                           | framework    | iOS host Swift package (`BareHost`): IPC coordinator, host plugin registry                                                           |
-| `examples/web`                                                                                                  | example      | Reference web UI (lit-html + nanostores + Tailwind)                                                                                  |
-| `examples/android-app`                                                                                          | example      | Reference Android app consuming `:bare-host` + web assets                                                                            |
-| `examples/ios-app`                                                                                              | example      | Reference iOS app consuming `BareHost` + web assets (xcodegen project)                                                               |
-| `e2e`                                                                                                           | tooling      | Playwright specs against the mock transport                                                                                          |
-| `scripts`                                                                                                       | tooling      | Dev-bare runner, playwright browser wrapper, prebuild fetcher                                                                        |
-| `prebuilds`                                                                                                     | build output | Bare Kit prebuilds (gitignored, fetched from a GitHub release)                                                                       |
-| `vision.md`, `plan.md`, `CONTEXT.md`, `rendering.md`, `ios-handoff.md`, `RELEASING.md`, `CHANGELOG.md`, `docs/` | docs         | Decision + planning documents; ADRs live in `docs/adr/`                                                                              |
+| Path                                                                               | Owner        | Contents                                                                                                                             |
+| ---------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `core/messages`                                                                    | framework    | Wire protocol: codec, plugin kernel, RPC messenger, host IPC, types                                                                  |
+| `core/server`, `core/lib`, `core/main.core.ts`                                     | framework    | Unified loopback HTTP+WS server (web app + media + protocol socket, cookie auth) + Bare worklet entry                                |
+| `plugins`                                                                          | framework    | Canonical plugins (`core.health`, `core.discovery`, `core.permissions`, `vendor.media`) + typed event builders                       |
+| `web/transports`, `web/websocket-client.ts`, `web/connection-machine.ts`           | framework    | `MessageTransport` + WebSocket (same-origin, cookie login, reconnect — the connection lifecycle is a mantaq actor) / mock transports |
+| `android`                                                                          | framework    | Android host library (`:bare-host`): IPC coordinator, host plugin registry, WebView client                                           |
+| `ios`                                                                              | framework    | iOS host Swift package (`BareHost`): IPC coordinator, host plugin registry                                                           |
+| `examples/web`                                                                     | example      | Reference web UI (lit-html + nanostores + Tailwind)                                                                                  |
+| `examples/android-app`                                                             | example      | Reference Android app consuming `:bare-host` + web assets                                                                            |
+| `examples/ios-app`                                                                 | example      | Reference iOS app consuming `BareHost` + web assets (xcodegen project)                                                               |
+| `e2e`                                                                              | tooling      | Playwright specs against the mock transport                                                                                          |
+| `scripts`                                                                          | tooling      | Dev-bare runner, playwright browser wrapper, prebuild fetcher                                                                        |
+| `prebuilds`                                                                        | build output | Bare Kit prebuilds (gitignored, fetched from a GitHub release)                                                                       |
+| `vision.md`, `CONTEXT.md`, `rendering.md`, `RELEASING.md`, `CHANGELOG.md`, `docs/` | docs         | Decision documents; ADRs live in `docs/adr/`                                                                                         |
 
 The framework's public API surface is the `exports` map in `package.json`
 (`@ekrooh/bare/core`, `/runtime`, `/plugins`, `/plugins/*/events`,
@@ -103,12 +103,6 @@ tooling, internals) can change freely.
 Releases are **tag-driven and single-version** (`vX.Y.Z`): CI builds and
 publishes every artifact for the tag together. Follow `RELEASING.md`, never
 ad-hoc publish.
-
-## Planning
-
-The transport/auth roadmap lives in `plan.md` (Phase 1 done; Phase 2 unifies
-the loopback server + cookie auth; Phase 3 is release readiness). Follow it
-when extending the host/transport surface.
 
 ## Agent skills
 

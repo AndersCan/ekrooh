@@ -1,24 +1,19 @@
 # web/transports/
 
-Transports for the binary message protocol. Exported as `@ekrooh/bare/transports`.
+Transports for the binary message protocol, exported as `@ekrooh/bare/transports`.
 
-| File                  | Contents                                                                                                               |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `index.ts`            | Public entry: `MessageTransport` type + the transports.                                                                |
-| `websocket-client.ts` | `createWebSocketTransport` + the `MessageTransport` interface (lives one level up). Same-origin default, cookie login. |
-| `mock.ts`             | `createMockTransport` — deterministic, in-process responses used by unit/e2e tests.                                    |
-| `mock-handlers.ts`    | Mock invoke handlers for the canonical health plugin.                                                                  |
+- `index.ts`: public entry (`MessageTransport` type and transports).
+- `../websocket-client.ts`: `createWebSocketTransport` and the `MessageTransport` interface.
+- `mock.ts`: `createMockTransport`, deterministic in-process responses for tests.
+- `mock-handlers.ts`: mock invoke handlers for `core.health`.
 
-A `MessageTransport` has `send(type, header, payload?)` and
-`subscribe(handler)`. It is the UI-facing boundary; it does not know about
-worklets, Bare, or host IPC.
+`MessageTransport` has `send(type, header, payload?)` and `subscribe(handler)`. It knows nothing about worklets, Bare, or host IPC.
 
-On device the page is served by the worklet's loopback server, so the
-WebSocket transport defaults to the page origin (`ws://location.host`); when a
-one-time bootstrap nonce is injected (`window.__ekrooh.bootstrap`, never the
-raw token) it is exchanged for a `bare_session` cookie via `POST /login` before
-the socket opens, and reconnects with backoff (250ms → 2s, 5 tries). There is
-no `?token=` URL fallback. Browser dev is cross-origin, so pass an explicit URL
-(`VITE_BARE_WS_URL` in `examples/web`).
+WebSocket transport:
 
-Tests: `mock.test.ts` + `websocket-client.test.ts` (run via `vp test`).
+- Defaults to the page origin. On device the worklet's loopback server serves the page.
+- A one-time nonce (`window.__ekrooh.bootstrap`, never the raw token) is exchanged for a `bare_session` cookie via `POST /login`.
+- Reconnects with backoff (250 ms to 2 s, 5 tries). No `?token=` fallback.
+- Cross-origin browser dev needs `VITE_BARE_WS_URL` (see `examples/web`).
+
+Tests: `mock.test.ts`, `websocket-client.test.ts` (`vp test`).

@@ -1,33 +1,18 @@
-# android/ — host library (`:bare-host`)
+# android/: host library (`:bare-host`)
 
-The Android host for `@ekrooh/bare`, published as an AAR. Package
-`to.holepunch.bare.android`.
+Android host for `@ekrooh/bare`, published as an AAR. Package `to.holepunch.bare.android`; sources in `src/main/java/to/holepunch/bare/android/`.
 
-| Class                | Responsibility                                                                                                          |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `BareProtocol`       | Kotlin mirror of the binary wire protocol (encode/decode).                                                              |
-| `HostIpcCoordinator` | Reads the IPC channel: answers capability queries and dispatches host invokes (the web layer uses the loopback socket). |
-| `HostPluginRegistry` | Registers host-side handlers and produces capability rows.                                                              |
-| `DefaultHostPlugins` | Registers the canonical host plugin handlers (`core.permissions` stub).                                                 |
-| `BareWebViewClient`  | Logs WebView resource errors (the worklet serves the page over loopback).                                               |
-
-Build:
+- `BareProtocol`: Kotlin mirror of the wire protocol.
+- `HostIpcCoordinator`: answers capability queries, dispatches host invokes.
+- `HostPluginRegistry`: host-side handlers and capability rows.
+- `DefaultHostPlugins`: canonical host handlers (`core.permissions` stub).
+- `BareWebViewClient`: logs WebView resource errors.
 
 ```bash
 ./gradlew :bare-host:build
+./gradlew :bare-host:testDebugUnitTest   # JUnit tests in src/test/
 ```
 
-Tests: `src/test/` (JUnit, via `./gradlew :bare-host:testDebugUnitTest`).
+Reference consumer: `examples/android-app` (`MainActivity.kt`). The Bare Kit prebuilt (`prebuilds/android/bare-kit/`, gitignored, from `npm run prebuilds`) is packaged into the AAR.
 
-Consumers: `examples/android-app` depends on this module and demonstrates the
-full host lifecycle (`MainActivity.kt`).
-
-The Bare Kit runtime prebuilt (`prebuilds/android/bare-kit/classes.jar`,
-gitignored — fetch with `npm run prebuilds`) ships inside the published AAR:
-AGP packages the local jar into the AAR's `libs/` and the native libs from
-`prebuilds/android/bare-kit/jni` into `jni/`, so consumers need no prebuilds
-download.
-
-Publishing: `io.ekrooh:bare-host` to GitHub Packages via
-`./gradlew :bare-host:publishMavenAarPublicationToGitHubPackagesRepository`
-(`release.yml` does this on tags).
+Publishing: `io.ekrooh:bare-host` to GitHub Packages via `./gradlew :bare-host:publishMavenAarPublicationToGitHubPackagesRepository`; `.github/workflows/release.yml` runs it on tags.
