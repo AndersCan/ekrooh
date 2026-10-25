@@ -143,6 +143,71 @@ class FrameDecoderTest {
         assertArrayEquals(byteArrayOf(7), decoded[1].payload)
     }
 
+    private fun pattern(size: Int, seed: Int = 0) =
+        ByteArray(size) { ((it * 31 + seed) and 0xff).toByte() }
+
+    @Test
+    fun `reassembles a multi-megabyte payload delivered in 64KB chunks`() {
+        val payload = pattern(4 * 1024 * 1024)
+        val f = frame(payload)
+        val decoder = FrameDecoder()
+        val decoded = mutableListOf<BareProtocol.WireMessage>()
+        var o = 0
+        while (o < f.size) {
+            val end = minOf(o + 65536, f.size)
+            decoded += decoder.push(f.copyOfRange(o, end))
+            o = end
+        }
+        assertTrue(decoder.error == null)
+        assertEquals(1, decoded.size)
+        assertArrayEquals(payload, decoded[0].payload)
+    }
+
+    @Test
+    fun `keeps a trailing partial frame across pushes and decodes it intact`() {
+        val f1 = frame(pattern(300, 1))
+        val f2 = frame(pattern(70000, 2))
+        val f3 = frame(null)
+        val stream = f1 + f2 + f3
+        val decoder = FrameDecoder()
+        val decoded = mutableListOf<BareProtocol.WireMessage>()
+        var o = 0
+        // Boundaries land inside a prefix, a header and a payload, and several
+        // frames coalesce with a partial tail.
+        for (size in listOf(5, 400, 1, 20000, 49000, 7)) {
+            decoded += decoder.push(stream.copyOfRange(o, o + size))
+            o += size
+        }
+        decoded += decoder.push(stream.copyOfRange(o, stream.size))
+        assertTrue(decoder.error == null)
+        assertEquals(3, decoded.size)
+        assertArrayEquals(pattern(300, 1), decoded[0].payload)
+        assertArrayEquals(pattern(70000, 2), decoded[1].payload)
+    }
+
+    @Test
+    fun `does not alias a partial frame to a caller buffer that is reused`() {
+        val f = frame(byteArrayOf(65, 65, 65, 65))
+        val mid = f.size - 2
+        val reusable = f.copyOfRange(0, mid)
+        val decoder = FrameDecoder()
+        assertEquals(0, decoder.push(reusable).size)
+        // The caller scribbles over its buffer before the rest arrives.
+        reusable.fill(0xee.toByte())
+        val decoded = decoder.push(f.copyOfRange(mid, f.size))
+        assertEquals(1, decoded.size)
+        assertArrayEquals(byteArrayOf(65, 65, 65, 65), decoded[0].payload)
+    }
+
+    @Test
+    fun `frees a large partial buffer once drained and keeps working`() {
+        val big = frame(pattern(256 * 1024))
+        val decoder = FrameDecoder()
+        assertEquals(0, decoder.push(big.copyOfRange(0, 1000)).size)
+        assertEquals(1, decoder.push(big.copyOfRange(1000, big.size)).size)
+        assertEquals(1, decoder.push(frame(null)).size)
+    }
+
     @Test
     fun `goes inert after a frame too large and resyncs on clear`() {
         val decoder = FrameDecoder()

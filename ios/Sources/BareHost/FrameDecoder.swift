@@ -30,27 +30,36 @@ public struct FrameDecoder {
     buffer.append(chunk)
 
     var out: [BareProtocol.WireMessage] = []
-    while buffer.count >= 7 {
-      let bytes = [UInt8](buffer)
-      let headerLen = Int(bytes[2]) << 8 | Int(bytes[3])
+    // Frames are read in place at `offset` and the consumed prefix is removed
+    // once at the end, so draining N coalesced frames (or reading each prefix)
+    // never copies the whole buffer per frame.
+    let base = buffer.startIndex
+    var offset = 0
+    while buffer.count - offset >= 7 {
+      let at = base + offset
+      let headerLen = Int(buffer[at + 2]) << 8 | Int(buffer[at + 3])
       if headerLen > BareProtocol.maxHeaderBytes {
         fail(BareProtocolError.headerTooLarge(headerLen))
         return out
       }
       let payloadLen =
-        (Int(bytes[4]) << 16) | (Int(bytes[5]) << 8) | Int(bytes[6])
+        (Int(buffer[at + 4]) << 16) | (Int(buffer[at + 5]) << 8)
+        | Int(buffer[at + 6])
       let frameLen = 7 + headerLen + payloadLen
       if frameLen > BareProtocol.maxFrameBytes {
         fail(BareProtocolError.frameTooLarge(frameLen))
         return out
       }
-      if buffer.count < frameLen { break }
+      if buffer.count - offset < frameLen { break }
 
-      let frame = buffer.subdata(in: 0..<frameLen)
-      buffer.removeSubrange(0..<frameLen)
+      let frame = buffer.subdata(in: at..<(at + frameLen))
+      offset += frameLen
       if let message = BareProtocol.parseMessage(frame) {
         out.append(message)
       }
+    }
+    if offset > 0 {
+      buffer.removeSubrange(base..<(base + offset))
     }
 
     // A partial longer than the frame cap can never complete a legal frame.

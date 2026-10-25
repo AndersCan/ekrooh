@@ -185,6 +185,128 @@ describe('createFrameDecoder', () => {
     expect(new TextDecoder().decode(b.payload)).toBe('BBBB');
   });
 
+  describe('chunked reassembly', () => {
+    const header = (event: string, requestId: string) =>
+      ({
+        type: 'INVOKE_REQUEST',
+        pluginId: 'a',
+        event,
+        requestId,
+        args: {},
+      }) as const;
+
+    const pattern = (size: number, seed = 0) => {
+      const bytes = new Uint8Array(size);
+      for (let i = 0; i < size; i++) bytes[i] = (i * 31 + seed) & 0xff;
+      return bytes;
+    };
+
+    it('reassembles a multi-megabyte payload delivered in 64KB chunks', () => {
+      const decoder = createFrameDecoder(protocol);
+      const payload = pattern(4 * 1024 * 1024);
+      const frame = protocol.encode(
+        MessageType.ENVELOPE,
+        header('a.big', 'big'),
+        payload,
+      );
+      const seen: WireMessage[] = [];
+      for (let o = 0; o < frame.byteLength; o += 65536) {
+        seen.push(...decoder.push(frame.subarray(o, o + 65536)));
+      }
+      expect(decoder.error).toBeNull();
+      expect(seen).toHaveLength(1);
+      expect(seen[0].payload.byteLength).toBe(payload.byteLength);
+      expect(Buffer.compare(seen[0].payload, payload)).toBe(0);
+    });
+
+    it('keeps a trailing partial frame across pushes and decodes it intact', () => {
+      const decoder = createFrameDecoder(protocol);
+      const f1 = protocol.encode(
+        MessageType.ENVELOPE,
+        header('a.one', '1'),
+        pattern(300, 1),
+      );
+      const f2 = protocol.encode(
+        MessageType.ENVELOPE,
+        header('a.two', '2'),
+        pattern(70000, 2),
+      );
+      const f3 = protocol.encode(
+        MessageType.ENVELOPE,
+        header('a.three', '3'),
+        null,
+      );
+      const stream = new Uint8Array(
+        f1.byteLength + f2.byteLength + f3.byteLength,
+      );
+      stream.set(f1, 0);
+      stream.set(f2, f1.byteLength);
+      stream.set(f3, f1.byteLength + f2.byteLength);
+
+      // Chunk sizes chosen so boundaries land inside a prefix, a header and a
+      // payload, and several frames coalesce with a partial tail.
+      const sizes = [5, 400, 1, 20000, 49000, 7];
+      const seen: WireMessage[] = [];
+      let o = 0;
+      for (const size of sizes) {
+        seen.push(...decoder.push(stream.subarray(o, o + size)));
+        o += size;
+      }
+      seen.push(...decoder.push(stream.subarray(o)));
+      expect(decoder.error).toBeNull();
+      expect(requests(seen)).toEqual(['a.one', 'a.two', 'a.three']);
+      expect(Buffer.compare(seen[0].payload, pattern(300, 1))).toBe(0);
+      expect(Buffer.compare(seen[1].payload, pattern(70000, 2))).toBe(0);
+    });
+
+    it('does not alias a partial frame to a caller buffer that is reused', () => {
+      const decoder = createFrameDecoder(protocol);
+      const frame = protocol.encode(
+        MessageType.ENVELOPE,
+        header('a.ping', 'p'),
+        new TextEncoder().encode('AAAA'),
+      );
+      const mid = frame.byteLength - 2;
+      const reusable = new Uint8Array(mid);
+      reusable.set(frame.subarray(0, mid));
+      expect(decoder.push(reusable)).toEqual([]);
+      // The caller scribbles over its buffer before the rest arrives.
+      reusable.fill(0xee);
+      const [decoded] = decoder.push(frame.subarray(mid));
+      expect(new TextDecoder().decode(decoded.payload)).toBe('AAAA');
+    });
+
+    it('copies frames out of a Buffer chunk (Buffer#slice is a view)', () => {
+      const decoder = createFrameDecoder(protocol);
+      const frame = protocol.encode(
+        MessageType.ENVELOPE,
+        header('a.ping', 'b'),
+        new TextEncoder().encode('AAAA'),
+      );
+      const chunk = Buffer.from(frame);
+      const [decoded] = decoder.push(chunk);
+      chunk.fill(0xee);
+      expect(new TextDecoder().decode(decoded.payload)).toBe('AAAA');
+    });
+
+    it('frees a large partial buffer once drained and keeps working', () => {
+      const decoder = createFrameDecoder(protocol);
+      const big = protocol.encode(
+        MessageType.ENVELOPE,
+        header('a.big', 'x'),
+        pattern(256 * 1024),
+      );
+      const small = protocol.encode(
+        MessageType.ENVELOPE,
+        header('a.small', 'y'),
+        null,
+      );
+      expect(decoder.push(big.subarray(0, 1000))).toEqual([]);
+      expect(requests(decoder.push(big.subarray(1000)))).toEqual(['a.big']);
+      expect(requests(decoder.push(small))).toEqual(['a.small']);
+    });
+  });
+
   it('records a decode error, goes inert, and clears on clear()', () => {
     const decoder = createFrameDecoder(protocol);
     // A ≥7-byte chunk whose version byte is invalid: the frame fails to decode
