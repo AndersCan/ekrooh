@@ -27,3 +27,25 @@ _Avoid_: "coverage requirement" alone
 **Public API snapshot**:
 The contract test that freezes the exact exported names of each `@ekrooh/bare` subpath, so an accidental break of a stability boundary fails CI as a test, not a review note.
 _Avoid_: "API test" (too generic)
+
+## Autonomy
+
+**Charter**:
+The human-owned document (`docs/api-charter.md`) stating how the framework's API should feel, with worked good and bad examples that are also executable. Agents conform to it; only the owner edits it.
+_Avoid_: "style guide", "requirements doc"
+
+**Owner-gated change**:
+A change that touches a stability boundary, `vision.md`, the charter, an ADR, or the CI workflows, and therefore waits for the owner instead of merging itself. Every other change merges itself once all gates are green.
+_Avoid_: "protected file", "manual review"
+
+**Housekeeping script**:
+A deterministic, owner-triggered script for routine upkeep (dependency updates, runtime bumps). It is not an agent loop; an agent is involved only to repair a failure.
+_Avoid_: "maintenance bot", "agent loop"
+
+**Release PR**:
+The single pull request, opened and kept current by a deterministic script whenever there are unreleased changes, whose merge cuts the release. Merging it is the owner's only release decision, and a major release always waits for the owner.
+_Avoid_: "release branch", "release ticket"
+
+**Release gate**:
+A check required to merge a Release PR but not an ordinary change. The downstream app (justus) building against the release candidate is the release gate.
+_Avoid_: "canary job"

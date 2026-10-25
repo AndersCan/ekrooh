@@ -38,9 +38,13 @@ and is not, and it wins over any code-level decision.
 
 ## Canonical commands
 
-Run from the repo root. The gate for every change is `npm run build:pkg` (compiles
-the package to `dist/`, which `vp check`, `vp test`, and the web build resolve
-through the `exports` map) followed by `vp check` + `vp test`.
+Run from the repo root. **GitHub CI is the authority on whether a change works**
+(see `docs/adr/0004-owner-initiated-agent-run-repo.md`). A local run is a quick
+hint, never proof: do not report a change as verified from a local run, and do not
+add test steps that only work on one machine. Push and read the CI result. The CI
+gate is `npm run build:pkg` (compiles the package to `dist/`, which `vp check`,
+`vp test`, and the web build resolve through the `exports` map) followed by
+`vp check` + `vp test`, plus the e2e, emulator and simulator jobs.
 
 | Command                                         | Meaning                                                                                                 |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
