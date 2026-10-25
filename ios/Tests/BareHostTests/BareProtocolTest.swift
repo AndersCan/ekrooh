@@ -176,6 +176,51 @@ final class FrameDecoderTest: XCTestCase {
     XCTAssertEqual(decoded.last?.payload, Data([7]))
   }
 
+  private func pattern(_ size: Int, seed: Int = 0) -> Data {
+    Data((0..<size).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ seed) })
+  }
+
+  func testReassemblesAMultiMegabytePayloadDeliveredIn64KBChunks() throws {
+    let payload = pattern(4 * 1024 * 1024)
+    let f = try frame(payload: payload)
+    var decoder = FrameDecoder()
+    var decoded: [BareProtocol.WireMessage] = []
+    var o = 0
+    while o < f.count {
+      let end = min(o + 65536, f.count)
+      decoded.append(contentsOf: decoder.push(f.subdata(in: o..<end)))
+      o = end
+    }
+    XCTAssertNil(decoder.error)
+    XCTAssertEqual(decoded.count, 1)
+    XCTAssertEqual(decoded.first?.payload, payload)
+  }
+
+  func testKeepsATrailingPartialFrameAcrossPushesAndDecodesItIntact() throws {
+    let f1 = try frame(payload: pattern(300, seed: 1))
+    let f2 = try frame(payload: pattern(70000, seed: 2))
+    let f3 = try frame()
+    var stream = Data()
+    stream.append(f1)
+    stream.append(f2)
+    stream.append(f3)
+
+    var decoder = FrameDecoder()
+    var decoded: [BareProtocol.WireMessage] = []
+    var o = 0
+    // Boundaries land inside a prefix, a header and a payload, and several
+    // frames coalesce with a partial tail.
+    for size in [5, 400, 1, 20000, 49000, 7] {
+      decoded.append(contentsOf: decoder.push(stream.subdata(in: o..<(o + size))))
+      o += size
+    }
+    decoded.append(contentsOf: decoder.push(stream.subdata(in: o..<stream.count)))
+    XCTAssertNil(decoder.error)
+    XCTAssertEqual(decoded.count, 3)
+    XCTAssertEqual(decoded[0].payload, pattern(300, seed: 1))
+    XCTAssertEqual(decoded[1].payload, pattern(70000, seed: 2))
+  }
+
   func testGoesInertAfterAFrameTooLargeAndResyncsOnClear() throws {
     var decoder = FrameDecoder()
     // headerLen 0, payloadLen 0xffffff: frameLen exceeds the cap (a framing

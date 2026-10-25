@@ -2,14 +2,13 @@ import { MAX_HEADER_BYTES } from './constants';
 import type { WireMessage } from './types';
 import type { MessageProtocol } from './wire-codec';
 
-function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
-  if (a.byteLength === 0) return b;
-  if (b.byteLength === 0) return a;
-  const out = new Uint8Array(a.byteLength + b.byteLength);
-  out.set(a, 0);
-  out.set(b, a.byteLength);
-  return out;
-}
+/** Smallest buffer allocated for a partial frame whose length is not yet known
+ * (fewer than 7 prefix bytes have arrived). */
+const MIN_PARTIAL_BYTES = 64;
+
+/** A partial-frame buffer larger than this is released once drained, so one
+ * large frame does not pin its memory for the rest of the session. */
+const RETAIN_BYTES = 64 * 1024;
 
 /** Receive-side frame decoder for a single channel. The wire format is
  * `[version][type][hLenHi][hLenLo][pLenHi][pLenMid][pLenLo][header][payload]`:
@@ -26,7 +25,12 @@ function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
  * but the frames already decoded from the same chunk are still returned; the
  * caller decides whether to drop the channel. The caller checks `error` after a
  * `push` rather than relying on a throw, so a good frame is never lost to a
- * later frame failing in the same chunk. */
+ * later frame failing in the same chunk.
+ *
+ * Reassembly is linear in the bytes received: once the length prefix of an
+ * incomplete frame is known the partial buffer is sized to that frame once and
+ * filled in place as chunks arrive, rather than re-concatenating everything
+ * buffered on every chunk. */
 export interface FrameDecoder {
   push(chunk: Uint8Array): WireMessage[];
   clear(): void;
@@ -34,7 +38,11 @@ export interface FrameDecoder {
 }
 
 export function createFrameDecoder(protocol: MessageProtocol): FrameDecoder {
+  /** Partial-frame storage: the first `length` bytes are buffered data. Empty
+   * whenever nothing is buffered, so a chunk of whole frames is decoded
+   * straight from the caller's bytes without being copied in first. */
   let buffer: Uint8Array = new Uint8Array(0);
+  let length = 0;
   let error: Error | null = null;
 
   function fail(err: Error): void {
@@ -43,15 +51,68 @@ export function createFrameDecoder(protocol: MessageProtocol): FrameDecoder {
     // the stream, so the only safe resync point is a fresh frame boundary after
     // `clear()` (or a successful batch, which resets the error).
     buffer = new Uint8Array(0);
+    length = 0;
+  }
+
+  /** Grows `buffer` to hold at least `bytes`, preserving buffered data. */
+  function reserve(bytes: number): void {
+    if (buffer.byteLength >= bytes) return;
+    const next = new Uint8Array(Math.max(bytes, MIN_PARTIAL_BYTES));
+    next.set(buffer.subarray(0, length), 0);
+    buffer = next;
+  }
+
+  /** Keeps `rest` (the unconsumed tail of `source`) as the buffered partial,
+   * sized for `frameLen` when the incomplete frame's length is known. */
+  function retain(
+    source: Uint8Array,
+    from: number,
+    to: number,
+    frameLen: number,
+  ) {
+    const rest = to - from;
+    if (rest === 0) {
+      length = 0;
+      if (buffer.byteLength > RETAIN_BYTES) buffer = new Uint8Array(0);
+      return;
+    }
+    if (source === buffer) {
+      // Compact in place; `copyWithin` handles the overlap.
+      buffer.copyWithin(0, from, to);
+      length = rest;
+      reserve(frameLen);
+      return;
+    }
+    // `source` is the caller's chunk, which they may reuse: copy the tail out.
+    length = 0;
+    reserve(Math.max(rest, frameLen));
+    buffer.set(source.subarray(from, to), 0);
+    length = rest;
   }
 
   function push(chunk: Uint8Array): WireMessage[] {
     if (error) return [];
-    buffer = concatBytes(buffer, chunk);
+
+    let source: Uint8Array;
+    let end: number;
+    if (length === 0) {
+      // Nothing buffered: decode straight from the caller's bytes.
+      source = chunk;
+      end = chunk.byteLength;
+    } else {
+      reserve(length + chunk.byteLength);
+      buffer.set(chunk, length);
+      length += chunk.byteLength;
+      source = buffer;
+      end = length;
+    }
 
     const out: WireMessage[] = [];
-    while (buffer.byteLength >= 7) {
-      const headerLen = (buffer[2] << 8) | buffer[3];
+    let offset = 0;
+    // Length of the incomplete frame at `offset`, once its prefix has arrived.
+    let pendingFrameLen = 0;
+    while (end - offset >= 7) {
+      const headerLen = (source[offset + 2] << 8) | source[offset + 3];
       if (headerLen > MAX_HEADER_BYTES) {
         fail(
           new Error(
@@ -60,7 +121,10 @@ export function createFrameDecoder(protocol: MessageProtocol): FrameDecoder {
         );
         return out;
       }
-      const payloadLen = (buffer[4] << 16) | (buffer[5] << 8) | buffer[6];
+      const payloadLen =
+        (source[offset + 4] << 16) |
+        (source[offset + 5] << 8) |
+        source[offset + 6];
       const frameLen = 7 + headerLen + payloadLen;
       if (frameLen > protocol.maxFrameBytes) {
         fail(
@@ -70,15 +134,23 @@ export function createFrameDecoder(protocol: MessageProtocol): FrameDecoder {
         );
         return out;
       }
-      if (buffer.byteLength < frameLen) break;
+      if (end - offset < frameLen) {
+        pendingFrameLen = frameLen;
+        break;
+      }
 
-      // Copy the frame out of the internal buffer before decoding: `buffer`
-      // may alias the caller-supplied `chunk` (concatBytes returns `chunk`
-      // directly when the buffer was empty), so a `subarray` view would let
-      // `decode`'s header/payload views point back at caller-owned memory that
-      // the caller reuses on its next read — silently corrupting decoded data.
-      const frame = buffer.slice(0, frameLen);
-      buffer = buffer.subarray(frameLen);
+      // Copy the frame out before decoding: `source` may be the caller's chunk
+      // (or the reusable partial buffer), so a `subarray` view would let
+      // `decode`'s header/payload views point back at memory that is reused on
+      // the next read — silently corrupting decoded data.
+      // `Uint8Array.prototype.slice` is called explicitly: on a Node/Bare
+      // `Buffer`, `.slice` is a view, not a copy.
+      const frame = Uint8Array.prototype.slice.call(
+        source,
+        offset,
+        offset + frameLen,
+      );
+      offset += frameLen;
       try {
         out.push(protocol.decode(frame));
       } catch (err) {
@@ -91,8 +163,10 @@ export function createFrameDecoder(protocol: MessageProtocol): FrameDecoder {
       }
     }
 
+    retain(source, offset, end, pendingFrameLen);
+
     // A partial longer than the frame cap can never complete a legal frame.
-    if (buffer.byteLength > protocol.maxFrameBytes) {
+    if (length > protocol.maxFrameBytes) {
       fail(
         new Error(
           `Frame buffer exceeded ${protocol.maxFrameBytes} bytes with no complete frame`,
@@ -107,6 +181,7 @@ export function createFrameDecoder(protocol: MessageProtocol): FrameDecoder {
     push,
     clear() {
       buffer = new Uint8Array(0);
+      length = 0;
       error = null;
     },
     get error() {
