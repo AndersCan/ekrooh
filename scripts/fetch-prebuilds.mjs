@@ -5,7 +5,7 @@
  *
  * Usage:
  *   node scripts/fetch-prebuilds.mjs            # pinned version (see below)
- *   node scripts/fetch-prebuilds.mjs v2.3.0     # explicit version
+ *   node scripts/fetch-prebuilds.mjs v2.5.5     # explicit version
  *
  * Requires the GitHub CLI (`gh`) with access to holepunchto/bare-kit releases.
  *
@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const version = process.argv[2] ?? 'v2.3.0';
+const version = process.argv[2] ?? 'v2.5.5';
 const archive = path.join(root, 'prebuilds.zip');
 const assetName = 'prebuilds.zip';
 const lockPath = path.join(scriptDir, 'prebuilds.lock.json');
