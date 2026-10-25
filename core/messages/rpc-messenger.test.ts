@@ -193,6 +193,71 @@ describe('createProtocolMessenger', () => {
     expect(vi.mocked(fetch)).toHaveBeenCalledWith('/logs?tail=50&format=text');
   });
 
+  it('shares one log-tail fetch across simultaneous timeouts and rate-limits it', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('window', { location: { host: '127.0.0.1:4321' } });
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => 'backend boom',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const messenger = createProtocolMessenger(vi.fn());
+      const invokeOnce = () =>
+        messenger.invoke(
+          {
+            type: 'INVOKE_REQUEST',
+            pluginId: 'core.health',
+            event: 'health.ping',
+            args: {},
+          },
+          null,
+          1000,
+        );
+      const expectTail = (p: Promise<unknown>) =>
+        expect(p).rejects.toThrow(/invoke timeout.*recent logs:.*boom/);
+
+      // A stalled peer times out many calls at once: one fetch, all enriched.
+      const burst = Array.from({ length: 50 }, invokeOnce).map(expectTail);
+      await vi.advanceTimersByTimeAsync(1001);
+      await Promise.all(burst);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // A timeout inside the rate-limit window reuses the cached tail.
+      const soon = expectTail(invokeOnce());
+      await vi.advanceTimersByTimeAsync(1001);
+      await soon;
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Once the window has passed, the next timeout fetches again.
+      await vi.advanceTimersByTimeAsync(6000);
+      const later = expectTail(invokeOnce());
+      await vi.advanceTimersByTimeAsync(1001);
+      await later;
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not delay a timeout rejection when no tail is available', async () => {
+    vi.useFakeTimers();
+    const messenger = createProtocolMessenger(vi.fn());
+    const promise = messenger.invoke(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        args: {},
+      },
+      null,
+      1000,
+    );
+    const assertion = expect(promise).rejects.toThrow(/^invoke timeout/);
+    await vi.advanceTimersByTimeAsync(1001);
+    await assertion;
+  });
+
   it('drops the oldest invoke when the concurrent cap is exceeded', async () => {
     const send = vi.fn();
     const messenger = createProtocolMessenger(send);

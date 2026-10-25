@@ -56,6 +56,7 @@ export function createProtocolMessenger(
       timer: ReturnType<typeof setTimeout>;
     }
   >();
+  const sharedLogTail = createSharedLogTail();
 
   return {
     dispatch(request, payload) {
@@ -70,7 +71,7 @@ export function createProtocolMessenger(
       return new Promise<MessageHeader>((resolvePromise, rejectPromise) => {
         const fail = async (reason: string): Promise<void> => {
           console.error(`[invoke] ${reason}`);
-          const tail = await serverLogTail();
+          const tail = await sharedLogTail();
           rejectPromise(
             new Error(tail ? `${reason}; recent logs: ${tail}` : reason),
           );
@@ -164,6 +165,36 @@ function withRequestId<T extends object>(
  * land in an XCTest accessibility label, so keep it bounded. */
 const INVOKE_TAIL_LINES = 20;
 const INVOKE_TAIL_TIMEOUT_MS = 2000;
+/** A tail fetched within this window is reused for later timeouts instead of
+ * fetching again. Timeouts cluster (a stalled peer times out every pending
+ * call at once), so without this each one would add its own `/logs` request to
+ * the server that is already struggling. */
+const INVOKE_TAIL_MIN_INTERVAL_MS = 5000;
+
+/**
+ * Wraps {@link serverLogTail} so concurrent timeouts share one request and
+ * timeouts shortly after a fetch reuse its result. State is per messenger, so
+ * nothing leaks between instances.
+ */
+function createSharedLogTail(): () => Promise<string | null> {
+  let inflight: Promise<string | null> | null = null;
+  let last: { at: number; tail: string | null } | null = null;
+  return () => {
+    if (inflight) return inflight;
+    if (last && Date.now() - last.at < INVOKE_TAIL_MIN_INTERVAL_MS) {
+      return Promise.resolve(last.tail);
+    }
+    inflight = serverLogTail()
+      .then((tail) => {
+        last = { at: Date.now(), tail };
+        return tail;
+      })
+      .finally(() => {
+        inflight = null;
+      });
+    return inflight;
+  };
+}
 
 /**
  * Fetches a short tail of the loopback server's log (worklet + webview console)
