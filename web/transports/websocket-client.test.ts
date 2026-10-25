@@ -607,3 +607,152 @@ describe('createWebSocketTransport reconnect', () => {
     expect(header.error?.code).toBe('TRANSPORT_ERROR');
   });
 });
+
+describe('createWebSocketTransport after a successful connect', () => {
+  const invoke = (requestId: string) =>
+    [
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId,
+      },
+      null,
+    ] as const;
+
+  /** Connects once, then fails `failures` reconnects in a row. */
+  async function connectThenFail(failures: number, maxRetries = 2) {
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries,
+      backoffMs: 5,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    lastSocket().open();
+    lastSocket().close();
+    for (let i = 0; i < failures; i++) {
+      await vi.advanceTimersByTimeAsync(2000);
+      lastSocket().close();
+    }
+    return transport;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('keeps reconnecting past maxRetries consecutive failures', async () => {
+    await connectThenFail(8);
+    const before = FakeWebSocket.instances.length;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(FakeWebSocket.instances.length).toBe(before + 1);
+
+    lastSocket().open();
+    expect(lastSocket().readyState).toBe(FakeWebSocket.OPEN);
+  });
+
+  it('fails invokes fast during a long outage and works again once reconnected', async () => {
+    const transport = await connectThenFail(5);
+    const headers: PluginInvokeResponseHeader[] = [];
+    transport.subscribe((m) => headers.push(m.header as never));
+
+    transport.send(...invoke('offline'));
+    expect(headers).toHaveLength(1);
+    expect(headers[0].requestId).toBe('offline');
+    expect(headers[0].error?.code).toBe('TRANSPORT_ERROR');
+
+    await vi.advanceTimersByTimeAsync(2000);
+    lastSocket().open();
+    transport.send(...invoke('online'));
+    expect(lastSocket().sent).toHaveLength(1);
+    expect(headers).toHaveLength(1);
+  });
+
+  it('fails requests queued before the outage turned long', async () => {
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 1,
+      backoffMs: 5,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    lastSocket().open();
+    const headers: PluginInvokeResponseHeader[] = [];
+    transport.subscribe((m) => headers.push(m.header as never));
+    lastSocket().close();
+    transport.send(...invoke('queued'));
+    expect(headers).toHaveLength(0);
+
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(2000);
+      lastSocket().close();
+    }
+    expect(headers.map((h) => h.requestId)).toEqual(['queued']);
+    expect(headers[0].error?.code).toBe('TRANSPORT_ERROR');
+  });
+
+  describe('returning to the foreground', () => {
+    let handlers: Record<string, () => void>;
+    let doc: { visibilityState: string; addEventListener: unknown };
+    beforeEach(() => {
+      handlers = {};
+      doc = {
+        visibilityState: 'visible',
+        addEventListener: vi.fn((type: string, fn: () => void) => {
+          handlers[type] = fn;
+        }),
+      };
+      vi.stubGlobal('document', doc);
+    });
+
+    it('retries immediately instead of waiting out the backoff', async () => {
+      await connectThenFail(5);
+      const before = FakeWebSocket.instances.length;
+      handlers['visibilitychange']();
+      expect(FakeWebSocket.instances.length).toBe(before + 1);
+      // The pending backoff timer must not open a second socket.
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(FakeWebSocket.instances.length).toBe(before + 1);
+    });
+
+    it('ignores a visibilitychange to hidden', async () => {
+      await connectThenFail(2);
+      const before = FakeWebSocket.instances.length;
+      doc.visibilityState = 'hidden';
+      handlers['visibilitychange']();
+      expect(FakeWebSocket.instances.length).toBe(before);
+    });
+
+    it('treats a socket the browser already closed as lost', async () => {
+      createWebSocketTransport({ url: 'ws://test', backoffMs: 5 });
+      await vi.advanceTimersByTimeAsync(0);
+      const stale = lastSocket();
+      stale.open();
+      // Suspended page: readyState moved on but `onclose` has not fired yet.
+      stale.readyState = FakeWebSocket.CLOSED;
+      handlers['visibilitychange']();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(lastSocket()).not.toBe(stale);
+    });
+
+    it('ignores a late close from a socket that was already replaced', async () => {
+      createWebSocketTransport({ url: 'ws://test', backoffMs: 5 });
+      await vi.advanceTimersByTimeAsync(0);
+      const stale = lastSocket();
+      stale.open();
+      stale.readyState = FakeWebSocket.CLOSED;
+      handlers['visibilitychange']();
+      await vi.advanceTimersByTimeAsync(2000);
+      const fresh = lastSocket();
+      const count = FakeWebSocket.instances.length;
+      stale.onclose?.();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(FakeWebSocket.instances.length).toBe(count);
+      fresh.open();
+      expect(fresh.readyState).toBe(FakeWebSocket.OPEN);
+    });
+  });
+});

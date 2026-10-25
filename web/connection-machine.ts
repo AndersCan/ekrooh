@@ -11,6 +11,9 @@ import {
  * The WebSocket connection state machine for `createWebSocketTransport`,
  * modeled with mantaq (internal-only — never part of the public `@ekrooh/bare`
  * surface). Owns the connection lifecycle, exponential backoff and retry cap.
+ * The cap only applies to a client that has never connected: once a socket has
+ * opened, a lost connection retries forever at the capped backoff (the app may
+ * simply be suspended), and `WAKE` skips the wait when it returns.
  * There is no `?token=` upgrade-rejection fallback: the session token must
  * never appear in a URL (the loopback server rejects it), so a rejected
  * upgrade can only be retried as a fresh authenticated socket.
@@ -45,6 +48,7 @@ const loginOk = event('LOGIN_OK')();
 const loginFail = event('LOGIN_FAIL')();
 const socketOpen = event('SOCKET_OPEN')();
 const socketClose = event('SOCKET_CLOSE')();
+const wake = event('WAKE')();
 const retryTimer = event('RETRY_TIMER')();
 
 type ConnectionContext = {
@@ -53,6 +57,8 @@ type ConnectionContext = {
   initialBackoffMs: number;
   maxBackoffMs: number;
   retries: number;
+  /** Set on the first `SOCKET_OPEN`; lifts the retry cap for good. */
+  everConnected: boolean;
 };
 
 export interface ConnectionMachine {
@@ -60,10 +66,16 @@ export interface ConnectionMachine {
   state(): ConnectionStateName;
   isConnected(): boolean;
   isGaveUp(): boolean;
+  /** True once a client that has connected before has failed more than
+   * `maxRetries` times in a row: the outage is no longer a quick blip. */
+  isDegraded(): boolean;
   sendLoginOk(): void;
   sendLoginFail(): void;
   sendOpen(): void;
   sendClose(): void;
+  /** The app returned to the foreground: retry now rather than after the
+   * backoff. A no-op in every state but `backoff`. */
+  sendWake(): void;
   /** Fires on every state/context change with the current state name. */
   onChange(fn: (state: ConnectionStateName) => void): () => void;
 }
@@ -77,10 +89,11 @@ export function createConnectionMachine(
     initialBackoffMs: options.initialBackoffMs,
     maxBackoffMs: options.maxBackoffMs,
     retries: 0,
+    everConnected: false,
   };
 
   const actor = new Actor({
-    inputs: [loginOk, loginFail, socketOpen, socketClose],
+    inputs: [loginOk, loginFail, socketOpen, socketClose, wake],
     internal: [retryTimer],
     outputs: [],
     states: [
@@ -128,7 +141,7 @@ export function createConnectionMachine(
 
       m.on(openingState, socketOpen, (_event, opts) => {
         const s = opts!.context.get();
-        opts!.context.set({ ...s, retries: 0 });
+        opts!.context.set({ ...s, retries: 0, everConnected: true });
         return { state: connectedState };
       });
       m.on(openingState, socketClose, (_event, opts) => {
@@ -136,17 +149,19 @@ export function createConnectionMachine(
         // A close while still `opening` means the upgrade was rejected and the
         // `/login` cookie did not ride the handshake. There is no token-URL
         // fallback — retry (or give up at the cap) on a fresh socket instead.
-        if (s.retries >= s.maxRetries) return { state: gaveUpState };
+        if (!s.everConnected && s.retries >= s.maxRetries) {
+          return { state: gaveUpState };
+        }
         opts!.context.set({ ...s, retries: s.retries + 1 });
         return { state: backoffState };
       });
       m.on(connectedState, socketClose, (_event, opts) => {
         const s = opts!.context.get();
-        if (s.retries >= s.maxRetries) return { state: gaveUpState };
         opts!.context.set({ ...s, retries: s.retries + 1 });
         return { state: backoffState };
       });
       m.on(backoffState, retryTimer, () => ({ state: openingState }));
+      m.on(backoffState, wake, () => ({ state: openingState }));
       // Defensive: a stray close while backing off (no socket exists) is a
       // true no-op — returning the same state would RE-ENTER backoff and
       // reset the pending retry timer.
@@ -162,10 +177,14 @@ export function createConnectionMachine(
     state: () => name(actor.snapshot()),
     isConnected: () => name(actor.snapshot()) === 'connected',
     isGaveUp: () => name(actor.snapshot()) === 'gaveUp',
+    isDegraded: () =>
+      actor.context.everConnected &&
+      actor.context.retries > actor.context.maxRetries,
     sendLoginOk: () => actor.send(loginOk.create()),
     sendLoginFail: () => actor.send(loginFail.create()),
     sendOpen: () => actor.send(socketOpen.create()),
     sendClose: () => actor.send(socketClose.create()),
+    sendWake: () => actor.send(wake.create()),
     onChange(fn) {
       return actor.on('change', (snapshot) => fn(name(snapshot)));
     },

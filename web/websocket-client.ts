@@ -183,6 +183,8 @@ export function createWebSocketTransport(
     maxBackoffMs: MAX_BACKOFF_MS,
   });
 
+  const reconnectingMessage = `${WS_DISCONNECTED_MESSAGE} (reconnecting)`;
+
   const emitTransportError = (header: MessageHeader, message: string) => {
     if (header.type !== 'INVOKE_REQUEST') {
       return;
@@ -222,15 +224,21 @@ export function createWebSocketTransport(
   /** Opens a WebSocket for the machine's current URL and wires it to the
    * machine's lifecycle events. */
   function openSocket() {
-    socket = new WebSocket(machine.url());
-    socket.binaryType = 'arraybuffer';
+    const current = new WebSocket(machine.url());
+    socket = current;
+    current.binaryType = 'arraybuffer';
 
-    socket.onopen = () => {
+    // A socket that has been replaced (the foreground check treated it as lost)
+    // may still fire late events; they must not drive the machine for its
+    // successor.
+    current.onopen = () => {
+      if (socket !== current) return;
       machine.sendOpen();
       flushQueued();
     };
 
-    socket.onmessage = (event) => {
+    current.onmessage = (event) => {
+      if (socket !== current) return;
       const size = event.data?.byteLength ?? 0;
       if (size === 0) {
         try {
@@ -248,12 +256,13 @@ export function createWebSocketTransport(
       }
     };
 
-    socket.onclose = () => {
+    current.onclose = () => {
+      if (socket !== current) return;
       // No `opened` flag: the machine derives it from its own state.
       machine.sendClose();
     };
 
-    socket.onerror = () => {
+    current.onerror = () => {
       // `close` always follows; reconnect/give-up is handled there.
     };
   }
@@ -265,8 +274,31 @@ export function createWebSocketTransport(
       openSocket();
     } else if (state === 'gaveUp') {
       void failWithServerDetail();
+    } else if (state === 'backoff' && machine.isDegraded()) {
+      // The outage outlived the quick-retry window: stop holding requests for a
+      // reconnect that may be far off. Retrying continues in the background.
+      failQueuedMessages(reconnectingMessage);
     }
   });
+
+  /** The app returned to the foreground. A suspended page may hold a socket
+   * the browser already closed without firing `onclose`; treat it as lost, and
+   * retry now instead of waiting out the backoff. */
+  function onForeground() {
+    if (
+      machine.isConnected() &&
+      socket &&
+      socket.readyState !== WebSocket.OPEN
+    ) {
+      machine.sendClose();
+    }
+    machine.sendWake();
+  }
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') onForeground();
+    });
+  }
 
   /** Terminal give-up: when we have no better name for the failure, fold the
    * server's own view (its `[loopback]` upgrade rejections) into the surfaced
@@ -347,6 +379,10 @@ export function createWebSocketTransport(
       }
       if (machine.isGaveUp()) {
         emitTransportError(header, gaveUpMessage());
+        return;
+      }
+      if (machine.state() === 'backoff' && machine.isDegraded()) {
+        emitTransportError(header, reconnectingMessage);
         return;
       }
       // Queue while connecting (first open, backoff, login).

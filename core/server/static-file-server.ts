@@ -232,6 +232,16 @@ export interface LoopbackServerOptions {
   /** Idle timeout (ms) after which an authenticated WebSocket connection is
    * dropped. Defaults to 60s. */
   wsIdleTimeoutMs?: number;
+  /** Dead-peer timeout for the protocol socket, in ms. The socket sends a
+   * protocol-level ping at half this interval and is destroyed when nothing (a
+   * pong included) arrives within it, so a suspended or reloaded WebView frees
+   * the slot in seconds. Browsers answer pings themselves, so this needs no
+   * application message. Defaults to 10s. */
+  wsDeadPeerTimeoutMs?: number;
+  /** Minimum gap, in ms, between an accepted protocol socket and the next one
+   * that may replace it. Bounds eviction churn if two live clients compete.
+   * Defaults to 1000. */
+  wsReplaceMinIntervalMs?: number;
 }
 
 export interface LoopbackServer {
@@ -301,6 +311,8 @@ export function createLoopbackServer(
   const port = options.port ?? 0;
   const authEnabled = options.auth ?? true;
   const wsIdleTimeoutMs = options.wsIdleTimeoutMs ?? 60_000;
+  const wsDeadPeerTimeoutMs = options.wsDeadPeerTimeoutMs ?? 10_000;
+  const wsReplaceMinIntervalMs = options.wsReplaceMinIntervalMs ?? 1_000;
 
   /** URL-safe random secret for the session token / bootstrap nonce. */
   const randomSecret = () =>
@@ -324,6 +336,7 @@ export function createLoopbackServer(
   let boundOrigin = '';
   let originPromise: Promise<string> | null = null;
   let activeSocket: WebSocketLike | null = null;
+  let activeSince = 0;
 
   /** Non-fatal, never-throwing debug for skipped work (a missing file, a failed
    * write) — observable in the `core.logs` ring buffer, never able to alter
@@ -792,11 +805,14 @@ export function createLoopbackServer(
       return;
     }
 
-    // Single-client policy: reject before the handshake so a refused second
-    // socket never receives a 101 (a 101-then-close would look like an
-    // established connection to the client's reconnect logic).
-    if (activeSocket) {
-      reject('single-client policy (a protocol socket is already connected)');
+    // Single-client policy: at most one live protocol socket. A new client that
+    // has passed the origin and auth checks above replaces the current one
+    // (a reloaded or suspended WebView leaves a dead socket holding the slot),
+    // so replacement is no easier than connecting was. The rate limit bounds
+    // eviction churn; it rejects before the handshake so a refused socket never
+    // receives a 101.
+    if (activeSocket && Date.now() - activeSince < wsReplaceMinIntervalMs) {
+      reject('replacement rate limit (a protocol socket was just accepted)');
       return;
     }
 
@@ -808,10 +824,21 @@ export function createLoopbackServer(
       const client = new ws.Socket({
         socket,
         isServer: true,
+        idleTimeout: wsDeadPeerTimeoutMs,
       } as unknown as ConstructorParameters<
         typeof ws.Socket
       >[0]) as unknown as WebSocketLike;
+      const previous = activeSocket;
       activeSocket = client;
+      activeSince = Date.now();
+      if (previous) {
+        console.warn('[loopback] replaced the existing protocol socket');
+        try {
+          previous.destroy();
+        } catch {
+          debugSkip('[static-server] replace: previous socket already closed');
+        }
+      }
       client.on('close', () => {
         if (activeSocket === client) activeSocket = null;
       });

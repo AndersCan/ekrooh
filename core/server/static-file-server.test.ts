@@ -42,6 +42,8 @@ vi.mock('bare-crypto', async () => {
     },
   };
 });
+const wsSocketOptions = vi.hoisted(() => [] as Array<Record<string, unknown>>);
+
 vi.mock('bare-ws', async () => {
   const crypto = await import('node:crypto');
   return {
@@ -74,6 +76,7 @@ vi.mock('bare-ws', async () => {
         private socket?: net.Socket;
         constructor(opts?: { socket?: net.Socket }) {
           super();
+          wsSocketOptions.push({ ...opts });
           this.socket = opts?.socket;
           // The real ws library closes the client when the TCP socket dies;
           // mirror that so the server's `client.on('close')` (activeSocket
@@ -973,30 +976,143 @@ describe('loopback server WebSocket upgrade', () => {
     });
   });
 
-  it('rejects a second socket while one is active (single-client policy)', async () => {
-    const sc = createLoopbackServer({ auth: true, token: TOKEN });
-    sc.mountDir('/', dir);
-    const creds = await sc.credentials();
-    const scPort = Number(
-      creds.origin.slice(creds.origin.lastIndexOf(':') + 1),
-    );
-    const base = { token: TOKEN, origin: creds.origin, port: scPort };
+  describe('socket replacement and heartbeat', () => {
+    async function withServer(
+      options: Parameters<typeof createLoopbackServer>[0],
+      run: (ctx: {
+        sc: ReturnType<typeof createLoopbackServer>;
+        base: { token: string; origin: string; port: number };
+      }) => Promise<void>,
+    ) {
+      const sc = createLoopbackServer({ auth: true, token: TOKEN, ...options });
+      sc.mountDir('/', dir);
+      const creds = await sc.credentials();
+      const scPort = Number(
+        creds.origin.slice(creds.origin.lastIndexOf(':') + 1),
+      );
+      try {
+        await run({
+          sc,
+          base: { token: TOKEN, origin: creds.origin, port: scPort },
+        });
+      } finally {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 2000);
+          sc.close(() => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+      }
+    }
 
-    const first = await openUpgrade(base);
-    expect(first.response.split('\r\n')[0]).toContain('101');
+    const closedWithin = (socket: net.Socket, ms: number) =>
+      new Promise<boolean>((resolve) => {
+        if (socket.destroyed) return resolve(true);
+        const timer = setTimeout(() => resolve(false), ms);
+        socket.once('close', () => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+      });
 
-    // Rejected before the handshake: the second connection closes without a
-    // 101 response (never looks like an established connection).
-    await expect(openUpgrade(base)).rejects.toThrow(
-      /closed before the upgrade response/,
-    );
+    it('lets a new authenticated socket replace a silent one holding the slot', async () => {
+      await withServer({ wsReplaceMinIntervalMs: 0 }, async ({ base }) => {
+        // The first client goes quiet (suspended WebView): no close, no data.
+        const dead = await openUpgrade(base);
+        expect(dead.response.split('\r\n')[0]).toContain('101');
 
-    first.socket.destroy();
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, 2000);
-      sc.close(() => {
-        clearTimeout(timer);
-        resolve();
+        const fresh = await openUpgrade(base);
+        expect(fresh.response.split('\r\n')[0]).toContain('101');
+        expect(await closedWithin(dead.socket, 2000)).toBe(true);
+        expect(fresh.socket.destroyed).toBe(false);
+        fresh.socket.destroy();
+      });
+    });
+
+    it('routes pushes to the replacement, never the replaced socket', async () => {
+      await withServer({ wsReplaceMinIntervalMs: 0 }, async ({ sc, base }) => {
+        const old = await openUpgrade(base);
+        const fresh = await openUpgrade(base);
+        await closedWithin(old.socket, 2000);
+
+        const received = new Promise<string>((resolve) => {
+          fresh.socket.once('data', (d) => resolve(String(d)));
+        });
+        expect(sc.push(new TextEncoder().encode('hello'))).toBe(true);
+        expect(await received).toContain('hello');
+        fresh.socket.destroy();
+      });
+    });
+
+    it('keeps at most one live socket when upgrades race', async () => {
+      await withServer({ wsReplaceMinIntervalMs: 0 }, async ({ base }) => {
+        const results = await Promise.all([
+          openUpgrade(base),
+          openUpgrade(base),
+          openUpgrade(base),
+        ]);
+        await new Promise((r) => setTimeout(r, 200));
+        const live = results.filter((r) => !r.socket.destroyed);
+        expect(live).toHaveLength(1);
+        live[0].socket.destroy();
+      });
+    });
+
+    it('does not let an unauthenticated upgrade evict the active socket', async () => {
+      await withServer({ wsReplaceMinIntervalMs: 0 }, async ({ base }) => {
+        const active = await openUpgrade(base);
+        await expect(
+          openUpgrade({ origin: base.origin, port: base.port }),
+        ).rejects.toThrow(/closed before the upgrade response/);
+        await expect(
+          openUpgrade({ ...base, token: 'wrong-token' }),
+        ).rejects.toThrow(/closed before the upgrade response/);
+        expect(await closedWithin(active.socket, 300)).toBe(false);
+        active.socket.destroy();
+      });
+    });
+
+    it('does not let a foreign-origin upgrade evict the active socket', async () => {
+      await withServer({ wsReplaceMinIntervalMs: 0 }, async ({ base }) => {
+        const active = await openUpgrade(base);
+        await expect(
+          openUpgrade({ ...base, origin: 'http://evil.example' }),
+        ).rejects.toThrow(/closed before the upgrade response/);
+        expect(await closedWithin(active.socket, 300)).toBe(false);
+        active.socket.destroy();
+      });
+    });
+
+    it('rate-limits replacement so two live clients cannot evict each other in a loop', async () => {
+      await withServer({ wsReplaceMinIntervalMs: 60_000 }, async ({ base }) => {
+        const active = await openUpgrade(base);
+        await expect(openUpgrade(base)).rejects.toThrow(
+          /closed before the upgrade response/,
+        );
+        expect(await closedWithin(active.socket, 300)).toBe(false);
+        active.socket.destroy();
+      });
+    });
+
+    it('arms the protocol-level ping/pong dead-peer timeout on every socket', async () => {
+      wsSocketOptions.length = 0;
+      await withServer({ wsDeadPeerTimeoutMs: 7_000 }, async ({ base }) => {
+        const conn = await openUpgrade(base);
+        expect(wsSocketOptions.at(-1)).toMatchObject({
+          isServer: true,
+          idleTimeout: 7_000,
+        });
+        conn.socket.destroy();
+      });
+    });
+
+    it('defaults the dead-peer timeout to 10s', async () => {
+      wsSocketOptions.length = 0;
+      await withServer({}, async ({ base }) => {
+        const conn = await openUpgrade(base);
+        expect(wsSocketOptions.at(-1)).toMatchObject({ idleTimeout: 10_000 });
+        conn.socket.destroy();
       });
     });
   });

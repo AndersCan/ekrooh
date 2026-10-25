@@ -146,4 +146,100 @@ describe('connection-machine', () => {
     clock.advance(1);
     expect(m.state()).toBe('opening');
   });
+
+  describe('after a successful connect', () => {
+    it('never gives up: backs off past maxRetries consecutive failures', () => {
+      const { m, clock } = machine({ maxRetries: 3 });
+      m.sendLoginOk();
+      m.sendOpen();
+      m.sendClose();
+      for (let i = 0; i < 10; i++) {
+        expect(m.state()).toBe('backoff');
+        clock.advance(2000);
+        expect(m.state()).toBe('opening');
+        m.sendClose();
+      }
+      expect(m.isGaveUp()).toBe(false);
+      expect(m.state()).toBe('backoff');
+    });
+
+    it('still gives up at the cap when it never connected', () => {
+      const { m, clock } = machine({ maxRetries: 3 });
+      m.sendLoginOk();
+      for (let i = 0; i < 3; i++) {
+        m.sendClose();
+        clock.advance(2000);
+      }
+      m.sendClose();
+      expect(m.isGaveUp()).toBe(true);
+    });
+
+    it('stays capped at maxBackoffMs however many retries pile up', () => {
+      const { m, clock } = machine({ maxRetries: 1 });
+      m.sendLoginOk();
+      m.sendOpen();
+      for (let i = 0; i < 2000; i++) {
+        m.sendClose();
+        clock.advance(2000);
+      }
+      m.sendClose();
+      expect(m.state()).toBe('backoff');
+      clock.advance(2000);
+      expect(m.state()).toBe('opening');
+    });
+
+    it('reports degraded once failures pass maxRetries, and clears on open', () => {
+      const { m, clock } = machine({ maxRetries: 2 });
+      m.sendLoginOk();
+      m.sendOpen();
+      expect(m.isDegraded()).toBe(false);
+      for (let i = 0; i < 3; i++) {
+        m.sendClose();
+        clock.advance(2000);
+      }
+      m.sendClose();
+      expect(m.isDegraded()).toBe(true);
+      clock.advance(2000);
+      m.sendOpen();
+      expect(m.isDegraded()).toBe(false);
+    });
+
+    it('never reports degraded before the first connect', () => {
+      const { m } = machine({ maxRetries: 1 });
+      m.sendLoginOk();
+      m.sendClose();
+      expect(m.isDegraded()).toBe(false);
+    });
+  });
+
+  describe('wake (app returns to the foreground)', () => {
+    it('retries immediately instead of waiting out the backoff', () => {
+      const { m, clock } = machine();
+      m.sendLoginOk();
+      m.sendOpen();
+      m.sendClose();
+      expect(m.state()).toBe('backoff');
+      m.sendWake();
+      expect(m.state()).toBe('opening');
+      // The pending backoff timer must not open a second socket.
+      let changes = 0;
+      m.onChange(() => changes++);
+      changes = 0; // subscribing replays the current state
+      clock.advance(5000);
+      expect(m.state()).toBe('opening');
+      expect(changes).toBe(0);
+    });
+
+    it('is a no-op while connected, opening, idle or gave up', () => {
+      const { m } = machine();
+      m.sendWake();
+      expect(m.state()).toBe('idle');
+      m.sendLoginOk();
+      m.sendWake();
+      expect(m.state()).toBe('opening');
+      m.sendOpen();
+      m.sendWake();
+      expect(m.state()).toBe('connected');
+    });
+  });
 });
