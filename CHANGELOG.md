@@ -9,6 +9,21 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Reconnect, heartbeat and socket replacement** (`core/server/static-file-server.ts`,
+  `web/connection-machine.ts`, `web/websocket-client.ts`):
+  - The protocol socket now has a protocol-level ping/pong dead-peer timeout
+    (`wsDeadPeerTimeoutMs`, default 10s; `bare-ws` `idleTimeout`, needs
+    `bare-ws` >= 3.1.0). No wire-protocol change; browsers answer pings
+    themselves.
+  - A new client that passes the same origin and auth checks **replaces** the
+    current protocol socket instead of being refused, so a reloaded or
+    suspended WebView no longer holds the slot. At most one socket is live at
+    any time; replacement is rate-limited (`wsReplaceMinIntervalMs`, default 1s).
+  - The web client keeps reconnecting without a retry limit once it has
+    connected (capped backoff), retries immediately when the app returns to
+    the foreground, and fails requests fast during a long outage. Before the
+    first connect the retry cap and terminal `gaveUp` are unchanged.
+
 - **Loopback auth surface tightened** (`core/server/static-file-server.ts`,
   `core/runtime.ts`, reference hosts — ADR `docs/adr/0003-loopback-auth-surface.md`):
   - The `?token=` query-param auth path is **removed**; `isAuthorized` accepts

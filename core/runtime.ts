@@ -173,6 +173,12 @@ export type WorkletRuntimeOptions = {
   plugins?: PluginManifest[];
   /** Idle timeout (ms) after which an authenticated WebSocket is dropped. */
   wsIdleTimeoutMs?: number;
+  /** Dead-peer timeout (ms): a protocol socket that answers no ping within it
+   * is destroyed, freeing the slot. Defaults to 10s. */
+  wsDeadPeerTimeoutMs?: number;
+  /** Minimum gap (ms) before an accepted protocol socket may be replaced by a
+   * new authenticated one. Defaults to 1s. */
+  wsReplaceMinIntervalMs?: number;
   /** Ring capacity for the `core.logs` capture store (retention knob; the
    * rotating file sink is a consumer/app decision). Defaults to 500. */
   logsCapacity?: number;
@@ -268,6 +274,8 @@ export function createWorkletRuntime(
     port,
     auth,
     wsIdleTimeoutMs: options.wsIdleTimeoutMs,
+    wsDeadPeerTimeoutMs: options.wsDeadPeerTimeoutMs,
+    wsReplaceMinIntervalMs: options.wsReplaceMinIntervalMs,
   });
 
   // `core.logs`: the worklet capture seam (console interception), the shared
