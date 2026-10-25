@@ -11,7 +11,6 @@
 		1227E908B3B03DAE8A8FFA6C /* bare-fs.4.8.4.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 76D941ED3B440BDD43A4E483 /* bare-fs.4.8.4.xcframework */; };
 		13B95E1E6C3F3F85E944E2A0 /* IOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D1A2234F9E83EF38A5E1C7 /* IOSApp.swift */; };
 		18D52ECECC3CBF512E0F52EB /* DefaultHostPluginsTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF6B9A180D9F5B6D66FD6AE9 /* DefaultHostPluginsTest.swift */; };
-		23837A9EA61337E2F1FC3E2A /* rocksdb-native.3.17.4.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 90D0BD22D36A8662B0C389F7 /* rocksdb-native.3.17.4.xcframework */; };
 		27AF8F5818E489B763BA4788 /* BareKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A021468273BDA9ECF0BE0B04 /* BareKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		29C240A81BE97F1DA2631B5D /* BareHost in Frameworks */ = {isa = PBXBuildFile; productRef = 1A07DF693EDED0A38DE8D2AF /* BareHost */; };
 		2E08DBBD7219E8496F1E8D15 /* bare-hrtime.2.1.2.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8FB7C4148944F0B1A3EE3C9E /* bare-hrtime.2.1.2.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -29,6 +28,7 @@
 		68C2543BC754BD60FB401748 /* udx-native.1.21.0.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0FE1BB68711E0E9D49B2ED98 /* udx-native.1.21.0.xcframework */; };
 		69778C16DF54AF5516BA53A6 /* simdle-native.1.3.9.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6468A20583D798E5114605B5 /* simdle-native.1.3.9.xcframework */; };
 		69C2DB91A6163643450DCF45 /* quickbit-native.2.4.8.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 94622613ED44A6A998F78A5C /* quickbit-native.2.4.8.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		6D71DC82A3BA72DA80E4D84E /* rocksdb-native.3.19.1.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = DAC6CD220B7C7FFA35716525 /* rocksdb-native.3.19.1.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		6D82225FF51BC3C5C188174A /* bare-crypto.1.15.4.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D7950B6BAF9622115AE139D6 /* bare-crypto.1.15.4.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		710354BE6C137B35D372C23A /* bare-tcp.2.6.1.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 3EC4FEF6004223F9ED8321D1 /* bare-tcp.2.6.1.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		71B75504AE83437EB8683F1D /* HostPluginRegistryTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A15BBD07807E1102B648011 /* HostPluginRegistryTest.swift */; };
@@ -44,6 +44,7 @@
 		9697AE31CF4B9F3CF0A74E65 /* bare-pipe.4.4.0.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = BAD67F218239232EFC0F3D50 /* bare-pipe.4.4.0.xcframework */; };
 		9DF369EAF8C2189216DAD39A /* P2PVerifyTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6975CFA7693AB93952A7C5FC /* P2PVerifyTest.swift */; };
 		A0A2BBF3375DE6E1A65A3094 /* bare-tls.3.1.14.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = BFF34472C9302741E0C71AED /* bare-tls.3.1.14.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A482605613C2103ACBE70419 /* rocksdb-native.3.19.1.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = DAC6CD220B7C7FFA35716525 /* rocksdb-native.3.19.1.xcframework */; };
 		B2C7BFF97B2FA21BE7AB1623 /* bare-buffer.3.7.1.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F406EF6F1793C67A3893328F /* bare-buffer.3.7.1.xcframework */; };
 		B62D3231CB634F008F91F94D /* fs-native-extensions.1.5.0.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = AA58348B916C35B23DBDD3B9 /* fs-native-extensions.1.5.0.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		BD708DD5536595EF2032C91B /* bare-path.3.1.2.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 548E7FEED9199B11422346E9 /* bare-path.3.1.2.xcframework */; };
@@ -58,7 +59,6 @@
 		DFBC7196A39202DB940A571E /* WebAssets in Resources */ = {isa = PBXBuildFile; fileRef = DD61A0891866A23E00B97028 /* WebAssets */; };
 		F04CEAA45CE475BA0A1CF523 /* bare-url.2.5.5.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9EE53FB9B162D33ED8B52E15 /* bare-url.2.5.5.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		F3CC391307534BD3DF4176EF /* sodium-native.5.1.0.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B955CCC8D01552C46ABD4CA6 /* sodium-native.5.1.0.xcframework */; };
-		F4850BEE3E7E78714AAE333B /* rocksdb-native.3.17.4.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 90D0BD22D36A8662B0C389F7 /* rocksdb-native.3.17.4.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		F504C7A44C862F97F5586DB2 /* bare-pipe.4.4.0.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = BAD67F218239232EFC0F3D50 /* bare-pipe.4.4.0.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		F88759CC9F08046548E63AA8 /* BareProtocolTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2ED4E4F7F5E530D8912097D /* BareProtocolTest.swift */; };
 		FB7B580DF787613A9A6A4851 /* bare-tcp.2.6.1.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3EC4FEF6004223F9ED8321D1 /* bare-tcp.2.6.1.xcframework */; };
@@ -104,7 +104,7 @@
 				A0A2BBF3375DE6E1A65A3094 /* bare-tls.3.1.14.xcframework in Embed Frameworks */,
 				93EE53F4106205F6EEE3B6DF /* bare-type.1.4.0.xcframework in Embed Frameworks */,
 				F04CEAA45CE475BA0A1CF523 /* bare-url.2.5.5.xcframework in Embed Frameworks */,
-				F4850BEE3E7E78714AAE333B /* rocksdb-native.3.17.4.xcframework in Embed Frameworks */,
+				6D71DC82A3BA72DA80E4D84E /* rocksdb-native.3.19.1.xcframework in Embed Frameworks */,
 				D4C517401EC9EE5D395143C3 /* sodium-native.5.1.0.xcframework in Embed Frameworks */,
 				8633846A5E5215E4D7B470FE /* udx-native.1.21.0.xcframework in Embed Frameworks */,
 				B62D3231CB634F008F91F94D /* fs-native-extensions.1.5.0.xcframework in Embed Frameworks */,
@@ -139,7 +139,6 @@
 		7A957888A1FA2F4D4543C651 /* p2p-verify.bundle */ = {isa = PBXFileReference; lastKnownFileType = wrapper.cfbundle; path = "p2p-verify.bundle"; sourceTree = "<group>"; };
 		8CDB213EB13869D2E0D1D158 /* bare-type.1.4.0.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-type.1.4.0.xcframework"; path = "addons/bare-type.1.4.0.xcframework"; sourceTree = "<group>"; };
 		8FB7C4148944F0B1A3EE3C9E /* bare-hrtime.2.1.2.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-hrtime.2.1.2.xcframework"; path = "addons/bare-hrtime.2.1.2.xcframework"; sourceTree = "<group>"; };
-		90D0BD22D36A8662B0C389F7 /* rocksdb-native.3.17.4.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "rocksdb-native.3.17.4.xcframework"; path = "addons/rocksdb-native.3.17.4.xcframework"; sourceTree = "<group>"; };
 		94622613ED44A6A998F78A5C /* quickbit-native.2.4.8.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "quickbit-native.2.4.8.xcframework"; path = "addons/quickbit-native.2.4.8.xcframework"; sourceTree = "<group>"; };
 		9EE53FB9B162D33ED8B52E15 /* bare-url.2.5.5.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-url.2.5.5.xcframework"; path = "addons/bare-url.2.5.5.xcframework"; sourceTree = "<group>"; };
 		A021468273BDA9ECF0BE0B04 /* BareKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = BareKit.xcframework; path = ../../prebuilds/ios/BareKit.xcframework; sourceTree = "<group>"; };
@@ -152,6 +151,7 @@
 		CF770F49D6C546F930063C7E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		D2ED4E4F7F5E530D8912097D /* BareProtocolTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BareProtocolTest.swift; sourceTree = "<group>"; };
 		D7950B6BAF9622115AE139D6 /* bare-crypto.1.15.4.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-crypto.1.15.4.xcframework"; path = "addons/bare-crypto.1.15.4.xcframework"; sourceTree = "<group>"; };
+		DAC6CD220B7C7FFA35716525 /* rocksdb-native.3.19.1.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "rocksdb-native.3.19.1.xcframework"; path = "addons/rocksdb-native.3.19.1.xcframework"; sourceTree = "<group>"; };
 		DD4F8FDDDF1B5B749011B786 /* ios-appTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "ios-appTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		DD61A0891866A23E00B97028 /* WebAssets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WebAssets; path = Resources/WebAssets; sourceTree = SOURCE_ROOT; };
 		DF6B9A180D9F5B6D66FD6AE9 /* DefaultHostPluginsTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultHostPluginsTest.swift; sourceTree = "<group>"; };
@@ -187,7 +187,7 @@
 				7B78F636D4FF3721CF14008D /* bare-tls.3.1.14.xcframework in Frameworks */,
 				962969FE9CE8A3E97D02206C /* bare-type.1.4.0.xcframework in Frameworks */,
 				497D170ED78ADD03FBB24AD2 /* bare-url.2.5.5.xcframework in Frameworks */,
-				23837A9EA61337E2F1FC3E2A /* rocksdb-native.3.17.4.xcframework in Frameworks */,
+				A482605613C2103ACBE70419 /* rocksdb-native.3.19.1.xcframework in Frameworks */,
 				F3CC391307534BD3DF4176EF /* sodium-native.5.1.0.xcframework in Frameworks */,
 				68C2543BC754BD60FB401748 /* udx-native.1.21.0.xcframework in Frameworks */,
 				8938BCC81C4E546DAFDC6AAD /* fs-native-extensions.1.5.0.xcframework in Frameworks */,
@@ -254,7 +254,7 @@
 				AA58348B916C35B23DBDD3B9 /* fs-native-extensions.1.5.0.xcframework */,
 				94622613ED44A6A998F78A5C /* quickbit-native.2.4.8.xcframework */,
 				3E6AABF83FB9E0C74534C3EF /* rabin-native.2.0.0.xcframework */,
-				90D0BD22D36A8662B0C389F7 /* rocksdb-native.3.17.4.xcframework */,
+				DAC6CD220B7C7FFA35716525 /* rocksdb-native.3.19.1.xcframework */,
 				6468A20583D798E5114605B5 /* simdle-native.1.3.9.xcframework */,
 				B955CCC8D01552C46ABD4CA6 /* sodium-native.5.1.0.xcframework */,
 				0FE1BB68711E0E9D49B2ED98 /* udx-native.1.21.0.xcframework */,

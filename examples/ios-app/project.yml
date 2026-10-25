@@ -68,7 +68,7 @@ targets:
       # p2p addons (ticket #24): rocksdb (corestore), sodium (hypercore),
       # udx (hyperswarm DHT), plus hypercore's bitfield/hash/chunking and the
       # random-access fs layer. Emitted by the same bare-link step.
-      - framework: addons/rocksdb-native.3.17.4.xcframework
+      - framework: addons/rocksdb-native.3.19.1.xcframework
         embed: true
       - framework: addons/sodium-native.5.1.0.xcframework
         embed: true
