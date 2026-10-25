@@ -175,6 +175,12 @@ export type WorkletRuntimeOptions = {
   /** Ring capacity for the `core.logs` capture store (retention knob; the
    * rotating file sink is a consumer/app decision). Defaults to 500. */
   logsCapacity?: number;
+  /** Global cap on calls routed at once; calls over it fail with a
+   * `TRANSPORT_ERROR`. Defaults to 64. */
+  maxInflight?: number;
+  /** Plugin ids whose calls must run one at a time, in arrival order. All
+   * other plugins run concurrently, so one slow call never blocks the rest. */
+  serialPlugins?: readonly string[];
 };
 
 export type WorkletRuntimeConfig = {
@@ -282,6 +288,8 @@ export function createWorkletRuntime(
   }
 
   const pluginRouter = createPluginRouter(pluginRegistry, 'bare', {
+    maxInflight: options.maxInflight,
+    serialPlugins: options.serialPlugins,
     delegateToHost: (header, payload) =>
       hostBridge?.invokeOnHost(header, payload) ?? Promise.resolve(null),
     getHostCapabilities: () =>
@@ -291,11 +299,11 @@ export function createWorkletRuntime(
   if (ipc) {
     // Host→worklet frames arrive over a Node-style Readable whose `data` events
     // do not preserve message boundaries, so frames arrive split or coalesced.
-    // The per-runtime frame decoder drains synchronously and the downstream
-    // handling is serialized, so concurrent data events cannot interleave.
+    // The per-runtime frame decoder drains synchronously, so concurrent data
+    // events cannot interleave. Requests then route concurrently (see
+    // `maxInflight` / `serialPlugins`).
     const ipcDecoder = createFrameDecoder(protocol);
     const ipcHealth = new ChannelHealth();
-    let inflight: Promise<void> = Promise.resolve();
 
     ipc.on('data', (data) => {
       // A permanently desynced IPC pipe has no reconnect seam, so once a
@@ -323,28 +331,26 @@ export function createWorkletRuntime(
       ipcHealth.noteSuccess();
       if (messages.length === 0) return;
 
-      inflight = inflight
-        .then(async () => {
-          for (const parsed of messages) {
-            if (hostBridge?.tryConsumeDownstream(parsed)) {
-              continue;
-            }
-            const pluginResponse = await pluginRouter.route(
-              parsed.header,
-              parsed.payload,
-            );
+      for (const parsed of messages) {
+        // Host responses resolve a call the worklet is already waiting on, so
+        // consume them synchronously, ahead of any request work: queued behind
+        // the request that is waiting for them they would stall until timeout.
+        if (hostBridge?.tryConsumeDownstream(parsed)) continue;
+        pluginRouter
+          .route(parsed.header, parsed.payload)
+          .then((pluginResponse) => {
             if (pluginResponse) {
               writeIpc(
                 ipc,
                 protocol.encode(MessageType.ENVELOPE, pluginResponse, null),
               );
             }
-          }
-        })
-        .catch((err) => {
-          const message = err instanceof Error ? err.message : String(err);
-          console.error(`Malformed IPC frame dropped: ${message}`);
-        });
+          })
+          .catch((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error(`Malformed IPC frame dropped: ${message}`);
+          });
+      }
     });
   }
 
