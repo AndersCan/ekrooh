@@ -79,77 +79,109 @@ jobs:
       - name: Gradle build (includes host JUnit tests)
         run: ./gradlew build
 
-  # android-emulator / p2p verify is DISABLED pending issue #44.
-  # The job previously spun forever on `adb: device offline` (the emulator boots
-  # but adb never reports it online) and rang to the 6h default timeout,
-  # hanging CI on every run — before any test executes, and unrelated to the
-  # code under test. Retrying such an unbounded loop would only hang CI longer,
-  # so the job is disabled outright (see #44) until the boot/offline loop has a
-  # bounded timeout. The peer-drive replication gate still runs on the macOS
-  # smoke + iOS simulator. Re-enable with a bounded boot wait, not a retry
-  # matrix.
-  #
-  # android-emulator:
-  #   name: android-emulator (p2p verify)
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-  #
-  #     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-  #       with:
-  #         node-version: lts/*
-  #         cache: npm
-  #
-  #     - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
-  #       with:
-  #         distribution: temurin
-  #         java-version: 21
-  #
-  #     - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
-  #       with:
-  #         packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
-  #
-  #     - name: Install npm dependencies
-  #       run: npm ci
-  #
-  #     - name: Fetch Bare Kit prebuilds
-  #       run: npm run prebuilds
-  #       env:
-  #         GH_TOKEN: ${{ github.token }}
-  #
-  #     - name: Build JS and web assets for Android
-  #       run: npm run build
-  #
-  #     - name: Run the on-device p2p verify instrumentation test (issue #41)
-  #       # Boots `core/p2p-verify.core.ts` on an Android emulator in `mode=self`
-  #       # (self-contained corestore/hyperdrive smoke): proves the p2p native
-  #       # addons load and self-read on Android bare-kit. Real DHT peer
-  #       # discovery (server:true sockets reachable from a peer) is unreliable
-  #       # under the software-rendered x86_64 CI emulator, so the full
-  #       # peer-drive replication gate runs on the macOS smoke and the iOS
-  #       # simulator instead — the Android gate is the deterministic addon-load
-  #       # assertion.
-  #       uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
-  #       with:
-  #         api-level: 35
-  #         arch: x86_64
-  #         target: google_apis
-  #         force-avd-creation: true
-  #         cores: 4
-  #         emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
-  #         script: ./gradlew :examples:android-app:connectedDebugAndroidTest
-  #
-  #     - name: Assert the published POM carries the api dependencies
-  #       # Regression guard for GitHub issue #36: the bare-host POM used to be
-  #       # published with no <dependencies> at all (consumers failed to compile
-  #       # on WebViewCompat/appcompat). Fail the build if the generated POM
-  #       # drops the androidx deps again.
-  #       run: |
-  #         ./gradlew :bare-host:generatePomFileForMavenAarPublication
-  #         POM=android/build/publications/mavenAar/pom-default.xml
-  #         grep -q "androidx.webkit" "$POM" || { echo "POM is missing androidx.webkit — see issue #36"; exit 1; }
-  #         grep -q "androidx.appcompat" "$POM" || { echo "POM is missing androidx.appcompat — see issue #36"; exit 1; }
-  #         echo "POM dependency metadata OK"
+  android-pom:
+    name: android-pom (published POM carries api dependencies)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Fetch Bare Kit prebuilds
+        run: npm run prebuilds
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build JS and web assets for Android
+        run: npm run build
+
+      - name: Assert the published POM carries the api dependencies
+        # Regression guard for GitHub issue #36: the bare-host POM used to be
+        # published with no <dependencies> at all (consumers failed to compile
+        # on WebViewCompat/appcompat). Fail the build if the generated POM
+        # drops the androidx deps again.
+        run: |
+          ./gradlew :bare-host:generatePomFileForMavenAarPublication
+          POM=android/build/publications/mavenAar/pom-default.xml
+          grep -q "androidx.webkit" "$POM" || { echo "POM is missing androidx.webkit — see issue #36"; exit 1; }
+          grep -q "androidx.appcompat" "$POM" || { echo "POM is missing androidx.appcompat — see issue #36"; exit 1; }
+          echo "POM dependency metadata OK"
+
+  # Re-enabled with hard bounds (issue #44). The job used to spin forever on
+  # `adb: device offline` and ride the 6h default timeout. It is now bounded at
+  # the job level and at the emulator boot, and uses hardware acceleration (KVM)
+  # so the emulator comes online instead of sitting offline. Do not "fix" a red
+  # run here with a retry matrix: read the log, fix the cause.
+  android-emulator:
+    name: android-emulator (p2p verify)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Fetch Bare Kit prebuilds
+        run: npm run prebuilds
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build JS and web assets for Android
+        run: npm run build
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run the on-device p2p verify instrumentation test (issue #41)
+        # Boots `core/p2p-verify.core.ts` on an Android emulator in `mode=self`
+        # (self-contained corestore/hyperdrive smoke): proves the p2p native
+        # addons load and self-read on Android bare-kit. The full peer-drive
+        # replication gate runs in the `p2p` job and on the iOS simulator.
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: true
+          cores: 4
+          emulator-boot-timeout: 300
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+          script: ./gradlew :examples:android-app:connectedDebugAndroidTest
 
   ios:
     runs-on: macos-latest
