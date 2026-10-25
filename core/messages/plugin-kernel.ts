@@ -90,7 +90,17 @@ export type PluginRouterOptions = {
    * host-delegated invokes are allowed. */
   getHostCapabilities?: () => Promise<CapabilityDescriptor[]>;
   logger?: Pick<Console, 'warn' | 'error' | 'debug'>;
+  /** Global cap on calls routed at once (running or queued behind a serial
+   * plugin). A call over the cap is answered with a `TRANSPORT_ERROR` instead
+   * of being queued, so a flood cannot grow memory without bound. Defaults to
+   * `DEFAULT_MAX_INFLIGHT`. */
+  maxInflight?: number;
+  /** Plugin ids whose calls must run one at a time, in arrival order. Every
+   * other plugin's calls run concurrently, so a slow call never delays them. */
+  serialPlugins?: readonly string[];
 };
+
+const DEFAULT_MAX_INFLIGHT = 64;
 
 /** Whether the router may synthesize an UNSUPPORTED_EVENT response. Events are
  * only gated when the manifest declares them; a plugin with no manifest/owner
@@ -107,6 +117,10 @@ export function createPluginRouter(
   options?: PluginRouterOptions,
 ): PluginRouter {
   const logger = options?.logger ?? console;
+  const maxInflight = options?.maxInflight ?? DEFAULT_MAX_INFLIGHT;
+  const serialPlugins = new Set(options?.serialPlugins);
+  const serialTails = new Map<string, Promise<unknown>>();
+  let inflight = 0;
 
   /** Fresh host capabilities on every delegation decision — never memoized, so
    * abilities the host announces/withdraws after the first delegated invoke
@@ -126,118 +140,154 @@ export function createPluginRouter(
     return row ? row.events.includes(event) : false;
   }
 
-  return {
-    async route(header, payload) {
-      const plugin = isPluginEnvelopeHeader(header)
-        ? registry.get(header.pluginId)
-        : undefined;
+  /** Runs `task` after the previous call to the same serial plugin settles, so
+   * a failing call never wedges the queue behind it. */
+  function runSerial<T>(pluginId: string, task: () => Promise<T>): Promise<T> {
+    const tail = serialTails.get(pluginId) ?? Promise.resolve();
+    const run = tail.then(task, task);
+    const next = run.catch(() => undefined);
+    serialTails.set(pluginId, next);
+    void next.then(() => {
+      if (serialTails.get(pluginId) === next) serialTails.delete(pluginId);
+    });
+    return run;
+  }
 
-      if (isPluginEnvelopeHeader(header)) {
-        if (!declaresEvent(plugin, header.event)) {
-          const error = new CoreError(
-            ErrorCode.UNSUPPORTED_EVENT,
-            `Unsupported event ${header.pluginId}.${header.event} on ${runtime}`,
-          );
-          if (isPluginDispatchHeader(header)) {
-            logger.warn(error.message);
-          }
-          return invokeErrorResponse(header, error);
-        }
-      }
+  async function routeNow(
+    header: MessageHeader,
+    payload: Uint8Array,
+  ): Promise<PluginInvokeResponseHeader | null> {
+    const plugin = isPluginEnvelopeHeader(header)
+      ? registry.get(header.pluginId)
+      : undefined;
 
-      if (isPluginDispatchHeader(header)) {
-        const runtimeAdapter = registry.resolve(header.pluginId, runtime);
-        if (!runtimeAdapter?.dispatch) {
-          const error = new CoreError(
-            ErrorCode.UNSUPPORTED_CAPABILITY,
-            `Unsupported capability ${header.pluginId}.${header.event} on ${runtime}`,
-          );
+    if (isPluginEnvelopeHeader(header)) {
+      if (!declaresEvent(plugin, header.event)) {
+        const error = new CoreError(
+          ErrorCode.UNSUPPORTED_EVENT,
+          `Unsupported event ${header.pluginId}.${header.event} on ${runtime}`,
+        );
+        if (isPluginDispatchHeader(header)) {
           logger.warn(error.message);
-          return invokeErrorResponse(header, error);
         }
+        return invokeErrorResponse(header, error);
+      }
+    }
+
+    if (isPluginDispatchHeader(header)) {
+      const runtimeAdapter = registry.resolve(header.pluginId, runtime);
+      if (!runtimeAdapter?.dispatch) {
+        const error = new CoreError(
+          ErrorCode.UNSUPPORTED_CAPABILITY,
+          `Unsupported capability ${header.pluginId}.${header.event} on ${runtime}`,
+        );
+        logger.warn(error.message);
+        return invokeErrorResponse(header, error);
+      }
+      try {
+        await runtimeAdapter.dispatch(header.event, header.args, {
+          runtime,
+          payload,
+          sender: { pluginId: header.pluginId },
+        });
+        return null;
+      } catch (e) {
+        const error = new CoreError(
+          ErrorCode.PLUGIN_ERROR,
+          e instanceof Error ? e.message : String(e),
+        );
+        logger.error(
+          `dispatch ${header.pluginId}.${header.event} failed: ${error.message}`,
+        );
+        return invokeErrorResponse(header, error);
+      }
+    }
+
+    if (isPluginInvokeRequestHeader(header)) {
+      const runtimeAdapter = registry.resolve(header.pluginId, runtime);
+      if (runtimeAdapter?.invoke) {
         try {
-          await runtimeAdapter.dispatch(header.event, header.args, {
-            runtime,
-            payload,
-            sender: { pluginId: header.pluginId },
-          });
-          return null;
+          const result = await runtimeAdapter.invoke(
+            header.event,
+            header.args,
+            {
+              runtime,
+              payload,
+              sender: { pluginId: header.pluginId },
+            },
+          );
+          const [error, okResult] = result;
+          return {
+            type: 'INVOKE_RESPONSE',
+            pluginId: header.pluginId,
+            event: header.event,
+            requestId: header.requestId,
+            result: okResult ?? undefined,
+            error: error
+              ? { code: error.code, message: error.message }
+              : undefined,
+          };
         } catch (e) {
           const error = new CoreError(
             ErrorCode.PLUGIN_ERROR,
             e instanceof Error ? e.message : String(e),
           );
           logger.error(
-            `dispatch ${header.pluginId}.${header.event} failed: ${error.message}`,
+            `invoke ${header.pluginId}.${header.event} failed: ${error.message}`,
           );
           return invokeErrorResponse(header, error);
         }
       }
-
-      if (isPluginInvokeRequestHeader(header)) {
-        const runtimeAdapter = registry.resolve(header.pluginId, runtime);
-        if (runtimeAdapter?.invoke) {
+      if (header.requestId && options?.delegateToHost) {
+        const caps = await hostCapabilities();
+        if (isHostRegistered(header.pluginId, header.event, caps)) {
           try {
-            const result = await runtimeAdapter.invoke(
-              header.event,
-              header.args,
-              {
-                runtime,
-                payload,
-                sender: { pluginId: header.pluginId },
-              },
-            );
-            const [error, okResult] = result;
-            return {
-              type: 'INVOKE_RESPONSE',
-              pluginId: header.pluginId,
-              event: header.event,
-              requestId: header.requestId,
-              result: okResult ?? undefined,
-              error: error
-                ? { code: error.code, message: error.message }
-                : undefined,
-            };
-          } catch (e) {
-            const error = new CoreError(
-              ErrorCode.PLUGIN_ERROR,
-              e instanceof Error ? e.message : String(e),
-            );
-            logger.error(
-              `invoke ${header.pluginId}.${header.event} failed: ${error.message}`,
-            );
-            return invokeErrorResponse(header, error);
-          }
-        }
-        if (header.requestId && options?.delegateToHost) {
-          const caps = await hostCapabilities();
-          if (isHostRegistered(header.pluginId, header.event, caps)) {
-            try {
-              const delegated = await options.delegateToHost(header, payload);
-              if (delegated) {
-                return delegated;
-              }
-            } catch (e) {
-              return invokeErrorResponse(
-                header,
-                new CoreError(
-                  ErrorCode.HOST_ERROR,
-                  e instanceof Error ? e.message : String(e),
-                ),
-              );
+            const delegated = await options.delegateToHost(header, payload);
+            if (delegated) {
+              return delegated;
             }
+          } catch (e) {
+            return invokeErrorResponse(
+              header,
+              new CoreError(
+                ErrorCode.HOST_ERROR,
+                e instanceof Error ? e.message : String(e),
+              ),
+            );
           }
         }
-        return invokeErrorResponse(
-          header,
-          new CoreError(
-            ErrorCode.UNSUPPORTED_CAPABILITY,
-            `Unsupported capability ${header.pluginId}.${header.event} on ${runtime}`,
-          ),
-        );
       }
+      return invokeErrorResponse(
+        header,
+        new CoreError(
+          ErrorCode.UNSUPPORTED_CAPABILITY,
+          `Unsupported capability ${header.pluginId}.${header.event} on ${runtime}`,
+        ),
+      );
+    }
 
-      return null;
+    return null;
+  }
+
+  return {
+    async route(header, payload) {
+      if (!isPluginEnvelopeHeader(header)) return routeNow(header, payload);
+      if (inflight >= maxInflight) {
+        const error = new CoreError(
+          ErrorCode.TRANSPORT_ERROR,
+          `too many calls in flight (limit ${maxInflight}); retry later`,
+        );
+        logger.warn(`${header.pluginId}.${header.event}: ${error.message}`);
+        return invokeErrorResponse(header, error);
+      }
+      inflight++;
+      try {
+        return serialPlugins.has(header.pluginId)
+          ? await runSerial(header.pluginId, () => routeNow(header, payload))
+          : await routeNow(header, payload);
+      } finally {
+        inflight--;
+      }
     },
   };
 }

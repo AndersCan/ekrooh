@@ -482,3 +482,68 @@ describe('createLoopbackPush', () => {
     ).toBe(false);
   });
 });
+
+describe('attachWebSocketProtocol concurrency', () => {
+  it('answers a fast call while a slow call on the same socket is pending', async () => {
+    let releaseSlow: () => void = () => {};
+    const slowGate = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'test.mixed',
+      events: ['slow', 'fast'],
+      runtimes: {
+        bare: {
+          invoke: async (event) => {
+            if (event === 'slow') await slowGate;
+            return [null, { event }] as [null, unknown];
+          },
+        },
+      },
+    });
+    const harness = serverHarness();
+    attachWebSocketProtocol(
+      harness.server as never,
+      {
+        protocol,
+        pluginRegistry: registry,
+        pluginRouter: createPluginRouter(registry, 'bare'),
+      } as never,
+    );
+    const socket = fakeSocket();
+    harness.handler!(socket as never, { headers: {} });
+
+    socket.emit(
+      'data',
+      invokeFrame({
+        type: 'INVOKE_REQUEST',
+        pluginId: 'test.mixed',
+        event: 'slow',
+        requestId: 'slow-1',
+      }),
+    );
+    socket.emit(
+      'data',
+      invokeFrame({
+        type: 'INVOKE_REQUEST',
+        pluginId: 'test.mixed',
+        event: 'fast',
+        requestId: 'fast-1',
+      }),
+    );
+
+    await vi.waitFor(() => expect(socket.write).toHaveBeenCalledTimes(1));
+    const first = protocol.decode(socket.write.mock.calls[0][0] as Uint8Array);
+    expect((first.header as PluginInvokeResponseHeader).requestId).toBe(
+      'fast-1',
+    );
+
+    releaseSlow();
+    await vi.waitFor(() => expect(socket.write).toHaveBeenCalledTimes(2));
+    const second = protocol.decode(socket.write.mock.calls[1][0] as Uint8Array);
+    expect((second.header as PluginInvokeResponseHeader).requestId).toBe(
+      'slow-1',
+    );
+  });
+});

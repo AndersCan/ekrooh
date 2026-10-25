@@ -18,7 +18,8 @@ import {
   resolveCliConfig,
   resolveWorkletConfig,
 } from './runtime';
-import { definePlugin, ok } from './messages';
+import { EventEmitter } from 'node:events';
+import { definePlugin, MessageProtocol, MessageType, ok } from './messages';
 import type { EventSpec } from './messages';
 
 vi.mock('bare-http1', async () => ({
@@ -392,3 +393,104 @@ function httpGet(url: string): Promise<{ status: number; body: string }> {
     req.end();
   });
 }
+
+describe('host IPC response routing', () => {
+  const protocol = new MessageProtocol({
+    encode: (str) => new TextEncoder().encode(str),
+    decode: (bytes) => new TextDecoder().decode(bytes),
+  });
+  const frame = (header: Record<string, unknown>) =>
+    protocol.encode(
+      MessageType.ENVELOPE,
+      header as Parameters<typeof protocol.encode>[1],
+      null,
+    );
+
+  it('consumes host responses while a host-delegated invoke is still waiting on them', async () => {
+    const ipc = Object.assign(new EventEmitter(), {
+      write: vi.fn((_data: unknown) => true),
+      resume() {},
+    });
+    vi.stubGlobal('BareKit', { IPC: ipc });
+
+    const runtime = createWorkletRuntime({
+      port: 0,
+      plugins: [
+        {
+          id: 'app.hosted',
+          events: ['hosted.ping'],
+          runtimes: { android: { invoke: () => [null, {}] } },
+        },
+      ],
+    });
+
+    const sent = () =>
+      ipc.write.mock.calls.map(
+        (c) => protocol.decode(new Uint8Array(c[0] as Buffer)).header,
+      );
+    const nextSent = async (type: string) => {
+      await vi.waitFor(
+        () =>
+          expect(
+            sent().map((h) => h.type),
+            `waiting for ${type}`,
+          ).toContain(type),
+        { timeout: 1000 },
+      );
+      return sent().find((h) => h.type === type) as Record<string, any>;
+    };
+
+    // Worklet-bound invoke that the worklet can only answer by calling the
+    // host back (capabilities query, then the delegated invoke).
+    ipc.emit(
+      'data',
+      Buffer.from(
+        frame({
+          type: 'INVOKE_REQUEST',
+          pluginId: 'app.hosted',
+          event: 'hosted.ping',
+          requestId: 'r1',
+        }),
+      ),
+    );
+
+    const query = await nextSent('HOST_CAPABILITIES_QUERY');
+    ipc.emit(
+      'data',
+      Buffer.from(
+        frame({
+          type: 'HOST_CAPABILITIES_RESPONSE',
+          requestId: query.requestId,
+          capabilities: [
+            {
+              pluginId: 'app.hosted',
+              capabilities: [],
+              events: ['hosted.ping'],
+              runtimes: ['android'],
+            },
+          ],
+        }),
+      ),
+    );
+
+    const hostInvoke = await nextSent('HOST_INVOKE_REQUEST');
+    ipc.emit(
+      'data',
+      Buffer.from(
+        frame({
+          type: 'HOST_INVOKE_RESPONSE',
+          requestId: hostInvoke.requestId,
+          pluginId: 'app.hosted',
+          event: 'hosted.ping',
+          result: { pong: true },
+        }),
+      ),
+    );
+
+    const response = await nextSent('INVOKE_RESPONSE');
+    expect(response.requestId).toBe('r1');
+    expect(response.result).toEqual({ pong: true });
+
+    runtime.close();
+  });
+});

@@ -50,10 +50,9 @@ export function attachWebSocketProtocol(
     // self-delimiting even when a peer transport strips unknown JSON header
     // fields. The per-socket frame decoder drains synchronously: a single frame
     // may arrive split across chunks, or several frames coalesced into one, and
-    // the routing below is serialized per socket so concurrent data events can
-    // never interleave on a shared buffer.
+    // concurrent data events can never interleave on a shared buffer. Calls
+    // then route concurrently, so a slow call never delays the ones behind it.
     const decoder = createFrameDecoder(protocol);
-    let inflight: Promise<void> = Promise.resolve();
 
     socket.on('data', (raw) => {
       const data = toUint8Array(raw);
@@ -74,27 +73,24 @@ export function attachWebSocketProtocol(
       }
       if (messages.length === 0) return;
 
-      inflight = inflight
-        .then(async () => {
-          for (const parsed of messages) {
-            const pluginResponse = await pluginRouter.route(
-              parsed.header,
-              parsed.payload,
-            );
+      for (const parsed of messages) {
+        pluginRouter
+          .route(parsed.header, parsed.payload)
+          .then((pluginResponse) => {
             if (pluginResponse) {
               socket.write(
                 protocol.encode(MessageType.ENVELOPE, pluginResponse, null),
               );
             }
-          }
-        })
-        .catch((err) => {
-          // A routing/encode failure must not wedge the per-socket chain; the
-          // stream itself stays usable. Decode/framing failures already
-          // destroyed the socket above.
-          const message = err instanceof Error ? err.message : String(err);
-          console.error('Error handling WebSocket message:', message);
-        });
+          })
+          .catch((err) => {
+            // A routing/encode failure must not affect other in-flight calls;
+            // the stream itself stays usable. Decode/framing failures already
+            // destroyed the socket above.
+            const message = err instanceof Error ? err.message : String(err);
+            console.error('Error handling WebSocket message:', message);
+          });
+      }
     });
 
     socket.on('close', () => {

@@ -762,3 +762,166 @@ describe('integration: messenger + protocol + bus over an encoded channel', () =
     expect(error?.message).toBe('missing');
   });
 });
+
+describe('createPluginRouter concurrency', () => {
+  function gate() {
+    let release: () => void = () => {};
+    const open = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { open, release };
+  }
+
+  function invokeHeader(pluginId: string, event: string, requestId: string) {
+    return { type: 'INVOKE_REQUEST', pluginId, event, requestId } as const;
+  }
+
+  function registryWith(
+    invoke: (event: string) => Promise<[null, unknown]> | [null, unknown],
+    pluginId = 'app.slow',
+  ) {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: pluginId,
+      events: ['slow', 'fast'],
+      runtimes: { bare: { invoke: (event) => invoke(event) } },
+    });
+    return registry;
+  }
+
+  it('answers a fast call while a slow call on the same router is pending', async () => {
+    const slow = gate();
+    const router = createPluginRouter(
+      registryWith(async (event) => {
+        if (event === 'slow') await slow.open;
+        return ok({ event });
+      }),
+      'bare',
+    );
+
+    const slowCall = router.route(
+      invokeHeader('app.slow', 'slow', 's1'),
+      new Uint8Array(),
+    );
+    const fast = await router.route(
+      invokeHeader('app.slow', 'fast', 'f1'),
+      new Uint8Array(),
+    );
+    expect(fast?.result).toEqual({ event: 'fast' });
+
+    slow.release();
+    expect((await slowCall)?.result).toEqual({ event: 'slow' });
+  });
+
+  it('rejects calls beyond maxInflight with a clear error and recovers after', async () => {
+    const slow = gate();
+    const router = createPluginRouter(
+      registryWith(async (event) => {
+        if (event === 'slow') await slow.open;
+        return ok({ event });
+      }),
+      'bare',
+      { maxInflight: 2 },
+    );
+
+    const first = router.route(
+      invokeHeader('app.slow', 'slow', 'a'),
+      new Uint8Array(),
+    );
+    const second = router.route(
+      invokeHeader('app.slow', 'slow', 'b'),
+      new Uint8Array(),
+    );
+    const over = await router.route(
+      invokeHeader('app.slow', 'fast', 'c'),
+      new Uint8Array(),
+    );
+    expect(over?.requestId).toBe('c');
+    expect(over?.error?.code).toBe(ErrorCode.TRANSPORT_ERROR);
+    expect(over?.error?.message).toMatch(
+      /too many calls in flight \(limit 2\)/,
+    );
+
+    slow.release();
+    await Promise.all([first, second]);
+    const after = await router.route(
+      invokeHeader('app.slow', 'fast', 'd'),
+      new Uint8Array(),
+    );
+    expect(after?.result).toEqual({ event: 'fast' });
+  });
+
+  it('runs calls to a serialPlugins plugin one at a time, in arrival order', async () => {
+    const started: string[] = [];
+    const finished: string[] = [];
+    const gates = new Map<string, ReturnType<typeof gate>>();
+    const router = createPluginRouter(
+      registryWith(async (event) => {
+        started.push(event);
+        const g = gate();
+        gates.set(event, g);
+        await g.open;
+        finished.push(event);
+        return ok({ event });
+      }, 'app.ordered'),
+      'bare',
+      { serialPlugins: ['app.ordered'] },
+    );
+
+    const a = router.route(
+      invokeHeader('app.ordered', 'slow', 'a'),
+      new Uint8Array(),
+    );
+    const b = router.route(
+      invokeHeader('app.ordered', 'fast', 'b'),
+      new Uint8Array(),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(started).toEqual(['slow']);
+
+    gates.get('slow')!.release();
+    await a;
+    await vi.waitFor(() => expect(started).toEqual(['slow', 'fast']));
+    gates.get('fast')!.release();
+    await b;
+    expect(finished).toEqual(['slow', 'fast']);
+  });
+
+  it('does not let a serial plugin block other plugins', async () => {
+    const slow = gate();
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'app.ordered',
+      events: ['slow'],
+      runtimes: {
+        bare: {
+          invoke: async () => {
+            await slow.open;
+            return ok({});
+          },
+        },
+      },
+    });
+    registry.register({
+      id: 'app.other',
+      events: ['fast'],
+      runtimes: { bare: { invoke: () => ok({ fast: true }) } },
+    });
+    const router = createPluginRouter(registry, 'bare', {
+      serialPlugins: ['app.ordered'],
+    });
+
+    const pending = router.route(
+      invokeHeader('app.ordered', 'slow', 'a'),
+      new Uint8Array(),
+    );
+    const other = await router.route(
+      invokeHeader('app.other', 'fast', 'b'),
+      new Uint8Array(),
+    );
+    expect(other?.result).toEqual({ fast: true });
+    slow.release();
+    await pending;
+  });
+});
