@@ -9,20 +9,39 @@ export function createLogRingBuffer(capacity: number): LogStore {
       `log ring capacity must be a positive integer (got ${capacity})`,
     );
   }
-  const buffer: LogEntry[] = [];
+  // Circular storage: `append` overwrites the oldest slot in O(1) instead of
+  // shifting the whole array on every entry once full.
+  const ring = Array.from<LogEntry | undefined>({ length: capacity });
+  let start = 0;
+  let size = 0;
   let seq = 0;
+
+  /** Entries oldest-first. */
+  function ordered(): LogEntry[] {
+    const out: LogEntry[] = [];
+    for (let i = 0; i < size; i++) {
+      out.push(ring[(start + i) % capacity] as LogEntry);
+    }
+    return out;
+  }
 
   return {
     get capacity() {
       return capacity;
     },
     append(entry) {
-      buffer.push({ ...entry, seq: seq++ });
-      if (buffer.length > capacity) buffer.shift();
+      const record = { ...entry, seq: seq++ };
+      if (size < capacity) {
+        ring[(start + size) % capacity] = record;
+        size++;
+      } else {
+        ring[start] = record;
+        start = (start + 1) % capacity;
+      }
     },
     view(options: LogViewOptions = {}) {
       const { tail, level, source } = options;
-      const filtered = buffer.filter(
+      const filtered = ordered().filter(
         (e) =>
           (level === undefined || e.level === level) &&
           (source === undefined || e.source === source),
@@ -32,8 +51,10 @@ export function createLogRingBuffer(capacity: number): LogStore {
       return filtered.slice(filtered.length - count);
     },
     clear() {
-      const cleared = buffer.length;
-      buffer.length = 0;
+      const cleared = size;
+      ring.fill(undefined);
+      start = 0;
+      size = 0;
       return cleared;
     },
   };

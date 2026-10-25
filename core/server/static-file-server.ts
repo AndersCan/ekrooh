@@ -498,9 +498,9 @@ export function createLoopbackServer(
       const stat = fs.statSync(candidate);
       if (stat.isFile()) return { filePath: candidate, stat };
     } catch {
-      debugSkip(
-        `[static-server] resolveDirFile: stat failed for ${candidate} — falling through to the directory index / SPA fallback`,
-      );
+      // Expected on every SPA route and missing asset: fall through to the
+      // directory index / SPA fallback below. Deliberately not logged — it
+      // would fill the log ring with routine navigation.
     }
     // The mount root serves its `index.html` directly.
     if (mount.rel === '') {

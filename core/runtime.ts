@@ -182,6 +182,11 @@ export type WorkletRuntimeOptions = {
   /** Plugin ids whose calls must run one at a time, in arrival order. All
    * other plugins run concurrently, so one slow call never blocks the rest. */
   serialPlugins?: readonly string[];
+  /** Lowest level the `core.logs` capture store records (`debug` | `info` |
+   * `warn` | `error`). Lower-level console calls still reach stdout. Defaults
+   * to `debug` (record everything); raise it to stop routine debug traces
+   * from evicting warnings out of a small ring. */
+  logsMinLevel?: 'debug' | 'info' | 'warn' | 'error';
 };
 
 export type WorkletRuntimeConfig = {
@@ -270,7 +275,9 @@ export function createWorkletRuntime(
   // log routes. Retention is a consumer knob (`logsCapacity`); the rotating file
   // sink is an app decision, kept out of the framework.
   const logStore = createLogRingBuffer(options.logsCapacity ?? 500);
-  installConsoleCapture(logStore, 'backend');
+  installConsoleCapture(logStore, 'backend', {
+    minLevel: options.logsMinLevel,
+  });
   registerLogRoutes(server, logStore);
 
   for (const plugin of createDefaultPlugins({

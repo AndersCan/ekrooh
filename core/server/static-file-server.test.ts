@@ -744,6 +744,21 @@ describe('static caching', () => {
       spy.mockRestore();
     }
   });
+
+  it('does not log routine SPA navigations or missing assets', async () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    try {
+      const spa = await request('/some/client/route', {
+        headers: { Accept: 'text/html' },
+      });
+      expect(spa.status).toBe(200);
+      const missing = await request('/assets/gone.js');
+      expect(missing.status).toBe(404);
+      expect(debugSpy).not.toHaveBeenCalled();
+    } finally {
+      debugSpy.mockRestore();
+    }
+  });
 });
 
 describe('loopback server origin validation (auth mode)', () => {

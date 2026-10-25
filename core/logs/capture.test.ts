@@ -40,6 +40,51 @@ describe('installConsoleCapture', () => {
     expect(store.view()[0]?.level).toBe('error');
   });
 
+  it('records every level by default', () => {
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const store = createLogRingBuffer(10);
+    const capture = installConsoleCapture(store, 'backend');
+    console.debug('d');
+    capture.restore();
+    expect(store.view().map((e) => e.level)).toEqual(['debug']);
+  });
+
+  it('minLevel skips lower levels in the store but still forwards them', () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = createLogRingBuffer(10);
+    const capture = installConsoleCapture(store, 'backend', {
+      minLevel: 'warn',
+    });
+    console.debug('d');
+    console.info('i');
+    console.warn('w');
+    console.error('e');
+    capture.restore();
+    expect(store.view().map((e) => e.message)).toEqual(['w', 'e']);
+    expect(debugSpy).toHaveBeenCalledWith('d');
+    expect(infoSpy).toHaveBeenCalledWith('i');
+    expect(warnSpy).toHaveBeenCalledWith('w');
+  });
+
+  it('minLevel skips formatting for filtered calls', () => {
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const store = createLogRingBuffer(10);
+    const capture = installConsoleCapture(store, 'backend', {
+      minLevel: 'info',
+    });
+    let formatted = false;
+    console.debug({
+      toJSON() {
+        formatted = true;
+        return {};
+      },
+    });
+    capture.restore();
+    expect(formatted).toBe(false);
+  });
+
   it('does not break boot when the store append throws', () => {
     const badStore = {
       capacity: 1,
