@@ -39,34 +39,36 @@ targets:
         embed: true
       # Native addons produced by `bare-link --preset ios` (gitignored; see
       # scripts/build-ios-app.mjs). Keep in sync with that output.
-      - framework: addons/bare-buffer.3.6.2.xcframework
+      - framework: addons/bare-buffer.3.7.1.xcframework
         embed: true
-      - framework: addons/bare-crypto.1.15.3.xcframework
+      - framework: addons/bare-crypto.1.15.4.xcframework
         embed: true
-      - framework: addons/bare-dns.2.1.4.xcframework
+      - framework: addons/bare-dns.2.3.1.xcframework
         embed: true
-      - framework: addons/bare-fs.4.8.0.xcframework
+      - framework: addons/bare-fs.4.8.4.xcframework
         embed: true
-      - framework: addons/bare-inspect.3.1.4.xcframework
+      - framework: addons/bare-hrtime.2.1.2.xcframework
+        embed: true
+      - framework: addons/bare-inspect.3.1.10.xcframework
         embed: true
       - framework: addons/bare-os.3.9.3.xcframework
         embed: true
-      - framework: addons/bare-path.3.1.1.xcframework
+      - framework: addons/bare-path.3.1.2.xcframework
         embed: true
-      - framework: addons/bare-pipe.4.2.3.xcframework
+      - framework: addons/bare-pipe.4.4.0.xcframework
         embed: true
-      - framework: addons/bare-tcp.2.5.4.xcframework
+      - framework: addons/bare-tcp.2.6.1.xcframework
         embed: true
-      - framework: addons/bare-tls.3.1.8.xcframework
+      - framework: addons/bare-tls.3.1.14.xcframework
         embed: true
-      - framework: addons/bare-type.1.1.0.xcframework
+      - framework: addons/bare-type.1.4.0.xcframework
         embed: true
-      - framework: addons/bare-url.2.5.1.xcframework
+      - framework: addons/bare-url.2.5.5.xcframework
         embed: true
       # p2p addons (ticket #24): rocksdb (corestore), sodium (hypercore),
       # udx (hyperswarm DHT), plus hypercore's bitfield/hash/chunking and the
       # random-access fs layer. Emitted by the same bare-link step.
-      - framework: addons/rocksdb-native.3.17.4.xcframework
+      - framework: addons/rocksdb-native.3.19.1.xcframework
         embed: true
       - framework: addons/sodium-native.5.1.0.xcframework
         embed: true

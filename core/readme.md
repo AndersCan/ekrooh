@@ -1,15 +1,14 @@
 # core/
 
-The Bare worklet side of the framework.
+Bare worklet side of the framework.
 
-| Path           | Contents                                                                                                                                                  |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `messages/`    | **Public API.** Binary wire protocol (`MessageProtocol`), plugin registry/router, RPC messenger, host IPC bridge, shared types. See `messages/readme.md`. |
-| `server/`      | Dev WebSocket backend (`websocket-server.ts`), used by `npm run dev`.                                                                                     |
-| `lib/`         | `get-ipc.ts` — resolves the active IPC channel (BareKit / Sidecar).                                                                                       |
-| `main.core.ts` | Worklet entry: wires plugins, host bridge, IPC, and the dev server. Bundled by `npm run build:core` into `core/main.core.gen.js` (build output).          |
+| Path           | Contents                                                                |
+| -------------- | ----------------------------------------------------------------------- |
+| `messages/`    | Public API (`@ekrooh/bare/core`): wire protocol, router, RPC, host IPC. |
+| `server/`      | Dev WebSocket backend (`websocket-server.ts`) used by `npm run dev`.    |
+| `lib/`         | `get-ipc.ts`: resolves the IPC channel (BareKit / Sidecar).             |
+| `main.core.ts` | Worklet entry. `npm run build:core` bundles it to `main.core.gen.js`.   |
 
-Stability note: `messages/` is exported as `@ekrooh/bare/core` and is part of the
-public API contract (see `vision.md`). The rest is implementation.
+Only `messages/` is public API (see `messages/readme.md` and `vision.md`).
 
-Tests: co-located `*.test.ts` (run via `vp test`).
+Tests: co-located `*.test.ts`, run with `vp test`.

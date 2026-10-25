@@ -43,7 +43,7 @@ export function mimeTypeFor(filePath: string): string {
  * (enforced by `originAllowed`), and is an escape hatch for same-loopback
  * non-browser clients; it is accepted over TLS-agnostic plain HTTP by design. */
 export function tokenFromHeaders(
-  headers: Record<string, string | number>,
+  headers: Record<string, string | string[] | number>,
 ): string | null {
   const value = headers['x-bare-token'];
   return typeof value === 'string' ? value : null;
@@ -51,7 +51,7 @@ export function tokenFromHeaders(
 
 /** Reads the `bare_session` value from the `Cookie` request header. */
 export function cookieSession(
-  headers: Record<string, string | number>,
+  headers: Record<string, string | string[] | number>,
 ): string | null {
   const cookie = headers['cookie'];
   if (typeof cookie !== 'string') return null;
@@ -83,7 +83,7 @@ function secretEquals(a: string, b: string): boolean {
 /** Parses a `Range: bytes=<start>-<end>` header. Returns `null` when absent or
  * unsatisfiable (caller falls back to a 200 full response). */
 export function parseRange(
-  value: string | number | undefined,
+  value: string | string[] | number | undefined,
   size: number,
 ): { start: number; end: number } | null {
   if (typeof value !== 'string') return null;
@@ -169,7 +169,7 @@ export type LoopbackRouteHandler = (
 export type LoopbackRequest = {
   url?: string;
   method?: string;
-  headers: Record<string, string | number>;
+  headers: Record<string, string | string[] | number>;
 };
 
 export type LoopbackConnectionHandler = (
@@ -295,7 +295,7 @@ export function createLoopbackServer(
     }
   }
 
-  function isAuthorized(headers: Record<string, string | number>) {
+  function isAuthorized(headers: Record<string, string | string[] | number>) {
     if (!authEnabled) return true;
     if (token === null) return false;
     if (secretEquals(tokenFromHeaders(headers) ?? '', token)) return true;
@@ -309,7 +309,9 @@ export function createLoopbackServer(
    * a `Host` header pointing back at the bound 127.0.0.1:port. A DNS-rebinding
    * navigation resolves the loopback address under an attacker-controlled
    * hostname and therefore sends a foreign `Host`. Dev (auth off) is open. */
-  function originAllowed(headers: Record<string, string | number>): boolean {
+  function originAllowed(
+    headers: Record<string, string | string[] | number>,
+  ): boolean {
     if (!authEnabled) return true;
     if (boundOrigin === '') return true;
     const boundHostPort = boundOrigin.slice('http://'.length);
@@ -642,7 +644,7 @@ export function createLoopbackServer(
         server.on('error', reject);
         server.listen(port, host, () => {
           const address = server.address();
-          boundOrigin = `http://${host}:${address.port}`;
+          boundOrigin = `http://${host}:${address?.port}`;
           resolve(boundOrigin);
         });
       });

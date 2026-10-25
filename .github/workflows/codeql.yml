@@ -45,7 +45,7 @@ jobs:
         if: matrix.language == 'kotlin'
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
         with:
-          packages: tools platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
+          packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
 
       # The Bare Kit runtime (to.holepunch.bare.kit.IPC + Worklet) ships as a
       # prebuilt jar in prebuilds/android/bare-kit/classes.jar (gitignored,

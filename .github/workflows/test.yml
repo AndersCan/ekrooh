@@ -63,7 +63,7 @@ jobs:
 
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
         with:
-          packages: tools platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
+          packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
 
       - name: Install npm dependencies
         run: npm ci
@@ -107,7 +107,7 @@ jobs:
   #
   #     - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
   #       with:
-  #         packages: tools platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
+  #         packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
   #
   #     - name: Install npm dependencies
   #       run: npm ci
@@ -230,3 +230,9 @@ jobs:
           # Block the merge if a new dependency is added at a vulnerable
           # severity or with a disallowed license.
           fail-on-severity: high
+          # False positives: the lockfile records the `vite` override as the
+          # alias `npm:@voidzero-dev/vite-plus-core@1.4.0`, which the review
+          # misreads as the upstream `vite@1.4.0` (advisories for vite <2.9.13).
+          # `npm audit` (the vuln-scan job) resolves the alias correctly and is
+          # clean.
+          allow-ghsas: GHSA-mv48-hcvh-8jj8, GHSA-353f-5xf4-qw67, GHSA-587h-7wmj-h5pm, GHSA-fx2h-pf6j-xcff, GHSA-c27g-q93r-2cwf

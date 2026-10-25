@@ -17,7 +17,7 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   - The page receives only a **single-use bootstrap nonce** via
     `window.__ekrooh.bootstrap` (exchanged for the cookie via `POST /login`),
     never the raw token. `handoff.json` now carries `{ origin, port, token,
-bootstrap }`; the host keeps `token` for itself and injects only
+    bootstrap }`; the host keeps `token` for itself and injects only
     `bootstrap`.
   - Directory mounts are **gated by default**; `mountDir(..., { public: true })`
     opts into world-readable bootstrap serving (the web app at `/`). The SPA
@@ -28,7 +28,7 @@ bootstrap }`; the host keeps `token` for itself and injects only
 ### Added
 
 - **Peer-drive replication in the on-device p2p verify worklet** (`core/
-p2p-verify.core.ts`, issue #41): the worklet now replicates a drive across
+  p2p-verify.core.ts`, issue #41): the worklet now replicates a drive across
   two real peers over the local DHT — a creator announces its drive and
   serves it; a reader joins the topic client-only, opens the drive by key,
   `ready()`s it (the call the Android photo app timed out on), and reads a
@@ -59,11 +59,11 @@ p2p-verify.core.ts`, issue #41): the worklet now replicates a drive across
   three-dir contract `[webAssets, storage, cache]`, silencing the
   `cache dir missing or not a directory` fallback warning on every boot.
 - **Android example build works at any module depth** (`examples/android-app/
-build.gradle`, issue #38): the JS `Exec` tasks use the Gradle root project
+  build.gradle`, issue #38): the JS `Exec` tasks use the Gradle root project
   (overridable via `-Pekrooh.repoDir=<dir>`) instead of a hardcoded `"../../"`
   working dir, and write outputs under the module's own dir.
 - **`link` task fails on an empty link set** (`examples/android-app/
-build.gradle`, issue #37): bare-link exiting 0 while linking nothing (pnpm
+  build.gradle`, issue #37): bare-link exiting 0 while linking nothing (pnpm
   isolated node_modules, or a monorepo root without direct native-addon deps)
   now fails the build with an actionable message instead of shipping an APK
   that aborts with `dlopen failed`.
@@ -116,10 +116,10 @@ build.gradle`, issue #37): bare-link exiting 0 while linking nothing (pnpm
 ### Added
 
 - **Backend → web push** (`@ekrooh/bare/runtime`): `createLoopbackPush(server,
-protocol)` + `LoopbackServer.push(frame)` — server-initiated dispatch to the
+  protocol)` + `LoopbackServer.push(frame)` — server-initiated dispatch to the
   connected web layer (live galleries, sync status).
 - **Custom HTTP routes** (`@ekrooh/bare/runtime`): `LoopbackServer
-.registerRoute(method, path, handler)` runs before mount resolution, behind
+  .registerRoute(method, path, handler)` runs before mount resolution, behind
   the auth gate; `collectRequestBody` is re-exported for POST handlers.
 - **Consumer plugins**: `createWorkletRuntime({ plugins: [...] })` registers
   consumer plugin manifests after the canonical defaults (no more post-hoc

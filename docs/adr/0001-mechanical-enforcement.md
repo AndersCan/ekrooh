@@ -1,3 +1,20 @@
 # Mechanical enforcement of the stability and testing contract
 
-Vision's stability contract and testing contract are enforced mechanically — the test suite itself — rather than by prose alone. Each framework-core module must ship a co-located `*.test.ts` (presence manifest), the covered set holds a no-regress coverage floor (`all: false` over `core/**`, `plugins/**`, `web/**`, anchored to day-one values, branches reported but not gated), the public API surface is frozen by a snapshot test, and `package.json` `exports`/`files` entries must resolve to real paths. We chose tests-over-prose because the repo is agent-primary: a drifted claim loses all force when the reader is an agent that trusts the CI gate, not a human who remembers the doc. A pure percentage gate was rejected — it is gameable and drowns in generated bundles; the presence manifest covers structure, the floor covers depth, and nothing gates over generated or entry-point files.
+## Decision
+
+The stability and testing contract in `vision.md` is enforced by the test suite,
+not by prose:
+
+- Each framework-core module ships a co-located `*.test.ts` (presence manifest).
+- Coverage floor: `all: false` over `core/**`, `plugins/**`, `web/**`, anchored to
+  day-one values. Branches are reported, not gated.
+- The public API surface is frozen by a snapshot test.
+- `package.json` `exports`/`files` entries must resolve to real paths.
+- Nothing is gated over generated or entry-point files.
+
+## Rationale
+
+The repo is agent-primary. A drifted claim in prose loses all force against an agent
+that trusts the CI gate. A pure percentage gate was rejected: it is gameable and
+drowns in generated bundles. The presence manifest covers structure, and the floor
+covers depth.
