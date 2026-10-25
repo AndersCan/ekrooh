@@ -191,7 +191,7 @@ export function createHarnessSupervisor(
         server.on('error', reject);
         server.listen(port, host, () => {
           const address = server.address();
-          resolve(`http://${host}:${address.port}`);
+          resolve(`http://${host}:${address?.port}`);
         });
       });
     }

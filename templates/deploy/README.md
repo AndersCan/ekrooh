@@ -39,7 +39,7 @@ templates/deploy/
      `ANDROID_KEYSTORE_*` env vars; read `versionCode`/`versionName` from `-P`
      flags. Keep minify/R8 off (JS/WebView + native-addon bundle).
    - iOS: create the App ID and App Store Connect app, then run `fastlane match
-appstore` once on a Mac. CI syncs certs read-only.
+     appstore` once on a Mac. CI syncs certs read-only.
 4. Store access (once per platform):
    - Android: create the app and upload the first release manually in Play
      Console. Opt into Play App Signing, create an upload keystore, and invite the
