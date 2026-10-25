@@ -181,7 +181,21 @@ jobs:
           emulator-boot-timeout: 300
           disable-animations: true
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
-          script: ./gradlew :examples:android-app:connectedDebugAndroidTest
+          # On failure dump the device log (the emulator is gone once this step
+          # ends) so a crashed instrumentation process is diagnosable from CI.
+          script: |
+            adb logcat -c
+            ./gradlew :examples:android-app:connectedDebugAndroidTest || { adb logcat -d -t 1500 > logcat.txt; grep -iE "fatal|crash|signal|abort|dlopen|UnsatisfiedLink|bare|p2p" logcat.txt | tail -120; exit 1; }
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: android-emulator-reports
+          path: |
+            examples/android-app/build/reports/androidTests/
+            logcat.txt
+          if-no-files-found: ignore
+          retention-days: 14
 
   ios:
     runs-on: macos-latest
