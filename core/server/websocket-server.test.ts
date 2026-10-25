@@ -547,3 +547,47 @@ describe('attachWebSocketProtocol concurrency', () => {
     );
   });
 });
+
+describe('attachWebSocketProtocol oversized results', () => {
+  it('answers with FRAME_TOO_LARGE instead of dropping a result that cannot be encoded', async () => {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'test.big',
+      events: ['big'],
+      runtimes: {
+        bare: {
+          invoke: () => [null, { text: 'x'.repeat(70_000) }] as [null, unknown],
+        },
+      },
+    });
+    const harness = serverHarness();
+    attachWebSocketProtocol(
+      harness.server as never,
+      {
+        protocol,
+        pluginRegistry: registry,
+        pluginRouter: createPluginRouter(registry, 'bare'),
+      } as never,
+    );
+    const socket = fakeSocket();
+    harness.handler!(socket as never, { headers: {} });
+
+    socket.emit(
+      'data',
+      invokeFrame({
+        type: 'INVOKE_REQUEST',
+        pluginId: 'test.big',
+        event: 'big',
+        requestId: 'big-1',
+      }),
+    );
+
+    await vi.waitFor(() => expect(socket.write).toHaveBeenCalledTimes(1));
+    const header = protocol.decode(socket.write.mock.calls[0][0] as Uint8Array)
+      .header as PluginInvokeResponseHeader;
+    expect(header.requestId).toBe('big-1');
+    expect(header.result).toBeUndefined();
+    expect(header.error?.code).toBe('FRAME_TOO_LARGE');
+    expect(header.error?.message).toContain('test.big.big');
+  });
+});

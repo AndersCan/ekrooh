@@ -3,10 +3,11 @@ import path from 'bare-path';
 import { TextDecoder, TextEncoder } from 'bare-encoding';
 import { createDefaultPlugins } from '../plugins';
 import { getIPC } from './lib/get-ipc';
+import { encodeResponse } from './messages/encode-response';
 import { createFrameDecoder } from './messages/framing';
 import { ChannelHealth } from './messages/channel-health';
 import { createHostIpcBridge } from './messages/host-ipc';
-import { MessageType, MessageProtocol, type PluginManifest } from './messages';
+import { MessageProtocol, type PluginManifest } from './messages';
 import { createPluginRegistry, createPluginRouter } from './messages/protocol';
 import { installConsoleCapture } from './logs/capture';
 import { createLogRingBuffer } from './logs/store';
@@ -340,10 +341,7 @@ export function createWorkletRuntime(
           .route(parsed.header, parsed.payload)
           .then((pluginResponse) => {
             if (pluginResponse) {
-              writeIpc(
-                ipc,
-                protocol.encode(MessageType.ENVELOPE, pluginResponse, null),
-              );
+              writeIpc(ipc, encodeResponse(protocol, pluginResponse));
             }
           })
           .catch((err) => {

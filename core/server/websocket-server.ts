@@ -1,5 +1,6 @@
 import { MessageType } from '../messages';
 import { BareRuntimeContext } from '../messages/create-bare-runtime-context';
+import { encodeResponse } from '../messages/encode-response';
 import { createFrameDecoder } from '../messages/framing';
 import type { MessageHeader, MessageProtocol } from '../messages';
 import type { LoopbackServer } from './static-file-server';
@@ -78,9 +79,7 @@ export function attachWebSocketProtocol(
           .route(parsed.header, parsed.payload)
           .then((pluginResponse) => {
             if (pluginResponse) {
-              socket.write(
-                protocol.encode(MessageType.ENVELOPE, pluginResponse, null),
-              );
+              socket.write(encodeResponse(protocol, pluginResponse));
             }
           })
           .catch((err) => {

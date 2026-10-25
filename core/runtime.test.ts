@@ -493,4 +493,48 @@ describe('host IPC response routing', () => {
 
     runtime.close();
   });
+
+  it('answers a host invoke with FRAME_TOO_LARGE when the result cannot be encoded', async () => {
+    const ipc = Object.assign(new EventEmitter(), {
+      write: vi.fn((_data: unknown) => true),
+      resume() {},
+    });
+    vi.stubGlobal('BareKit', { IPC: ipc });
+    const runtime = createWorkletRuntime({
+      port: 0,
+      plugins: [
+        {
+          id: 'app.big',
+          events: ['big'],
+          runtimes: {
+            bare: { invoke: () => [null, { text: 'x'.repeat(70_000) }] },
+          },
+        },
+      ],
+    });
+
+    ipc.emit(
+      'data',
+      Buffer.from(
+        frame({
+          type: 'INVOKE_REQUEST',
+          pluginId: 'app.big',
+          event: 'big',
+          requestId: 'big-1',
+        }),
+      ),
+    );
+
+    await vi.waitFor(() => expect(ipc.write).toHaveBeenCalledTimes(1), {
+      timeout: 1000,
+    });
+    const header = protocol.decode(
+      new Uint8Array(ipc.write.mock.calls[0][0] as Buffer),
+    ).header as Record<string, any>;
+    expect(header.type).toBe('INVOKE_RESPONSE');
+    expect(header.requestId).toBe('big-1');
+    expect(header.error.code).toBe('FRAME_TOO_LARGE');
+
+    runtime.close();
+  });
 });
