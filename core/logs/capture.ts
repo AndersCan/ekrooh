@@ -10,6 +10,20 @@ const LEVEL_BY_METHOD: Record<ConsoleMethod, LogLevel> = {
 
 type ConsoleMethod = 'debug' | 'log' | 'info' | 'warn' | 'error';
 
+const LEVEL_RANK: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+
+export type ConsoleCaptureOptions = {
+  /** Lowest level recorded in the store. Lower-level calls still reach the
+   * original console but skip formatting and storage. Defaults to `debug`
+   * (record everything). */
+  minLevel?: LogLevel;
+};
+
 function safeStringify(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value instanceof Error) return value.stack ?? value.message;
@@ -43,7 +57,9 @@ export type ConsoleCapture = {
 export function installConsoleCapture(
   store: LogStore,
   source: LogSource = 'backend',
+  options: ConsoleCaptureOptions = {},
 ): ConsoleCapture {
+  const minRank = LEVEL_RANK[options.minLevel ?? 'debug'];
   const original: Record<ConsoleMethod, (...args: unknown[]) => void> = {
     debug: console.debug,
     log: console.log,
@@ -53,16 +69,19 @@ export function installConsoleCapture(
   };
 
   const wrap = (method: ConsoleMethod, level: LogLevel) => {
+    const recorded = LEVEL_RANK[level] >= minRank;
     return (...args: unknown[]) => {
-      try {
-        store.append({
-          ts: Date.now(),
-          level,
-          source,
-          message: formatArgs(args),
-        });
-      } catch {
-        // Never let the seam break a consumer's own log call.
+      if (recorded) {
+        try {
+          store.append({
+            ts: Date.now(),
+            level,
+            source,
+            message: formatArgs(args),
+          });
+        } catch {
+          // Never let the seam break a consumer's own log call.
+        }
       }
       try {
         original[method].apply(console, args);

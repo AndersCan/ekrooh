@@ -45,6 +45,45 @@ describe('createLogRingBuffer', () => {
     expect(store.view({ source: 'web' }).map((e) => e.message)).toEqual(['d']);
   });
 
+  it('stays ordered and bounded across several laps of the ring', () => {
+    const store = createLogRingBuffer(3);
+    for (let i = 0; i < 10; i++)
+      store.append({
+        ts: i,
+        level: 'info',
+        source: 'backend',
+        message: `m${i}`,
+      });
+    expect(store.view().map((e) => e.message)).toEqual(['m7', 'm8', 'm9']);
+    expect(store.view().map((e) => e.seq)).toEqual([7, 8, 9]);
+    expect(store.view({ tail: 2 }).map((e) => e.message)).toEqual(['m8', 'm9']);
+  });
+
+  it('works with a capacity of one', () => {
+    const store = createLogRingBuffer(1);
+    store.append({ ts: 1, level: 'info', source: 'backend', message: 'a' });
+    store.append({ ts: 2, level: 'info', source: 'backend', message: 'b' });
+    expect(store.view().map((e) => e.message)).toEqual(['b']);
+  });
+
+  it('keeps counting seq and ordering after clear on a wrapped ring', () => {
+    const store = createLogRingBuffer(3);
+    for (let i = 0; i < 5; i++)
+      store.append({
+        ts: i,
+        level: 'info',
+        source: 'backend',
+        message: `m${i}`,
+      });
+    expect(store.clear()).toBe(3);
+    store.append({ ts: 9, level: 'info', source: 'backend', message: 'x' });
+    store.append({ ts: 10, level: 'info', source: 'backend', message: 'y' });
+    expect(store.view().map((e) => [e.seq, e.message])).toEqual([
+      [5, 'x'],
+      [6, 'y'],
+    ]);
+  });
+
   it('clear empties the buffer and reports the count', () => {
     const store = createLogRingBuffer(10);
     store.append({ ts: 1, level: 'info', source: 'backend', message: 'a' });
