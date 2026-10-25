@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vite-plus/test';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { ErrorCode } from './constants';
 import { CoreError } from './types';
 import {
@@ -417,7 +417,9 @@ describe('createPluginRouter', () => {
     ];
     // The host announces nothing first, then storage, then only camera —
     // a memoized snapshot would deny the newly-announced capability and keep
-    // delegating the withdrawn one.
+    // delegating the withdrawn one. Caching is switched off (`ttl 0`) so the
+    // host is asked on every delegation; the cached behaviour has its own
+    // tests below.
     const getHostCapabilities = vi
       .fn()
       .mockResolvedValueOnce(announce([]))
@@ -426,6 +428,7 @@ describe('createPluginRouter', () => {
     const router = createPluginRouter(registry, 'bare', {
       delegateToHost,
       getHostCapabilities,
+      hostCapabilitiesTtlMs: 0,
     });
     const invoke = (event: string, requestId: string) =>
       router.route(
@@ -454,6 +457,170 @@ describe('createPluginRouter', () => {
     const withdrawn = await invoke('permissions.requestStorage', 'r13');
     expect(withdrawn?.error?.code).toBe('UNSUPPORTED_CAPABILITY');
     expect(getHostCapabilities).toHaveBeenCalledTimes(4);
+  });
+
+  describe('host capabilities cache', () => {
+    const announce = (events: string[]) => [
+      {
+        pluginId: 'core.permissions',
+        capabilities: ['permissions'],
+        events,
+        runtimes: ['android' as const],
+      },
+    ];
+
+    function setup(
+      getHostCapabilities: () => Promise<ReturnType<typeof announce>>,
+      delegateImpl?: () => Promise<PluginInvokeResponseHeader | null>,
+    ) {
+      const registry = createPluginRegistry();
+      registry.register({
+        id: 'core.permissions',
+        events: ['permissions.requestStorage', 'permissions.requestCamera'],
+        runtimes: {},
+      });
+      const delegateToHost = vi.fn(
+        delegateImpl ??
+          (async (header: {
+            pluginId: string;
+            event: string;
+            requestId?: string;
+          }) => ({
+            type: 'INVOKE_RESPONSE' as const,
+            pluginId: header.pluginId,
+            event: header.event,
+            requestId: header.requestId,
+            result: { granted: true },
+          })),
+      );
+      const queries = vi.fn(getHostCapabilities);
+      const router = createPluginRouter(registry, 'bare', {
+        delegateToHost: delegateToHost as never,
+        getHostCapabilities: queries,
+      });
+      const invoke = (event = 'permissions.requestStorage') =>
+        router.route(
+          {
+            type: 'INVOKE_REQUEST',
+            pluginId: 'core.permissions',
+            event,
+            requestId: 'r',
+          },
+          new Uint8Array(0),
+        );
+      return { invoke, queries, delegateToHost };
+    }
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('asks the host once for many delegated invokes', async () => {
+      const { invoke, queries } = setup(async () =>
+        announce(['permissions.requestStorage']),
+      );
+      for (let i = 0; i < 5; i++) {
+        expect((await invoke())?.error).toBeUndefined();
+      }
+      expect(queries).toHaveBeenCalledTimes(1);
+    });
+
+    it('shares one query between concurrent cold-start invokes', async () => {
+      const { invoke, queries } = setup(async () =>
+        announce(['permissions.requestStorage']),
+      );
+      const results = await Promise.all(
+        Array.from({ length: 10 }, () => invoke()),
+      );
+      expect(results.every((r) => r?.error === undefined)).toBe(true);
+      expect(queries).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks again once the TTL has expired', async () => {
+      vi.useFakeTimers();
+      const { invoke, queries } = setup(async () =>
+        announce(['permissions.requestStorage']),
+      );
+      await invoke();
+      await vi.advanceTimersByTimeAsync(29_000);
+      await invoke();
+      expect(queries).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await invoke();
+      expect(queries).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not re-query for an unlisted event inside the refresh window, then picks up a late announcement', async () => {
+      vi.useFakeTimers();
+      let events: string[] = [];
+      const { invoke, queries } = setup(async () => announce(events));
+      expect((await invoke())?.error?.code).toBe('UNSUPPORTED_CAPABILITY');
+      expect((await invoke())?.error?.code).toBe('UNSUPPORTED_CAPABILITY');
+      expect(queries).toHaveBeenCalledTimes(1);
+
+      // The host announces the capability; after the refresh window the next
+      // call sees it.
+      events = ['permissions.requestStorage'];
+      await vi.advanceTimersByTimeAsync(2_001);
+      expect((await invoke())?.error).toBeUndefined();
+      expect(queries).toHaveBeenCalledTimes(2);
+    });
+
+    it('drops the cache when a delegation throws', async () => {
+      let calls = 0;
+      const { invoke, queries } = setup(
+        async () => announce(['permissions.requestStorage']),
+        async () => {
+          calls++;
+          if (calls === 1) throw new Error('host went away');
+          return {
+            type: 'INVOKE_RESPONSE',
+            pluginId: 'core.permissions',
+            event: 'permissions.requestStorage',
+            requestId: 'r',
+            result: { granted: true },
+          };
+        },
+      );
+      expect((await invoke())?.error?.code).toBe('HOST_ERROR');
+      expect((await invoke())?.error).toBeUndefined();
+      expect(queries).toHaveBeenCalledTimes(2);
+    });
+
+    it('drops the cache when the host disowns the event', async () => {
+      let answered = false;
+      const { invoke, queries } = setup(
+        async () => announce(['permissions.requestStorage']),
+        async () => {
+          const unsupported = !answered;
+          answered = true;
+          return {
+            type: 'INVOKE_RESPONSE',
+            pluginId: 'core.permissions',
+            event: 'permissions.requestStorage',
+            requestId: 'r',
+            ...(unsupported
+              ? { error: { code: 'UNSUPPORTED_CAPABILITY', message: 'gone' } }
+              : { result: { granted: true } }),
+          };
+        },
+      );
+      expect((await invoke())?.error?.code).toBe('UNSUPPORTED_CAPABILITY');
+      expect((await invoke())?.error).toBeUndefined();
+      expect(queries).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not cache a failed query', async () => {
+      let attempt = 0;
+      const { invoke, queries } = setup(async () => {
+        attempt++;
+        if (attempt === 1) throw new Error('Host IPC timeout');
+        return announce(['permissions.requestStorage']);
+      });
+      await expect(invoke()).rejects.toThrow(/Host IPC timeout/);
+      expect((await invoke())?.error).toBeUndefined();
+      expect(queries).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('returns UNSUPPORTED_CAPABILITY when neither adapter nor host handles it', async () => {
