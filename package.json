@@ -96,7 +96,6 @@
     "bare-env": "^3.0.0",
     "bare-fs": "^4.8.0",
     "bare-hrtime": "2.1.2",
-    "bare-type": "1.4.0",
     "bare-http1": "^4.5.7",
     "bare-path": "^3.1.1",
     "bare-tcp": "^2.2.7",
