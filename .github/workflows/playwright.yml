@@ -28,6 +28,10 @@ jobs:
         run: npm run test:e2e:web
       - name: Run Playwright tests (multi-instance harness)
         run: npm run test:e2e:harness
+      - name: Run Playwright tests (consumer example, real stack)
+        # Boots the consumer worklet under `bare` serving the built web app,
+        # the same-origin topology that runs on device.
+        run: npm run test:e2e:consumer
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
