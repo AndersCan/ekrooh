@@ -41,8 +41,9 @@ rule:
 
 - `GET /logs?tail=&level=&source=&format=jsonl|text` — read-back (defaults to
   human-readable text; `format=jsonl` returns newline-delimited JSON).
-- `POST /logs` with `{ source: 'web', entries: [...] }` — ingest web/browser
-  log batches.
+- `POST /logs` with `{ entries: [...] }` — ingest web/browser log batches.
+  Every ingested entry is recorded as `source: 'web'`; only the worklet's own
+  console capture writes `backend` entries.
 
 ## Capture
 

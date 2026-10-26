@@ -3,7 +3,8 @@ title: Loopback Server & Auth
 description: One HTTP+WS server serves the app, media, and protocol socket.
 ---
 
-One loopback HTTP+WS server (`core/server/static-file-server.ts`) serves the
+One loopback HTTP+WS server (`core/server/static-file-server.ts`, with its
+admission policy in `core/server/loopback-gate.ts`) serves the
 web app at `/`, the media files mounted by plugins, and the framed-protocol
 WebSocket socket. On device it binds `127.0.0.1` on an ephemeral port, and
 every gated request is authorized by a per-session credential:
@@ -12,16 +13,32 @@ every gated request is authorized by a per-session credential:
    to `handoff.json`. The host injects **only the one-time `bootstrap` nonce**
    into the page (`window.__ekrooh = { bootstrap }`), never the raw token.
 2. The page exchanges the bootstrap nonce for a `bare_session` cookie via
-   `POST /login` (`HttpOnly; SameSite=Lax; Path=/`). The nonce is single-use:
-   after the page redeems it, it is spent.
+   `POST /login` (`HttpOnly; SameSite=Strict; Path=/`). The nonce is
+   single-use: after the page redeems it, it is spent. The raw session token
+   is never accepted as a login body.
 3. The cookie then authorizes `<img>`/`<video>`/`fetch` and the WebSocket
    upgrade. Non-browser clients use the `X-Bare-Token` header. There is **no**
    `?token=` query-param path — a token must never appear in a URL.
 4. The host keeps the real `token` from `handoff.json` for its own IPC needs
    and loads `http://127.0.0.1:<port>/index.html`.
 
-The dev backend runs the same bundle with auth off on a fixed port
-(`ws://localhost:8080`), so browser dev needs no credential.
+Every request, in every mode, must also pass the **origin rule**: its `Host`
+must name the bound server (`127.0.0.1`, `localhost` or `[::1]` on the bound
+port), which defeats DNS rebinding, and an `Origin`, when sent, must be that
+server or one listed in `allowedOrigins`. WebSocket upgrades are not subject to
+CORS, so this is what stops another site open in the same browser from driving
+the backend. With auth on, an upgrade without an `Origin` is refused.
+
+The dev backend (`mode=dev`) runs the same bundle with auth off on a fixed port
+(`ws://localhost:8080`), so browser dev needs no credential, but the origin
+rule still applies: the Vite dev server's origin is passed as
+`origin=http://localhost:5173`.
+
+HTML documents carry a Content-Security-Policy whose `connect-src` names the
+one protocol socket the page may open (`ws://<host>:<port>`), not any `ws:`
+host. A directory mount never serves a file whose real path (symlinks
+resolved) lies outside the mount root, and a path segment that decodes to
+`.`, `..`, a separator or NUL is a 400.
 
 ## Public vs gated (the threat model)
 

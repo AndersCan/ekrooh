@@ -7,6 +7,60 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **Origin rule in every mode** (`core/server/loopback-gate.ts`): with auth
+  off (the dev backend), the loopback server no longer accepts any `Host` or
+  page `Origin`. A website open in the same browser could previously open the
+  dev protocol socket (WebSocket upgrades bypass CORS) and invoke every plugin.
+  Cross-origin dev pages must be listed in `allowedOrigins` (CLI `origin=`).
+- **Secure defaults** (`@ekrooh/bare/runtime`): `createWorkletRuntime`
+  defaults to device mode (auth on, ephemeral port) whether or not `storage` is
+  set, and `resolveCliConfig` keeps those defaults unless `mode=dev` is passed.
+  The desktop sidecar forces auth on. A broken host configuration no longer
+  falls back to an unauthenticated dev server.
+- **Nonce-only login**: `POST /login` no longer accepts the raw session token,
+  and the web transport no longer reads `window.__ekrooh.token`.
+- **Path containment**: path segments are percent-decoded and rejected (400)
+  when they decode to `.`, `..`, a separator or NUL; a directory mount never
+  serves a file whose real path (symlinks resolved) is outside its root.
+- **No error detail in responses**: a throwing route or handler answers a bare
+  `500 Internal Server Error`; the cause goes to the log.
+- **Tighter headers**: the session cookie is `SameSite=Strict`; HTML
+  `connect-src` names the one protocol socket instead of any `ws:` host.
+- **Protocol socket**: an `error` on the WebSocket (a peer reset) is contained
+  even when no connection handler listens, instead of crashing the worklet;
+  inbound messages are capped at the protocol's 16 MiB frame size.
+- **Log ingest**: `POST /logs` records every entry as `source: 'web'` and
+  validates `level`/`tag`; a malformed `GET /logs` query is a 400.
+
+### Changed
+
+- **BREAKING:** dev mode is opt-in (`deviceMode: false` or `mode=dev`); see
+  [ADR 0006](docs/adr/0006-secure-by-default-loopback.md). Dev runners pass
+  `mode=dev` and the Vite dev origin; the example Vite servers are pinned to
+  port 5173.
+- **BREAKING:** `getIPC()` returns `null` when there is no host (it returned
+  `undefined` typed as the channel).
+- The loopback server is split into the loopback gate (admission), the
+  protocol socket slot (`core/server/protocol-socket.ts`) and the HTTP serving
+  that remains in `static-file-server.ts`. The host IPC and the WebSocket share
+  one frame channel (`core/messages/frame-channel.ts`) for reassembly, routing
+  and malformed-frame policy.
+- `createWorkletRuntime` builds its protocol, registry and router through
+  `createBareRuntimeContext`, which now allocates one text encoder/decoder per
+  context instead of one per frame.
+
+### Added
+
+- `allowedOrigins` on `LoopbackServerOptions` and `WorkletRuntimeOptions`, and
+  the `mode=` and repeatable `origin=` CLI tokens.
+
+### Removed
+
+- The unused mantaq messenger prototype (`rpc-messenger.mantaq.ts`,
+  `pending-call.ts`) and the `@mantaq/sugar` dependency.
+
 ## [0.5.0] - 2026-10-26
 
 ### Added

@@ -60,7 +60,8 @@ const { origin, port, token, bootstrap } = await runtime.start();
 ```
 
 `resolveWorkletConfig()` reads the host-provided config from `Bare.argv`
-(`[webAssets, storage, cache]`). Under the bare CLI it returns `{}` → dev mode.
+(`[webAssets, storage, cache]`). Under the bare CLI it parses labeled tokens;
+dev mode (auth off) needs an explicit `mode=dev`.
 
 Bundle it for the Bare runtime:
 

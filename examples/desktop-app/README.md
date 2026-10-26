@@ -32,7 +32,8 @@ the glibc requirement stays low.
    instance holds it, the launch is a **no-op** (exit 0). The backend inherits
    the lock, so a relaunch cannot race a backend that is still shutting down.
 2. It opens the window on a local "Starting" page and spawns
-   `bare desktop.bundle webassets=… storage=… cache=… auth=on port=0 handoff=<fd>`,
+   `bare desktop.bundle webassets=… storage=… cache=… auth=on port=0 handoff=<fd>`
+   (the backend forces auth on regardless of `auth=`),
    keeping the child's **stdin open** and passing it the write end of a private
    pipe.
 3. The backend binds an ephemeral loopback port and writes one JSON line,

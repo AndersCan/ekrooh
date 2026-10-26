@@ -52,7 +52,8 @@ injected at `.atDocumentStart`.
 - `handoff.json` must be written to the **host-provided** sandbox dir, never a
   shared location.
 - The **page** receives only a one-time bootstrap nonce; the real token stays
-  in `handoff.json` for the host only. The cookie is `HttpOnly; SameSite=Lax`.
+  in `handoff.json` for the host only, and is never accepted as a `/login`
+  body. The cookie is `HttpOnly; SameSite=Strict`.
 - Non-browser clients use the `X-Bare-Token` header. There is no `?token=`
   URL fallback.
 - All loopback responses send `Referrer-Policy: no-referrer`.

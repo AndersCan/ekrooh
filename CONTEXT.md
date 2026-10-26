@@ -49,3 +49,21 @@ _Avoid_: "release branch", "release ticket"
 **Release gate**:
 A check required to merge a Release PR but not an ordinary change. The downstream app (justus) building against the release candidate is the release gate.
 _Avoid_: "canary job"
+
+## Loopback runtime
+
+**Loopback gate**:
+The module (`core/server/loopback-gate.ts`) that decides admission to the loopback server: the session token, the single-use bootstrap nonce, the session cookie and the origin rule. Every HTTP request, WebSocket upgrade and `/login` asks it for a verdict.
+_Avoid_: "auth middleware", "session service"
+
+**Origin rule**:
+The check that a request targets the bound loopback server (`Host`) and comes from an allowed page (`Origin`). It applies with auth on or off.
+_Avoid_: "CORS" (the server sends no CORS headers; WebSocket upgrades are not covered by CORS)
+
+**Protocol socket slot**:
+The single live protocol WebSocket of a loopback server (`core/server/protocol-socket.ts`): handshake, one-client replacement rule, bounded writes and server push.
+_Avoid_: "connection manager"
+
+**Frame channel**:
+One framed byte stream to a peer (`core/messages/frame-channel.ts`): reassembles frames, routes requests through the plugin router and writes responses, with a declared malformed-frame policy (`close` for the WebSocket, `tolerate` for the host IPC).
+_Avoid_: "pipe", "connection handler"

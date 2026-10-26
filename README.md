@@ -99,7 +99,8 @@ ephemeral port. Every request is gated by a per-session token:
 
 1. The shell injects `window.__ekrooh = { bootstrap }`, a single-use nonce (never the raw token).
 2. The page calls `POST /login` with the nonce and receives a
-   `bare_session` cookie (`HttpOnly; SameSite=Lax; Path=/`).
+   `bare_session` cookie (`HttpOnly; SameSite=Strict; Path=/`). The raw token is
+   never a login credential.
 3. The cookie authorizes `<img>`, `<video>`, `fetch`, and the WS upgrade.
    Non-browser clients send `X-Bare-Token`. There is no `?token=` fallback
    (see `docs/adr/0003-loopback-auth-surface.md`).
@@ -108,7 +109,11 @@ Only the bootstrap mount at `/` is public pre-auth. The worklet writes
 `{ origin, port, token, bootstrap }` to `handoff.json` in the host's sandbox dir;
 the host keeps `token` and loads `http://127.0.0.1:<port>/index.html`.
 
-The dev backend runs the same bundle with auth off on `ws://localhost:8080`.
+Every request must also target the bound loopback server (`Host`), and a page
+`Origin` must be that server or an explicitly allowed one, in every mode.
+
+The dev backend (`mode=dev`) runs the same bundle with auth off on
+`ws://localhost:8080`, allowing the Vite dev origin (`origin=` tokens).
 
 ## Testing
 
