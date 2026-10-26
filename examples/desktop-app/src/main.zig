@@ -71,7 +71,8 @@ fn run(init: std.process.Init) !u8 {
     // user-only, also when the dir already existed.
     const storage_dir = try Io.Dir.cwd().createDirPathOpen(io, opts.storage, .{ .permissions = .fromMode(0o700) });
     defer storage_dir.close(io);
-    try storage_dir.setPermissions(io, .fromMode(0o700));
+    // By path: on Linux the dir handle is O_PATH, which fchmod rejects (EBADF).
+    try Io.Dir.cwd().setFilePermissions(io, opts.storage, .fromMode(0o700), .{});
     try storage_dir.createDirPath(io, "cache");
 
     // One instance per storage dir. The flock follows the open file into the
