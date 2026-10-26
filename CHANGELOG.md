@@ -53,6 +53,17 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **macOS desktop reference app** (`examples/desktop-app`, `core/desktop.core.ts`):
+  a Zig host with the system webview and a sidecar `bare` backend, built by
+  `npm run build:desktop` and smoke-tested in CI (`desktop` job). The backend
+  hands its origin and bootstrap nonce to the host over a private pipe, so no
+  credentials are written to disk. One instance per storage dir (a second
+  launch is a no-op), and startup failures or a crashed backend show an error
+  page instead of a silent exit.
+- **`handoffFile` runtime option** (`createWorkletRuntime`): set `false` to
+  keep the credentials out of `<storage>/handoff.json` when the host receives
+  them another way. Defaults to `true`, so existing hosts are unaffected.
+
 - **Peer-drive replication in the on-device p2p verify worklet** (`core/
   p2p-verify.core.ts`, issue #41): the worklet now replicates a drive across
   two real peers over the local DHT — a creator announces its drive and

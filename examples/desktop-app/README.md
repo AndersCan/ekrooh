@@ -14,15 +14,28 @@ Ekrooh.app/Contents
 
 ## How it works
 
-1. The host spawns `bare desktop.bundle webassets=… storage=… cache=… auth=on port=0`
-   and keeps the child's **stdin open**.
-2. The backend binds an ephemeral loopback port and writes `handoff.json`
-   (origin + one-time `bootstrap` nonce) into the storage dir, as on mobile.
-3. The host reads it, injects `window.__ekrooh = { bootstrap }` and opens a
-   native webview on the origin. The page does `POST /login` itself
-   (ADR 0003); the WebSocket + nonce is the only contract.
-4. When the window closes the host closes stdin. The backend exits on EOF, so a
-   crashed host leaves no orphan either.
+1. The host takes an exclusive lock on `<storage>/ekrooh.lock`. If another
+   instance holds it, the launch is a **no-op** (exit 0). The backend inherits
+   the lock, so a relaunch cannot race a backend that is still shutting down.
+2. It opens the window on a local "Starting" page and spawns
+   `bare desktop.bundle webassets=… storage=… cache=… auth=on port=0 handoff=<fd>`,
+   keeping the child's **stdin open** and passing it the write end of a private
+   pipe.
+3. The backend binds an ephemeral loopback port and writes one JSON line,
+   `{ origin, bootstrap }`, to that pipe. Nothing is written to disk: the
+   session token never leaves the backend (`handoffFile: false`; the mobile
+   hosts still read `handoff.json` from their sandbox).
+4. The host injects `window.__ekrooh = { bootstrap }` (on the backend's origin
+   only) and navigates. The page does `POST /login` itself (ADR 0003); the
+   WebSocket + nonce is the only contract.
+5. When the window closes the host closes stdin. The backend shuts down on EOF,
+   so a crashed host leaves no orphan either; one that ignores EOF for 5s is
+   killed.
+
+If the backend fails to start (exits, times out after 20s, or hands off
+garbage) or dies while the window is open, the window shows an error page
+pointing at `<storage>/backend.log` instead of vanishing, and the host exits 1
+when it is closed.
 
 ## Build and run
 
@@ -36,8 +49,11 @@ examples/desktop-app/dist/Ekrooh.app/Contents/MacOS/ekrooh --debug --storage /tm
 ```
 
 Host flags: `--resources <dir>`, `--storage <dir>` (default
-`~/Library/Application Support/Ekrooh`), `--debug` (webview devtools).
-`zig build test` runs the host unit tests; `npm run smoke:desktop` launches two instances of the built app and checks the nonce handoff and orphan cleanup (CI job `desktop`).
+`~/Library/Application Support/Ekrooh`, created `0700`), `--debug` (webview
+devtools; backend output to the terminal instead of `backend.log`).
+`zig build test` runs the host unit tests; `npm run smoke:desktop` launches two instances of the built app and checks
+the pipe handoff and nonce redemption, the single-instance no-op, surviving a
+backend crash, and orphan cleanup (CI job `desktop`).
 
 ## Not done yet
 
