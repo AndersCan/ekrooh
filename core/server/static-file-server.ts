@@ -5,14 +5,19 @@ import type {
   HTTPServerResponse,
   HTTPStatusCode,
 } from 'bare-http1';
-import ws from 'bare-ws';
-import crypto from 'bare-crypto';
 import path from 'bare-path';
 import { TextDecoder, TextEncoder } from 'bare-encoding';
+import { createLoopbackGate } from './loopback-gate';
 import {
-  createBoundedWriter,
-  type BoundedWriter,
-} from '../messages/backpressure';
+  createProtocolSocketSlot,
+  type LoopbackConnectionHandler,
+} from './protocol-socket';
+
+export type {
+  LoopbackConnectionHandler,
+  LoopbackRequest,
+  WebSocketLike,
+} from './protocol-socket';
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   html: 'text/html',
@@ -79,50 +84,6 @@ export function etagMatches(
   return header
     .split(',')
     .some((candidate) => candidate.trim() === etag || candidate.trim() === '*');
-}
-
-/** Reads the token from the `X-Bare-Token` request header (parser-lowercased).
- * `fetch`-based non-browser clients that cannot carry cookies use this.
- * Security note: like the `bare_session` cookie, this credential travels the
- * cleartext 127.0.0.1 loopback — it is only trusted from the bound origin
- * (enforced by `originAllowed`), and is an escape hatch for same-loopback
- * non-browser clients; it is accepted over TLS-agnostic plain HTTP by design. */
-export function tokenFromHeaders(
-  headers: Record<string, string | string[] | number>,
-): string | null {
-  const value = headers['x-bare-token'];
-  return typeof value === 'string' ? value : null;
-}
-
-/** Reads the `bare_session` value from the `Cookie` request header. */
-export function cookieSession(
-  headers: Record<string, string | string[] | number>,
-): string | null {
-  const cookie = headers['cookie'];
-  if (typeof cookie !== 'string') return null;
-  for (const part of cookie.split(';')) {
-    const eq = part.indexOf('=');
-    if (eq === -1) continue;
-    if (part.slice(0, eq).trim() === 'bare_session') {
-      return part.slice(eq + 1).trim();
-    }
-  }
-  return null;
-}
-
-/** Derives the cookie value from the session token so the token itself is not
- * echoed into a request header a local attacker could read back. */
-export function sessionNonce(token: string): string {
-  return crypto.createHash('blake2b-256').update(token).digest('hex');
-}
-
-/** Constant-time string comparison. bare-crypto's `timingSafeEqual` requires
- * equal-length inputs (it throws otherwise), so guard on byte length first. */
-function secretEquals(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ab, bb);
 }
 
 /** Parses a `Range: bytes=<start>-<end>` header. Returns `null` when absent or
@@ -196,34 +157,10 @@ export function collectRequestBody(
   });
 }
 
-export type WebSocketLike = {
-  on(event: 'data', listener: (chunk: unknown) => void): unknown;
-  on(event: 'close', listener: () => void): unknown;
-  on(event: 'drain', listener: () => void): unknown;
-  on(event: 'error', listener: (err: Error) => void): unknown;
-  write(data: unknown): boolean;
-  destroy(): void;
-  /** Stops/restarts `data` events (inbound backpressure). */
-  pause?(): void;
-  resume?(): void;
-};
-
 /** Handler for a registered HTTP route on the loopback server. */
 export type LoopbackRouteHandler = (
   req: HTTPIncomingMessage,
   res: HTTPServerResponse,
-) => void;
-
-/** Minimal shape of the HTTP request object handed to WS upgrade handlers. */
-export type LoopbackRequest = {
-  url?: string;
-  method?: string;
-  headers: Record<string, string | string[] | number>;
-};
-
-export type LoopbackConnectionHandler = (
-  socket: WebSocketLike,
-  request: LoopbackRequest,
 ) => void;
 
 export interface LoopbackServerOptions {
@@ -231,12 +168,16 @@ export interface LoopbackServerOptions {
   host?: string;
   /** Port to bind; `0` picks an ephemeral port (on-device). */
   port?: number;
-  /** Require the per-session token/cookie on every request and WS upgrade.
-   * The dev backend turns this off (the browser cannot know the token). */
+  /** Require the per-session token/cookie on every gated request and WS
+   * upgrade. Defaults to on; only the dev backend turns it off. The origin
+   * check applies either way. */
   auth?: boolean;
-  /** Fixed session token (dev/tests); otherwise a random 32-byte token is
-   * generated on first bind. */
+  /** Fixed session token (tests); otherwise a random 32-byte token. */
   token?: string;
+  /** Extra page origins allowed to call the server, e.g. the Vite dev server
+   * (`http://localhost:5173`). The bound origin and its loopback aliases
+   * (`127.0.0.1`, `localhost`, `[::1]` on the bound port) are always allowed. */
+  allowedOrigins?: readonly string[];
   /** Idle timeout (ms) after which an authenticated WebSocket connection is
    * dropped. Defaults to 60s. */
   wsIdleTimeoutMs?: number;
@@ -262,15 +203,15 @@ export interface LoopbackServer {
    * first use. */
   origin(): Promise<string>;
   /** Resolves to a URL for `path` (`<origin><path>`). The per-session cookie
-   * authorizes media loads; no token is embedded in the URL anymore. */
+   * authorizes media loads; no token is embedded in the URL. */
   url(path: string): Promise<string>;
-  /** The per-session token (generated on first bind). The host reads it from
-   * `credentials()` for its own IPC needs — never injects it into the page. */
+  /** The per-session token. The host reads it from `credentials()` for its own
+   * `X-Bare-Token` calls and never injects it into the page. */
   token(): string;
-  /** Resolves to the bound origin, port, token and a one-time bootstrap nonce —
-   * written to the handoff file for the host to read before loading the page.
-   * The host injects `bootstrap` into the page (not the token); the page
-   * exchanges it once via `POST /login` for the HttpOnly session cookie. */
+  /** Resolves to the bound origin, port, token and the one-time bootstrap
+   * nonce (empty once spent). The host injects `bootstrap` into the page (not
+   * the token); the page exchanges it once via `POST /login` for the HttpOnly
+   * session cookie. */
   credentials(): Promise<{
     origin: string;
     port: number;
@@ -281,10 +222,12 @@ export interface LoopbackServer {
   mount(path: string, filePath: string): void;
   unmount(path: string): void;
   /** Serves every file under `dirPath` below `prefix` (longest-prefix match).
-   * The SPA fallback to `dirPath/index.html` for unknown nave GETs applies
-   * only to `public` mounts (the bootstrap web app). Pass `{ public: true }`
-   * to mark a mount as world-readable bootstrap content served before auth; a
-   * non-public directory mount gates every request behind the session. */
+   * The SPA fallback to `dirPath/index.html` for unknown navigation GETs
+   * applies only to `public` mounts (the bootstrap web app). Pass
+   * `{ public: true }` to mark a mount as world-readable bootstrap content
+   * served before auth; a non-public directory mount gates every request
+   * behind the session. A request never resolves outside `dirPath`, symlinks
+   * included. */
   mountDir(prefix: string, dirPath: string, opts?: { public?: boolean }): void;
   /** Registers a handler for authenticated, handshaken WebSocket connections
    * (the protocol socket). */
@@ -304,119 +247,80 @@ export interface LoopbackServer {
   close(cb?: (err?: Error | null) => void): void;
 }
 
+/** Splits a request target into its decoded path segments, or null when the
+ * path cannot name a file inside a mount: a malformed escape, or a segment
+ * that is `.`/`..` or carries a separator or NUL once decoded (`%2e%2e`,
+ * `%2f`, `\`). Empty segments (`//`, a trailing `/`) are dropped. */
+export function pathSegments(target: string): string[] | null {
+  const rawPath = target.split(/[?#]/, 1)[0];
+  const segments: string[] = [];
+  for (const raw of rawPath.split('/')) {
+    if (raw === '') continue;
+    let segment: string;
+    try {
+      segment = decodeURIComponent(raw);
+    } catch {
+      return null;
+    }
+    if (segment === '.' || segment === '..' || /[/\\\0]/.test(segment)) {
+      return null;
+    }
+    segments.push(segment);
+  }
+  return segments;
+}
+
+/** Whether `candidate` is `root` or lies below it. Both must be absolute,
+ * normalized paths. */
+function isWithin(root: string, candidate: string): boolean {
+  const rel = path.relative(root, candidate);
+  return (
+    rel === '' ||
+    (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
+  );
+}
+
 /**
  * The single loopback HTTP+WS server for the worklet. One origin serves the
  * web app (`/`), the media files mounted by plugins, and the framed-protocol
  * WebSocket socket the page connects to. On device it binds `127.0.0.1` on an
- * ephemeral port. Only the explicit **bootstrap** directory mount (`/`, marked
- * `{ public: true }`) is world-readable before auth — a fresh WebView must load
- * the page before it can `POST /login`. Mounted session files (media) and the
- * WS upgrade are gated by a per-session token, accepted as a `bare_session`
- * cookie (set via `POST /login` with the one-time bootstrap nonce or the token)
- * or the `X-Bare-Token` header (non-browser clients). The URL `?token=` query
- * param is **not** accepted — a token must never appear in a URL an observer
- * could read. All responses send `Referrer-Policy: no-referrer`.
+ * ephemeral port. Admission (origin rule, session credential, bootstrap login)
+ * is decided by the loopback gate (`loopback-gate.ts`); the protocol socket's
+ * lifecycle by the protocol socket slot (`protocol-socket.ts`). All responses
+ * send `Referrer-Policy: no-referrer`.
  */
 export function createLoopbackServer(
   options: LoopbackServerOptions = {},
 ): LoopbackServer {
   const host = options.host ?? '127.0.0.1';
   const port = options.port ?? 0;
-  const authEnabled = options.auth ?? true;
-  const wsIdleTimeoutMs = options.wsIdleTimeoutMs ?? 60_000;
-  const wsDeadPeerTimeoutMs = options.wsDeadPeerTimeoutMs ?? 10_000;
-  const wsReplaceMinIntervalMs = options.wsReplaceMinIntervalMs ?? 1_000;
-  const wsMaxQueuedBytes = options.wsMaxQueuedBytes ?? 2 * 1024 * 1024;
-
-  /** URL-safe random secret for the session token / bootstrap nonce. */
-  const randomSecret = () =>
-    crypto
-      .randomBytes(32)
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
+  const gate = createLoopbackGate({
+    auth: options.auth ?? true,
+    token: options.token,
+    allowedOrigins: options.allowedOrigins,
+  });
+  const slot = createProtocolSocketSlot({
+    idleTimeoutMs: options.wsIdleTimeoutMs ?? 60_000,
+    deadPeerTimeoutMs: options.wsDeadPeerTimeoutMs ?? 10_000,
+    replaceMinIntervalMs: options.wsReplaceMinIntervalMs ?? 1_000,
+    maxQueuedBytes: options.wsMaxQueuedBytes ?? 2 * 1024 * 1024,
+  });
 
   const fileMounts = new Map<string, string>();
   const dirMounts = new Map<string, string>();
   const publicDirMounts = new Set<string>();
   const routeHandlers = new Map<string, LoopbackRouteHandler>();
-  const connectionHandlers: LoopbackConnectionHandler[] = [];
-  let token: string | null = options.token ?? null;
-  let bootstrapNonce: string | null = null;
-  /** The most recently spent bootstrap nonce, kept only to answer replays of
-   * it with 409 (valid-once-but-consumed) instead of 401 (bad credential). */
-  let spentBootstrapNonce: string | null = null;
-  let boundOrigin = '';
   let originPromise: Promise<string> | null = null;
-  let activeSocket: WebSocketLike | null = null;
-  let activeWriter: BoundedWriter | null = null;
-  let activeSince = 0;
-
-  /** Non-fatal, never-throwing debug for skipped work (a missing file, a failed
-   * write) — observable in the `core.logs` ring buffer, never able to alter
-   * control flow. */
-  function debugSkip(message: string) {
-    try {
-      console.debug(message);
-    } catch {
-      // Logging must never throw.
-    }
-  }
-
-  /** The session cookie value derived from `token`, hashed once per token
-   * instead of on every request (the token is fixed after bind). */
-  let nonceToken: string | null = null;
-  let nonceValue = '';
-  function sessionCookieValue(forToken: string): string {
-    if (nonceToken !== forToken) {
-      nonceValue = sessionNonce(forToken);
-      nonceToken = forToken;
-    }
-    return nonceValue;
-  }
-
-  function isAuthorized(headers: Record<string, string | string[] | number>) {
-    if (!authEnabled) return true;
-    if (token === null) return false;
-    if (secretEquals(tokenFromHeaders(headers) ?? '', token)) return true;
-    return secretEquals(
-      cookieSession(headers) ?? '',
-      sessionCookieValue(token),
-    );
-  }
-
-  /** DNS-rebinding and cross-origin defense for plain HTTP. In auth (device)
-   * mode the server never advertises a stable hostname, so a browser request
-   * must either carry a same-origin `Origin` header (fetches/subresources) or,
-   * for top-level navigations that send no Origin (the initial WebView load),
-   * a `Host` header pointing back at the bound 127.0.0.1:port. A DNS-rebinding
-   * navigation resolves the loopback address under an attacker-controlled
-   * hostname and therefore sends a foreign `Host`. Dev (auth off) is open. */
-  function originAllowed(
-    headers: Record<string, string | string[] | number>,
-  ): boolean {
-    if (!authEnabled) return true;
-    if (boundOrigin === '') return true;
-    const boundHostPort = boundOrigin.slice('http://'.length);
-    const host = headers['host'];
-    if (typeof host !== 'string' || host !== boundHostPort) return false;
-    const origin = headers['origin'];
-    if (
-      typeof origin === 'string' &&
-      origin.length > 0 &&
-      origin !== boundOrigin
-    ) {
-      return false;
-    }
-    return true;
-  }
 
   function writeError(
     res: HTTPServerResponse,
     status: HTTPStatusCode,
     message: string,
   ) {
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
     res.writeHead(status, {
       'Content-Type': 'text/plain',
       'Referrer-Policy': 'no-referrer',
@@ -424,147 +328,140 @@ export function createLoopbackServer(
     res.end(message);
   }
 
+  /** Logs the cause and answers a bare 500: an exception message can carry
+   * file paths or plugin internals, which never belong in a response body. */
+  function writeInternalError(
+    res: HTTPServerResponse,
+    context: string,
+    err: unknown,
+  ) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[loopback] ${context} failed: ${message}`);
+    writeError(res, 500, 'Internal Server Error');
+  }
+
   function handleLogin(req: HTTPIncomingMessage, res: HTTPServerResponse) {
-    // /login runs before the auth gate, so bound the body a local client can
-    // pump at the worklet — an oversized body is a 413, never an OOM DoS.
+    // /login runs before the credential check, so bound the body a local
+    // client can pump at the worklet: an oversized body is a 413, never an
+    // OOM.
     void collectRequestBody(req, 4096)
       .then((body) => {
-        const trimmed = body.trim();
-        const byToken = token !== null && secretEquals(trimmed, token);
-        const byBootstrap =
-          bootstrapNonce !== null && secretEquals(trimmed, bootstrapNonce);
-        // An already-authenticated page may re-login without fresh
-        // credentials: a reload re-runs the shell with the SAME (now spent)
-        // bootstrap nonce injected, but the session cookie from the first
-        // login survives it. Accepting the cookie here is what makes "reload
-        // reconnects to the same instance" work while keeping ADR 0003's
-        // guarantee intact — a replayed spent nonce alone still fails.
-        const bySession = authEnabled && isAuthorized(req.headers);
-        const accepted = !authEnabled || byToken || byBootstrap || bySession;
-        const bySpentBootstrap =
-          bootstrapNonce === null &&
-          spentBootstrapNonce !== null &&
-          secretEquals(trimmed, spentBootstrapNonce);
-        if (!accepted) {
-          // A replay of the already-spent bootstrap nonce is not a bad
-          // credential: it means another document logged in first with the
-          // nonce this document was also given, and that document's session
-          // cookie is on its way. The 409 tells the shell to retry once
-          // rather than treat it as terminal, while granting nothing — no
-          // cookie is set and no session is created.
-          writeError(res, bySpentBootstrap ? 409 : 401, 'Unauthorized');
+        const verdict = gate.login(body, req.headers);
+        if (!verdict.ok) {
+          writeError(res, verdict.status, 'Unauthorized');
           return;
         }
-        // A bootstrap nonce is single-use: once the page exchanges it for the
-        // session cookie it is spent, so a script that later reads it (or copies
-        // it) cannot mint any further requests. The value is remembered only so
-        // replays can be answered with the honest 409 above.
-        if (byBootstrap && bootstrapNonce !== null) {
-          spentBootstrapNonce = bootstrapNonce;
-          bootstrapNonce = null;
-        }
-        // Dev mode (auth off) has no real token — still answer the login so the
-        // page transport proceeds, but set no cookie.
-        const headers: Record<string, string | number> = {
+        const headers: Record<string, string> = {
           'Content-Type': 'text/plain',
           'Cache-Control': 'no-store',
           'Referrer-Policy': 'no-referrer',
         };
-        if (authEnabled && token !== null) {
-          headers['Set-Cookie'] =
-            `bare_session=${sessionCookieValue(token)}; HttpOnly; SameSite=Lax; Path=/`;
-        }
+        if (verdict.cookie !== null) headers['Set-Cookie'] = verdict.cookie;
         res.writeHead(200, headers);
         res.end('ok');
       })
       .catch(() => writeError(res, 413, 'Request Entity Too Large'));
   }
 
-  /** Resolves a request path to a file mount, or a directory mount + relative
-   * path. Directory mounts win on longest-prefix match. */
+  /** Resolves a request path to a file mount, or a directory mount + the path
+   * segments below it. Directory mounts win on longest-prefix match. */
   function resolveMount(
     cleanPath: string,
+    segments: string[],
   ):
     | { kind: 'file'; filePath: string }
-    | { kind: 'dir'; dirPath: string; rel: string; public: boolean }
+    | { kind: 'dir'; dirPath: string; rel: string[]; public: boolean }
     | null {
     const fileMount = fileMounts.get(cleanPath);
     if (fileMount) return { kind: 'file', filePath: fileMount };
-    let best: { dirPath: string; rel: string; public: boolean } | null = null;
-    let bestPrefix = -1;
+    let best: { dirPath: string; rel: string[]; public: boolean } | null = null;
+    let bestDepth = -1;
     for (const [prefix, dirPath] of dirMounts) {
-      let rel: string;
-      if (cleanPath === prefix) {
-        rel = '';
-      } else if (prefix === '/') {
-        rel = cleanPath.replace(/^\/+/, '');
-      } else if (cleanPath.startsWith(`${prefix}/`)) {
-        rel = cleanPath.slice(prefix.length + 1);
-      } else {
-        continue;
-      }
-      if (prefix.length > bestPrefix) {
-        best = { dirPath, rel, public: publicDirMounts.has(prefix) };
-        bestPrefix = prefix.length;
-      }
+      const prefixSegments = prefix.split('/').filter((s) => s !== '');
+      const depth = prefixSegments.length;
+      if (depth <= bestDepth) continue;
+      if (!prefixSegments.every((s, i) => segments[i] === s)) continue;
+      best = {
+        dirPath,
+        rel: segments.slice(depth),
+        public: publicDirMounts.has(prefix),
+      };
+      bestDepth = depth;
     }
     return best ? { ...best, kind: 'dir' as const } : null;
   }
 
-  /** Resolves a directory-mount request to a concrete file. Only a `public`
-   * (bootstrap) mount applies the SPA fallback (unknown navigation GET →
-   * `index.html`); a non-public directory mount 404s unknown paths so
+  /** Resolves a directory-mount request to a concrete file inside the mount
+   * root (its real path, so a symlink cannot lead outside it). Only a
+   * `public` (bootstrap) mount applies the SPA fallback (unknown navigation
+   * GET → `index.html`); a non-public directory mount 404s unknown paths so
    * unauthenticated clients never receive bootstrap HTML. Subresource requests
-   * (`Accept` without `text/html`) never fall back — a missing asset is a 404. */
+   * (`Accept` without `text/html`) never fall back — a missing asset is a
+   * 404. */
   function resolveDirFile(
-    mount: { kind: 'dir'; dirPath: string; rel: string; public: boolean },
-    headers: Record<string, string | number>,
-  ): ResolvedFile | null {
-    const candidate =
-      mount.rel === '' ? mount.dirPath : path.join(mount.dirPath, mount.rel);
+    mount: { dirPath: string; rel: string[]; public: boolean },
+    headers: Record<string, string | string[] | number | undefined>,
+  ): (ResolvedFile & { rel: string }) | null {
+    let root: string;
     try {
-      const stat = fs.statSync(candidate);
-      if (stat.isFile()) return { filePath: candidate, stat };
+      root = fs.realpathSync(mount.dirPath);
     } catch {
-      // Expected on every SPA route and missing asset: fall through to the
-      // directory index / SPA fallback below. Deliberately not logged — it
-      // would fill the log ring with routine navigation.
-    }
-    // The mount root serves its `index.html` directly.
-    if (mount.rel === '') {
-      return indexHtmlIfPresent(mount.dirPath);
-    }
-    // SPA fallback is scoped to the bootstrap (public) mount only.
-    if (!mount.public) return null;
-    // SPA fallback only for navigations (browsers send `Accept: text/html` on
-    // top-level GETs); a missing subresource must 404, not return HTML.
-    const accept = headers['accept'];
-    if (typeof accept !== 'string' || !accept.includes('text/html')) {
+      console.debug(
+        `[static-server] mount root ${mount.dirPath} is missing — 404`,
+      );
       return null;
     }
-    return indexHtmlIfPresent(mount.dirPath);
+    const served = (file: ResolvedFile | null) =>
+      file && {
+        ...file,
+        rel: path.relative(root, file.filePath).split(path.sep).join('/'),
+      };
+    if (mount.rel.length > 0) {
+      const found = fileWithin(root, path.join(root, ...mount.rel));
+      if (found) return served(found);
+      // SPA fallback is scoped to the bootstrap (public) mount and to
+      // navigations (browsers send `Accept: text/html` on top-level GETs).
+      if (!mount.public) return null;
+      const accept = headers['accept'];
+      if (typeof accept !== 'string' || !accept.includes('text/html')) {
+        return null;
+      }
+    }
+    return served(fileWithin(root, path.join(root, 'index.html')));
   }
 
-  function indexHtmlIfPresent(dirPath: string): ResolvedFile | null {
+  /** `candidate` as a served file when it exists, is a regular file, and its
+   * real path stays inside `root`. A missing file is routine (every SPA route,
+   * every missing asset), so it is not logged. */
+  function fileWithin(root: string, candidate: string): ResolvedFile | null {
+    let real: string;
     try {
-      const index = path.join(dirPath, 'index.html');
-      const stat = fs.statSync(index);
-      if (stat.isFile()) return { filePath: index, stat };
+      real = fs.realpathSync(candidate);
     } catch {
-      debugSkip(
-        `[static-server] indexHtmlIfPresent: no index.html under ${dirPath} — 404`,
-      );
+      return null;
     }
-    return null;
+    if (!isWithin(root, real)) {
+      console.warn(
+        `[static-server] refused a path that resolves outside its mount: ${candidate}`,
+      );
+      return null;
+    }
+    try {
+      const stat = fs.statSync(real);
+      return stat.isFile() ? { filePath: real, stat } : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Strict Content-Security-Policy for HTML documents served by the loopback
-   * server; subresources must stay same-origin (the page talks to the worklet
-   * over the loopback socket). `style-src` needs `'unsafe-inline'` for the
-   * bundled web app's inline styles and `connect-src` allows the same-origin
-   * protocol socket. */
-  const CSP_HEADER =
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws:";
+   * server. Subresources stay same-origin; `connect-src` names the one
+   * protocol socket the page may open (`ws:` alone would allow any host).
+   * `style-src` needs `'unsafe-inline'` for the bundled web app's inline
+   * styles. */
+  function cspFor(socketSource: string): string {
+    return `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${socketSource}`;
+  }
 
   function serveFile(
     req: HTTPIncomingMessage,
@@ -580,7 +477,7 @@ export function createLoopbackServer(
       try {
         stat = fs.statSync(filePath);
       } catch {
-        debugSkip(
+        console.debug(
           `[static-server] serveFile: stat failed for ${filePath} — 404`,
         );
         writeError(res, 404, 'Not found');
@@ -594,7 +491,7 @@ export function createLoopbackServer(
     const contentType = mimeTypeFor(filePath);
     const cspHeader: Record<string, string> =
       contentType === 'text/html'
-        ? { 'Content-Security-Policy': CSP_HEADER }
+        ? { 'Content-Security-Policy': cspFor(gate.socketSource(req.headers)) }
         : {};
     const range = parseRange(req.headers['range'], stat.size);
     if (range) {
@@ -609,7 +506,7 @@ export function createLoopbackServer(
       });
       // Flush the headers immediately so bare-http1 does not append its own
       // (zero) Content-Length when the piped stream ends.
-      (res as unknown as { flushHeaders(): void }).flushHeaders();
+      res.flushHeaders();
       pipeFile(res, filePath, range);
       return;
     }
@@ -642,7 +539,7 @@ export function createLoopbackServer(
       'Referrer-Policy': 'no-referrer',
       ...cacheHeaders,
     });
-    (res as unknown as { flushHeaders(): void }).flushHeaders();
+    res.flushHeaders();
     pipeFile(res, filePath);
   }
 
@@ -675,226 +572,129 @@ export function createLoopbackServer(
     stream.pipe(res);
   }
 
+  function handleRequest(req: HTTPIncomingMessage, res: HTTPServerResponse) {
+    const headers = req.headers;
+    const segments = pathSegments(req.url ?? '/');
+    if (segments === null) {
+      writeError(res, 400, 'Bad request');
+      return;
+    }
+    const cleanPath = `/${segments.join('/')}`;
+
+    if (req.method === 'POST' && cleanPath === '/login') {
+      // The origin rule still applies; the credential is the body.
+      const verdict = gate.admitRequest(headers, 'public');
+      if (!verdict.ok) {
+        writeError(res, verdict.status, 'Forbidden');
+        return;
+      }
+      handleLogin(req, res);
+      return;
+    }
+
+    // Registered routes run before mount resolution and are always gated.
+    const route = routeHandlers.get(`${req.method} ${cleanPath}`);
+    if (route) {
+      const verdict = gate.admitRequest(headers, 'gated');
+      if (!verdict.ok) {
+        writeError(
+          res,
+          verdict.status,
+          verdict.status === 401 ? 'Unauthorized' : 'Forbidden',
+        );
+        return;
+      }
+      try {
+        route(req, res);
+      } catch (err) {
+        writeInternalError(res, `route ${req.method} ${cleanPath}`, err);
+      }
+      return;
+    }
+
+    const mount = resolveMount(cleanPath, segments);
+    // Only the bootstrap web app (a `public` directory mount) is served before
+    // `/login`; mounted session files (media) stay gated.
+    const verdict = gate.admitRequest(
+      headers,
+      mount !== null && mount.kind === 'dir' && mount.public
+        ? 'public'
+        : 'gated',
+    );
+    if (!verdict.ok) {
+      writeError(
+        res,
+        verdict.status,
+        verdict.status === 401 ? 'Unauthorized' : 'Forbidden',
+      );
+      return;
+    }
+
+    if (mount === null) {
+      writeError(res, 404, 'Not found');
+      return;
+    }
+    if (mount.kind === 'file') {
+      // Mounted files (e.g. media) can be replaced under the same URL and
+      // are session-gated: never cacheable.
+      serveFile(req, res, mount.filePath);
+      return;
+    }
+    const resolved = resolveDirFile(mount, headers);
+    if (resolved === null) {
+      writeError(res, 404, 'Not found');
+      return;
+    }
+    // Policy is decided from the file actually served, so an SPA fallback to
+    // `index.html` is revalidated rather than mistaken for a hashed asset.
+    serveFile(
+      req,
+      res,
+      resolved.filePath,
+      resolved.stat,
+      cachePolicyFor(resolved.rel, mount.public),
+    );
+  }
+
   const server = http.createServer((req, res) => {
     try {
-      const requestUrl = req.url ?? '/';
-      const [rawPath] = requestUrl.split('?');
-      // Normalize a trailing slash so `/media/<id>/` still matches the exact
-      // file mount (and keeps its auth gate) instead of falling through to the
-      // public directory mount.
-      const cleanPath = rawPath.split('#')[0].replace(/\/+$/, '') || '/';
-      const headers = req.headers as Record<string, string | number>;
-
-      // DNS-rebinding / cross-origin gate: all plain HTTP requests (login,
-      // logs, media, static) must target the bound origin in auth mode.
-      if (!originAllowed(headers)) {
-        writeError(res, 403, 'Forbidden');
-        return;
-      }
-
-      if (req.method === 'POST' && cleanPath === '/login') {
-        handleLogin(req, res);
-        return;
-      }
-
-      // Never let a path escape a mount root.
-      if (cleanPath.split('/').includes('..')) {
-        writeError(res, 400, 'Bad request');
-        return;
-      }
-
-      // Registered routes run before mount resolution, after the auth gate:
-      // device mode requires the session cookie/header (dev mode is open).
-      const route = routeHandlers.get(`${req.method} ${cleanPath}`);
-      if (route) {
-        if (!isAuthorized(headers)) {
-          writeError(res, 401, 'Unauthorized');
-          return;
-        }
-        try {
-          route(req, res);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          writeError(res, 500, message);
-        }
-        return;
-      }
-
-      const mount = resolveMount(cleanPath);
-      // The bundled web app (directory mounts, e.g. `/`) is public content —
-      // a fresh WebView must be able to load the page before `/login` runs.
-      // Mounted session files (media) and the WS upgrade stay gated.
-      const publicResource =
-        mount !== null && mount.kind === 'dir' && mount.public;
-      if (!publicResource && !isAuthorized(headers)) {
-        writeError(res, 401, 'Unauthorized');
-        return;
-      }
-
-      if (mount === null) {
-        writeError(res, 404, 'Not found');
-        return;
-      }
-      if (mount.kind === 'file') {
-        // Mounted files (e.g. media) can be replaced under the same URL and
-        // are session-gated: never cacheable.
-        serveFile(req, res, mount.filePath);
-        return;
-      }
-      const resolved = resolveDirFile(mount, headers);
-      if (resolved === null) {
-        writeError(res, 404, 'Not found');
-        return;
-      }
-      // Policy is decided from the file actually served, so an SPA fallback to
-      // `index.html` is revalidated rather than mistaken for a hashed asset.
-      const servedRel = resolved.filePath
-        .slice(mount.dirPath.length)
-        .replace(/\\/g, '/')
-        .replace(/^\/+/, '');
-      serveFile(
-        req,
-        res,
-        resolved.filePath,
-        resolved.stat,
-        cachePolicyFor(servedRel, mount.public),
-      );
+      handleRequest(req, res);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      res.writeHead(500, { 'Content-Type': 'text/plain' });
-      res.end(message);
+      writeInternalError(res, `${req.method} request`, err);
     }
   });
 
   function origin(): Promise<string> {
     if (!originPromise) {
       originPromise = new Promise<string>((resolve, reject) => {
-        token ??= randomSecret();
-        bootstrapNonce ??= randomSecret();
         server.on('error', reject);
         server.listen(port, host, () => {
           const address = server.address();
-          boundOrigin = `http://${host}:${address?.port}`;
-          resolve(boundOrigin);
+          const bound = `http://${host}:${address?.port}`;
+          gate.bind(bound);
+          resolve(bound);
         });
       });
     }
     return originPromise;
   }
 
-  // WS upgrade: origin check, auth check, then handshake. Rejects before the
-  // 101 so unauthenticated clients never complete a handshake. In auth (device)
-  // mode the page is served by this server, so its Origin must match the bound
-  // origin exactly — a missing or foreign Origin is rejected outright (no
-  // absent-Origin bypass). Dev runs cross-origin (Vite) with auth off, where
-  // the check is skipped.
+  // WS upgrade: the gate decides before the handshake, so an unadmitted
+  // client never receives a 101. Every rejection is logged with a stable
+  // `[loopback] upgrade rejected:` prefix — a silent `socket.destroy()` is
+  // indistinguishable on the client from "server unreachable". These lines are
+  // captured by the `core.logs` ring buffer.
   server.on('upgrade', (req, socket, head) => {
-    const headers = req.headers as Record<string, string | number>;
-
-    // Every rejection is logged with a stable `[loopback] upgrade rejected:`
-    // prefix — a silent `socket.destroy()` is indistinguishable on the client
-    // from "server unreachable", which cost a full device-only triage cycle.
-    // These lines are captured by the `core.logs` ring buffer.
     const reject = (reason: string) => {
       console.error(`[loopback] upgrade rejected: ${reason}`);
       socket.destroy();
     };
-
-    const origin = headers['origin'];
-    const allowed =
-      typeof origin === 'string' &&
-      origin.length > 0 &&
-      origin === boundOrigin &&
-      boundOrigin !== '';
-    if (authEnabled && !allowed) {
-      reject(
-        `origin mismatch (got ${typeof origin === 'string' && origin ? `'${origin}'` : 'no Origin header'}, bound '${boundOrigin}')`,
-      );
+    const verdict = gate.admitUpgrade(req.headers);
+    if (!verdict.ok) {
+      reject(verdict.reason);
       return;
     }
-
-    if (!isAuthorized(headers)) {
-      reject(
-        `unauthorized (${headers['cookie'] ? 'cookie present but invalid' : 'no bare_session cookie'})`,
-      );
-      return;
-    }
-
-    // Single-client policy: at most one live protocol socket. A new client that
-    // has passed the origin and auth checks above replaces the current one
-    // (a reloaded or suspended WebView leaves a dead socket holding the slot),
-    // so replacement is no easier than connecting was. The rate limit bounds
-    // eviction churn; it rejects before the handshake so a refused socket never
-    // receives a 101.
-    if (activeSocket && Date.now() - activeSince < wsReplaceMinIntervalMs) {
-      reject('replacement rate limit (a protocol socket was just accepted)');
-      return;
-    }
-
-    ws.Server.handshake(req as never, socket, head, (err) => {
-      if (err) {
-        reject(`handshake failed (${err.message})`);
-        return;
-      }
-      const raw = new ws.Socket({
-        socket,
-        isServer: true,
-        idleTimeout: wsDeadPeerTimeoutMs,
-      } as unknown as ConstructorParameters<
-        typeof ws.Socket
-      >[0]) as unknown as WebSocketLike;
-      // Every write goes through one bounded queue so a reader that stops
-      // reading cannot grow worklet memory: pushes are shed first (newest
-      // first); a response is never dropped, and past the hard cap the socket
-      // is closed so the client reconnects instead.
-      const writer = createBoundedWriter(raw as never, {
-        maxQueuedBytes: wsMaxQueuedBytes,
-        onOverflow: () => {
-          console.error(
-            '[loopback] client is not reading and responses are backing up; closing the protocol socket',
-          );
-          raw.destroy();
-        },
-      });
-      const client = {
-        on: (event: string, listener: (...args: never[]) => void) =>
-          raw.on(event as 'close', listener as () => void),
-        write: (data: unknown) => writer.write(data as Uint8Array),
-        destroy: () => raw.destroy(),
-        pause: () => raw.pause?.(),
-        resume: () => raw.resume?.(),
-      } as WebSocketLike;
-      const previous = activeSocket;
-      activeSocket = client;
-      activeWriter = writer;
-      activeSince = Date.now();
-      if (previous) {
-        console.warn('[loopback] replaced the existing protocol socket');
-        try {
-          previous.destroy();
-        } catch {
-          debugSkip('[static-server] replace: previous socket already closed');
-        }
-      }
-      raw.on('close', () => {
-        writer.clear();
-        if (activeSocket === client) {
-          activeSocket = null;
-          activeWriter = null;
-        }
-      });
-      // Idle timeout: bare-ws sockets are duplex streams; the underlying TCP
-      // socket resets its timer on any traffic.
-      socket.setTimeout(wsIdleTimeoutMs, () => raw.destroy());
-      for (const handler of connectionHandlers) {
-        try {
-          handler(client, req);
-        } catch (e) {
-          const message = e instanceof Error ? e.message : String(e);
-          console.error('Error in loopback WS connection handler:', message);
-        }
-      }
-    });
+    slot.accept(req, socket, head, reject);
   });
 
   async function url(path: string): Promise<string> {
@@ -904,16 +704,14 @@ export function createLoopbackServer(
   return {
     origin,
     url,
-    token() {
-      return token ?? '';
-    },
+    token: () => gate.token(),
     async credentials() {
       const originUrl = await origin();
       return {
         origin: originUrl,
         port: Number(originUrl.slice(originUrl.lastIndexOf(':') + 1)),
-        token: token!,
-        bootstrap: bootstrapNonce!,
+        token: gate.token(),
+        bootstrap: gate.bootstrap(),
       };
     },
     mount(path, filePath) {
@@ -927,31 +725,13 @@ export function createLoopbackServer(
       if (opts?.public) publicDirMounts.add(prefix);
       else publicDirMounts.delete(prefix);
     },
-    onConnection(handler) {
-      connectionHandlers.push(handler);
-    },
+    onConnection: (handler) => slot.onConnection(handler),
     registerRoute(method, path, handler) {
       routeHandlers.set(`${method.toUpperCase()} ${path}`, handler);
     },
-    push(frame) {
-      if (!activeWriter) return false;
-      try {
-        return activeWriter.write(frame, { droppable: true });
-      } catch {
-        debugSkip('[static-server] push: socket.write failed — frame dropped');
-        return false;
-      }
-    },
+    push: (frame) => slot.push(frame),
     close(cb) {
-      if (activeSocket) {
-        try {
-          activeSocket.destroy();
-        } catch {
-          debugSkip(
-            '[static-server] close: socket.destroy failed — already closed',
-          );
-        }
-      }
+      slot.close();
       server.close(cb);
     },
   };

@@ -13,8 +13,10 @@ declare const Bare: { argv?: string[] } | undefined;
  * Consumer worklet entry — the replacement for the framework's
  * `core/main.core.ts`. On-device hosts pass the configuration via
  * `Worklet.Configuration.assets` arguments, landing at `Bare.argv[0..2]` and
- * resolved by `resolveWorkletConfig()`; under the bare CLI (dev) it resolves to
- * `{}` — dev mode (auth off, fixed port, no handoff file).
+ * resolved by `resolveWorkletConfig()`. Under the bare CLI the dev runner
+ * passes `mode=dev` (auth off, fixed port, no handoff file) plus the Vite dev
+ * origins as `origin=` tokens; without `mode=dev` the worklet keeps the secure
+ * device defaults.
  *
  * Dev/test flags: `--web-assets <dir>` serves a built web app from the
  * loopback server (the real-stack e2e boots this way, matching the on-device

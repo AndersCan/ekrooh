@@ -35,7 +35,14 @@ const webAssets =
     : undefined;
 const port = process.env.CONSUMER_BASIC_PORT ?? '8080';
 
-const appArgs = [];
+// `mode=dev` selects the dev backend (auth off); without it the worklet keeps
+// the device defaults. The origins let the Vite dev server (pinned to 5173 in
+// vite.config.ts) open the protocol socket cross-origin.
+const appArgs = [
+  'mode=dev',
+  'origin=http://localhost:5173',
+  'origin=http://127.0.0.1:5173',
+];
 if (webAssets) appArgs.push('--web-assets', webAssets);
 appArgs.push('--port', port);
 

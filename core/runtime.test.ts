@@ -128,7 +128,7 @@ describe('resolveWorkletConfig', () => {
     warn.mockRestore();
   });
 
-  it('returns {} in dev mode (no host argv)', () => {
+  it('returns {} (secure device defaults) with no host argv', () => {
     vi.stubGlobal('Bare', undefined);
     expect(resolveWorkletConfig()).toEqual({});
   });
@@ -137,17 +137,18 @@ describe('resolveWorkletConfig', () => {
     vi.stubGlobal('Bare', {
       argv: ['/usr/local/bin/bare', '/app/worklet/index.js', 'storage=/tmp/s'],
     });
-    expect(resolveWorkletConfig()).toEqual({
-      storage: '/tmp/s',
-      deviceMode: false,
-      auth: false,
-      port: 8080,
-    });
+    expect(resolveWorkletConfig()).toEqual({ storage: '/tmp/s' });
+  });
+
+  it('never selects dev mode for a broken device configuration', () => {
+    // A host whose directories are missing must not end up with auth off.
+    vi.stubGlobal('Bare', { argv: ['/missing/web', '/missing/storage'] });
+    expect(resolveWorkletConfig()).toEqual({});
   });
 });
 
 describe('resolveCliConfig', () => {
-  it('parses labeled tokens with dev defaults (auth off, fixed port)', () => {
+  it('keeps the secure device defaults without mode=dev', () => {
     expect(
       resolveCliConfig([
         'webassets=/app/web',
@@ -158,48 +159,57 @@ describe('resolveCliConfig', () => {
       webAssets: '/app/web',
       storage: '/tmp/bare-storage',
       cache: '/tmp/bare-cache',
+    });
+    const runtime = createWorkletRuntime(
+      resolveCliConfig(['storage=/tmp/bare-storage']),
+    );
+    expect(runtime.config.deviceMode).toBe(true);
+  });
+
+  it('mode=dev selects the dev backend (auth off, fixed port)', () => {
+    expect(resolveCliConfig(['mode=dev', 'storage=/tmp/s'])).toEqual({
+      storage: '/tmp/s',
       deviceMode: false,
       auth: false,
       port: 8080,
     });
+    expect(resolveCliConfig(['mode=device'])).toEqual({});
   });
 
   it('honours auth=, port= and host= overrides', () => {
-    expect(resolveCliConfig(['auth=on', 'port=9000', 'host=0.0.0.0'])).toEqual({
+    expect(
+      resolveCliConfig(['mode=dev', 'auth=on', 'port=9000', 'host=0.0.0.0']),
+    ).toEqual({
       deviceMode: false,
       auth: true,
       port: 9000,
       host: '0.0.0.0',
     });
-    expect(resolveCliConfig(['auth=off'])).toMatchObject({ auth: false });
-    expect(resolveCliConfig(['auth=0'])).toMatchObject({ auth: false });
+    expect(resolveCliConfig(['auth=off'])).toEqual({ auth: false });
+    expect(resolveCliConfig(['auth=0'])).toEqual({ auth: false });
   });
 
-  it('a storage= token does not flip device mode on', () => {
-    const config = resolveCliConfig(['storage=/tmp/bare-storage']);
-    expect(config).toMatchObject({
-      deviceMode: false,
-      auth: false,
-      port: 8080,
+  it('collects repeatable origin= tokens', () => {
+    expect(
+      resolveCliConfig([
+        'mode=dev',
+        'origin=http://localhost:5173',
+        'origin=http://127.0.0.1:5173',
+      ]),
+    ).toMatchObject({
+      allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'],
     });
-    const runtime = createWorkletRuntime(config);
-    expect(runtime.config.deviceMode).toBe(false);
   });
 
   it('ignores unknown labels (consumer-owned, e.g. bootstrap=...)', () => {
-    // Unknown labels don't map to runtime options, but a labeled token still
-    // marks the invocation as CLI mode (dev defaults).
-    expect(resolveCliConfig(['bootstrap=127.0.0.1:49737'])).toEqual({
-      deviceMode: false,
-      auth: false,
-      port: 8080,
-    });
+    expect(resolveCliConfig(['bootstrap=127.0.0.1:49737'])).toEqual({});
   });
 
-  it('warns on an invalid port token', () => {
+  it('warns on an invalid port or mode token and keeps the defaults', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(resolveCliConfig(['port=abc'])).toMatchObject({ port: 8080 });
-    expect(warn).toHaveBeenCalled();
+    expect(resolveCliConfig(['port=abc', 'port='])).toEqual({});
+    expect(resolveCliConfig(['mode=prod'])).toEqual({});
+    expect(warn).toHaveBeenCalledTimes(3);
     warn.mockRestore();
   });
 
@@ -237,7 +247,7 @@ describe('createWorkletRuntime', () => {
     expect(page.status).toBe(200);
     expect(page.body).toBe('<html>app</html>');
 
-    const upgrade = await wsUpgrade(creds.origin, { token: undefined });
+    const upgrade = await wsUpgrade(creds.origin);
     expect(upgrade.split('\r\n')[0]).not.toContain('101');
 
     runtime.close();
@@ -261,8 +271,25 @@ describe('createWorkletRuntime', () => {
     runtime.close();
   });
 
+  it('defaults to device mode (auth on) even without a storage dir', async () => {
+    const runtime = createWorkletRuntime({ webAssets: webDir });
+    expect(runtime.config.deviceMode).toBe(true);
+
+    const creds = await runtime.start();
+    expect(creds.origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(creds.origin).not.toBe('http://127.0.0.1:8080');
+    const upgrade = await wsUpgrade(creds.origin);
+    expect(upgrade.split('\r\n')[0]).not.toContain('101');
+
+    runtime.close();
+  });
+
   it('dev mode: auth off, no handoff file', async () => {
-    const runtime = createWorkletRuntime({ webAssets: webDir, port: 0 });
+    const runtime = createWorkletRuntime({
+      webAssets: webDir,
+      deviceMode: false,
+      port: 0,
+    });
     expect(runtime.config.deviceMode).toBe(false);
 
     const creds = await runtime.start();
@@ -275,7 +302,7 @@ describe('createWorkletRuntime', () => {
     expect(runtime.config.storage).toBeUndefined();
 
     // Auth is off in dev: a token-less upgrade succeeds.
-    const upgrade = await wsUpgrade(creds.origin, { token: undefined });
+    const upgrade = await wsUpgrade(creds.origin);
     expect(upgrade.split('\r\n')[0]).toContain('101');
 
     runtime.close();
@@ -316,7 +343,7 @@ describe('createWorkletRuntime', () => {
     expect(creds.origin).toBe('http://127.0.0.1:8080');
     expect(fs.existsSync(path.join(devStorage, 'handoff.json'))).toBe(false);
 
-    const upgrade = await wsUpgrade(creds.origin, { token: undefined });
+    const upgrade = await wsUpgrade(creds.origin);
     expect(upgrade.split('\r\n')[0]).toContain('101');
 
     runtime.close();
@@ -354,12 +381,9 @@ describe('createWorkletRuntime', () => {
   });
 });
 
-function wsUpgrade(
-  origin: string,
-  opts: { token?: string } = {},
-): Promise<string> {
+/** A credential-less WebSocket upgrade from the bound origin. */
+function wsUpgrade(origin: string): Promise<string> {
   const port = Number(origin.slice(origin.lastIndexOf(':') + 1));
-  const q = opts.token ? `?token=${opts.token}` : '';
   return new Promise((resolve) => {
     let data = '';
     let done = false;
@@ -373,7 +397,7 @@ function wsUpgrade(
     socket.on('connect', () => {
       socket.write(
         [
-          `GET /ws${q} HTTP/1.1`,
+          'GET /ws HTTP/1.1',
           `Host: 127.0.0.1:${port}`,
           'Upgrade: websocket',
           'Connection: Upgrade',

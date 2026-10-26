@@ -3,6 +3,14 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 const outFile = 'core/main.core.gen.js';
+/** The dev backend (`mode=dev`: auth off, port 8080) still refuses page
+ * origins it was not told about, so allow the Vite dev server explicitly. Its
+ * port is pinned in `examples/web/vite.config.ts`. */
+const devArgs = [
+  'mode=dev',
+  'origin=http://localhost:5173',
+  'origin=http://127.0.0.1:5173',
+];
 const require = createRequire(import.meta.url);
 const bareExecutable = require('bare-runtime')();
 
@@ -44,7 +52,7 @@ async function startBare() {
   await stopBare();
   if (shuttingDown) return;
 
-  bareProcess = spawn(bareExecutable, [outFile], {
+  bareProcess = spawn(bareExecutable, [outFile, ...devArgs], {
     stdio: 'inherit',
   });
   log(`Started Bare process (pid=${bareProcess.pid ?? 'unknown'}).`);

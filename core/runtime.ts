@@ -1,14 +1,16 @@
 import fs from 'bare-fs';
 import path from 'bare-path';
-import { TextDecoder, TextEncoder } from 'bare-encoding';
 import { createDefaultPlugins } from '../plugins';
 import { getIPC } from './lib/get-ipc';
-import { encodeResponse } from './messages/encode-response';
-import { createFrameDecoder } from './messages/framing';
-import { ChannelHealth } from './messages/channel-health';
+import { toIpcChunk } from './messages/bytes';
+import { createBareRuntimeContext } from './messages/create-bare-runtime-context';
+import { createFrameChannel } from './messages/frame-channel';
 import { createHostIpcBridge } from './messages/host-ipc';
-import { MessageProtocol, type PluginManifest } from './messages';
-import { createPluginRegistry, createPluginRouter } from './messages/protocol';
+import type { MessageProtocol, PluginManifest } from './messages';
+import type {
+  createPluginRegistry,
+  createPluginRouter,
+} from './messages/protocol';
 import { installConsoleCapture } from './logs/capture';
 import { createLogRingBuffer } from './logs/store';
 import { registerLogRoutes } from './logs/routes';
@@ -44,12 +46,11 @@ function readBareArgv(): string[] {
 
 /** Resolves the host-provided worklet configuration from `start(...)`
  * arguments. On-device hosts pass `["<webAssets>", "<storage>", "<cache>"]`
- * (three existing directories, in that order), landing at `Bare.argv[0..2]`;
- * the Bare CLI (dev) passes the binary and the script path instead, so a
- * missing/absent config means dev mode (auth off, fixed port, no handoff
- * file). Falls back to the labeled CLI token syntax (see `resolveCliConfig`)
- * when the positional shape doesn't match, so the same entry works for both
- * device and dev runs. */
+ * (three existing directories, in that order), landing at `Bare.argv[0..2]`.
+ * Falls back to the labeled CLI token syntax (see `resolveCliConfig`) when the
+ * positional shape doesn't match, so the same entry works for device and dev
+ * runs. Nothing here turns auth off: the dev backend is selected only by an
+ * explicit `mode=dev` token. */
 export function resolveWorkletConfig(): WorkletRuntimeOptions {
   const argv = readBareArgv();
   const webAssets = argv[0];
@@ -81,28 +82,24 @@ export function resolveWorkletConfig(): WorkletRuntimeOptions {
 }
 
 /**
- * Parses the dev/CLI labeled-token configuration from bare CLI arguments:
- * `webassets=<dir>`, `storage=<dir>`, `cache=<dir>`, `host=<addr>`,
- * `port=<n>`, `auth=<on|off|true|false|1|0>` — a single `key=value` separator.
- * Unknown labels (e.g. `bootstrap=127.0.0.1:49737`) are ignored and stay
- * consumer-owned.
+ * Parses labeled-token configuration from bare CLI arguments, one `key=value`
+ * per token: `webassets=<dir>`, `storage=<dir>`, `cache=<dir>`,
+ * `host=<addr>`, `port=<n>`, `auth=<on|off|true|false|1|0>`,
+ * `mode=<device|dev>` and `origin=<scheme://host[:port]>` (repeatable; an
+ * extra allowed page origin, e.g. the Vite dev server). Unknown labels (e.g.
+ * `bootstrap=127.0.0.1:49737`) are ignored and stay consumer-owned.
  *
- * Returns the equivalent `WorkletRuntimeOptions` in **dev mode**: `deviceMode:
- * false` (so a `storage=` token does not flip auth on or make the port
- * ephemeral), `auth: false`, `port: 8080`, each overridable by a token. When
- * no labeled tokens are present it returns `{}` (plain dev defaults).
+ * Without `mode=dev` the result keeps the secure device defaults (auth on, an
+ * ephemeral port). `mode=dev` selects the dev backend: `deviceMode: false`,
+ * `auth: false`, `port: 8080`, each overridable by a token. Returns `{}` when
+ * no labeled tokens are present.
  */
 export function resolveCliConfig(
   argv: readonly string[] = readBareArgv(),
 ): WorkletRuntimeOptions {
-  const parsed: {
-    webAssets?: string;
-    storage?: string;
-    cache?: string;
-    host?: string;
-    port?: number;
-    auth?: boolean;
-  } = {};
+  const parsed: WorkletRuntimeOptions = {};
+  const allowedOrigins: string[] = [];
+  let dev = false;
   let matched = false;
 
   for (const token of argv) {
@@ -125,7 +122,7 @@ export function resolveCliConfig(
         break;
       case 'port': {
         const n = Number(value);
-        if (Number.isInteger(n) && n >= 0 && n <= 65535) {
+        if (value !== '' && Number.isInteger(n) && n >= 0 && n <= 65535) {
           parsed.port = n;
         } else {
           console.warn(`[bare] ignoring invalid port= token: "${value}"`);
@@ -135,6 +132,17 @@ export function resolveCliConfig(
       case 'auth':
         parsed.auth = value !== 'off' && value !== 'false' && value !== '0';
         break;
+      case 'mode':
+        if (value === 'dev') dev = true;
+        else if (value !== 'device') {
+          console.warn(
+            `[bare] ignoring unknown mode= token: "${value}" (expected device or dev)`,
+          );
+        }
+        break;
+      case 'origin':
+        allowedOrigins.push(value);
+        break;
       default:
         // Unknown labels are consumer-owned (e.g. hyperswarm bootstrap).
         break;
@@ -142,12 +150,10 @@ export function resolveCliConfig(
   }
 
   if (!matched) return {};
-  return {
-    deviceMode: false,
-    auth: false,
-    port: 8080,
-    ...parsed,
-  };
+  if (allowedOrigins.length > 0) parsed.allowedOrigins = allowedOrigins;
+  return dev
+    ? { deviceMode: false, auth: false, port: 8080, ...parsed }
+    : parsed;
 }
 
 export type WorkletRuntimeOptions = {
@@ -162,16 +168,21 @@ export type WorkletRuntimeOptions = {
   /** Port to bind; `0` picks an ephemeral port (on-device). Defaults to an
    * ephemeral port in device mode, 8080 in dev mode. */
   port?: number;
-  /** Require the per-session token/cookie. Defaults to on in device mode. */
+  /** Require the per-session token/cookie. Defaults to on in device mode and
+   * off in dev mode. The origin check applies either way. */
   auth?: boolean;
+  /** Extra page origins allowed to call the loopback server, e.g. the Vite dev
+   * server (`http://localhost:5173`). The bound origin and its loopback
+   * aliases are always allowed. */
+  allowedOrigins?: readonly string[];
   /** Write the credentials to `<storage>/handoff.json` for the host to read
    * (auth on only). Defaults to true; a host that receives them over its own
    * channel (the desktop host reads them from a pipe) sets false so the
    * session token never touches disk. */
   handoffFile?: boolean;
-  /** Explicit device-mode override. Defaults to on whenever `storage` is set
-   * (the on-device 3-arg contract); `resolveCliConfig` resolves it to false so
-   * a dev backend keeps auth off + fixed port even with a storage dir. */
+  /** Device mode (the default): auth on, an ephemeral port, and the handoff
+   * file when `storage` is set. Pass `false` (or the `mode=dev` CLI token) for
+   * the dev backend: auth off and port 8080 unless set explicitly. */
   deviceMode?: boolean;
   /** Additional plugin manifests to register after the canonical defaults
    * (consumer product plugins, e.g. `app.photos`). */
@@ -228,25 +239,6 @@ export interface WorkletRuntime {
   close(cb?: (err?: Error | null) => void): void;
 }
 
-function toUint8Array(data: Uint8Array | ArrayBuffer | Buffer): Uint8Array {
-  if (data instanceof Uint8Array) return data;
-  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(data))
-    return new Uint8Array(data);
-  return new Uint8Array(data as ArrayBuffer);
-}
-
-function writeIpc(
-  ipc: { write(data: Buffer | string): boolean },
-  bytes: Uint8Array,
-) {
-  if (typeof Buffer !== 'undefined' && typeof Buffer.from === 'function') {
-    // `encode` already returns a Buffer on Bare; `Buffer.from` would copy it.
-    ipc.write(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes));
-  } else {
-    ipc.write(bytes as unknown as Buffer);
-  }
-}
-
 /**
  * Creates one worklet runtime — a per-instance, stateless factory (no
  * module-scope singletons, no hardcoded port) so the dev/test backend can host
@@ -256,40 +248,41 @@ function writeIpc(
 export function createWorkletRuntime(
   options: WorkletRuntimeOptions = {},
 ): WorkletRuntime {
-  const deviceMode = options.deviceMode ?? options.storage !== undefined;
+  const deviceMode = options.deviceMode ?? true;
   const auth = options.auth ?? deviceMode;
   const port = options.port ?? (deviceMode ? 0 : 8080);
 
-  // One encoder/decoder per runtime, not one per frame.
-  const textEncoder = new TextEncoder();
-  const textDecoder = new TextDecoder();
-  const protocol = new MessageProtocol({
-    encode: (str) => textEncoder.encode(str),
-    decode: (bytes) => textDecoder.decode(bytes),
-  });
-
-  let ipc: ReturnType<typeof getIPC> | undefined;
-  try {
-    ipc = getIPC();
-  } catch (err) {
+  const ipc = getIPC();
+  if (!ipc) {
     console.debug(
-      `[runtime] no host IPC channel available, running without a host: ` +
-        (err instanceof Error ? err.message : String(err)),
+      '[runtime] no host IPC channel available, running without a host',
     );
-    ipc = undefined;
   }
 
-  const hostBridge = ipc ? createHostIpcBridge({ ipc, protocol }) : null;
-  const pluginRegistry = createPluginRegistry();
   const server = createLoopbackServer({
     host: options.host,
     port,
     auth,
+    allowedOrigins: options.allowedOrigins,
     wsIdleTimeoutMs: options.wsIdleTimeoutMs,
     wsDeadPeerTimeoutMs: options.wsDeadPeerTimeoutMs,
     wsReplaceMinIntervalMs: options.wsReplaceMinIntervalMs,
     wsMaxQueuedBytes: options.wsMaxQueuedBytes,
   });
+
+  // The host bridge needs the context's protocol and the router needs the
+  // bridge; the router only calls into it at route time, after both exist.
+  let hostBridge: ReturnType<typeof createHostIpcBridge> | null = null;
+  const context = createBareRuntimeContext([], {
+    maxInflight: options.maxInflight,
+    serialPlugins: options.serialPlugins,
+    delegateToHost: (header, payload) =>
+      hostBridge?.invokeOnHost(header, payload) ?? Promise.resolve(null),
+    getHostCapabilities: () =>
+      hostBridge?.queryCapabilities() ?? Promise.resolve([]),
+  });
+  const { protocol, pluginRegistry, pluginRouter } = context;
+  hostBridge = ipc ? createHostIpcBridge({ ipc, protocol }) : null;
 
   // `core.logs`: the worklet capture seam (console interception), the shared
   // ring buffer fed by both the seam and the web ingest route, and the loopback
@@ -316,68 +309,24 @@ export function createWorkletRuntime(
     pluginRegistry.register(plugin);
   }
 
-  const pluginRouter = createPluginRouter(pluginRegistry, 'bare', {
-    maxInflight: options.maxInflight,
-    serialPlugins: options.serialPlugins,
-    delegateToHost: (header, payload) =>
-      hostBridge?.invokeOnHost(header, payload) ?? Promise.resolve(null),
-    getHostCapabilities: () =>
-      hostBridge?.queryCapabilities() ?? Promise.resolve([]),
-  });
-
   if (ipc) {
-    // Host→worklet frames arrive over a Node-style Readable whose `data` events
-    // do not preserve message boundaries, so frames arrive split or coalesced.
-    // The per-runtime frame decoder drains synchronously, so concurrent data
-    // events cannot interleave. Requests then route concurrently (see
-    // `maxInflight` / `serialPlugins`).
-    const ipcDecoder = createFrameDecoder(protocol);
-    const ipcHealth = new ChannelHealth();
-
-    ipc.on('data', (data) => {
-      // A permanently desynced IPC pipe has no reconnect seam, so once a
-      // sustained run of malformed frames proves the byte stream is lost, stop
-      // parsing rather than silently eating garbage for the rest of the session.
-      if (ipcHealth.isFatal) return;
-      const messages = ipcDecoder.push(toUint8Array(data as Uint8Array));
-      // A frame-level failure marks the decoder inert but still returns the
-      // frames decoded before it in the same chunk. Treat it as a malformed
-      // frame: log, allow a short burst of recoverable failures, and treat a
-      // sustained run as a fatal desync.
-      if (ipcDecoder.error) {
-        console.error(
-          `Malformed IPC frame dropped: ${ipcDecoder.error.message}`,
-        );
-        if (ipcHealth.noteFailure()) {
-          console.error(
-            'IPC channel permanently desynced after repeated malformed frames; stopping host→worklet frame parsing',
-          );
-          return;
-        }
-        ipcDecoder.clear();
-        return;
-      }
-      ipcHealth.noteSuccess();
-      if (messages.length === 0) return;
-
-      for (const parsed of messages) {
-        // Host responses resolve a call the worklet is already waiting on, so
-        // consume them synchronously, ahead of any request work: queued behind
-        // the request that is waiting for them they would stall until timeout.
-        if (hostBridge?.tryConsumeDownstream(parsed)) continue;
-        pluginRouter
-          .route(parsed.header, parsed.payload)
-          .then((pluginResponse) => {
-            if (pluginResponse) {
-              writeIpc(ipc, encodeResponse(protocol, pluginResponse));
-            }
-          })
-          .catch((err) => {
-            const message = err instanceof Error ? err.message : String(err);
-            console.error(`Malformed IPC frame dropped: ${message}`);
-          });
-      }
+    const bridge = hostBridge;
+    // Host→worklet frames arrive over a stream whose `data` events do not
+    // preserve message boundaries. The IPC pipe has no reconnect seam, so a
+    // malformed frame is dropped and parsing resumes, until a sustained run
+    // proves the stream is desynced for good.
+    const channel = createFrameChannel({
+      name: '[ipc]',
+      protocol,
+      router: pluginRouter,
+      write: (frame) => ipc.write(toIpcChunk(frame)),
+      onMalformed: { kind: 'tolerate' },
+      // Host responses resolve a call the worklet is already waiting on, so
+      // consume them ahead of any request work: queued behind the request
+      // that is waiting for them they would stall until timeout.
+      intercept: (message) => bridge?.tryConsumeDownstream(message) ?? false,
     });
+    ipc.on('data', (data: unknown) => channel.push(data));
   }
 
   async function start() {

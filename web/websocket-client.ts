@@ -13,13 +13,11 @@ declare global {
     /** Per-session bridge state injected by the embedding shell on-device.
      * `bootstrap` is a one-time nonce the page exchanges for a session cookie
      * via `POST /login` (single-use — the raw session token is never exposed
-     * to page JS). `token` remains as a legacy login fallback for consumers
-     * that still inject it. The cookie then rides every same-origin request —
+     * to page JS). The cookie then rides every same-origin request —
      * including the WebSocket upgrade. Browser dev has none (the dev backend
      * runs without auth). */
     __ekrooh?: {
       bootstrap?: string;
-      token?: string;
       [key: string]: unknown;
     };
     /** Set by the embedding shell on-device. */
@@ -58,8 +56,8 @@ export interface CreateWebSocketTransportOptions {
   /** WebSocket URL. Defaults to the page's same-origin (`ws://location.host`).
    * Browser dev passes `VITE_BARE_WS_URL` explicitly. */
   url?: string;
-  /** Whether to bootstrap the session cookie via `POST /login` when a token
-   * is present. Defaults to `true`. */
+  /** Whether to bootstrap the session cookie via `POST /login` when a
+   * bootstrap nonce is present. Defaults to `true`. */
   login?: boolean;
   /** Reconnect attempts after an unexpected close (boot-window). Default 5. */
   maxRetries?: number;
@@ -147,11 +145,10 @@ export function createWebSocketTransport(
   const maxRetries = options.maxRetries ?? DEFAULT_RETRIES;
   const initialBackoff = options.backoffMs ?? DEFAULT_BACKOFF_MS;
   const loginTimeoutMs = options.loginTimeoutMs ?? LOGIN_TIMEOUT_MS;
-  // `bootstrap` (the one-time nonce) is preferred; `token` remains a legacy
-  // login fallback for consumers that inject it. Neither is ever placed in a
-  // URL — the transport exchanges the credential for the HttpOnly cookie.
+  // The one-time bootstrap nonce is exchanged for the HttpOnly cookie; it is
+  // never placed in a URL.
   const bridge = typeof window !== 'undefined' ? window.__ekrooh : undefined;
-  const credential = bridge?.bootstrap ?? bridge?.token;
+  const credential = bridge?.bootstrap;
   const shouldLogin =
     options.login !== false &&
     typeof credential === 'string' &&

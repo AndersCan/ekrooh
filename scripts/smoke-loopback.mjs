@@ -21,7 +21,7 @@ function check(name, cond) {
 }
 
 const server = createLoopbackServer({ auth: true });
-server.mountDir('/', dir);
+server.mountDir('/', dir, { public: true });
 // Media is a session-scoped file mount: requires auth even with the public
 // web app.
 server.mount('/media/sample.png', path.join(dir, 'app.js'));
@@ -61,20 +61,22 @@ check(
 r = await request('GET', '/media/sample.png');
 check('media without auth -> 401', r.status === 401);
 
-// 3. Login with token -> cookie
+// 3. The raw session token never logs a page in; the bootstrap nonce does,
+// once.
 r = await request('POST', '/login', { body: creds.token });
-check('login -> 200', r.status === 200);
-const setCookie = r.headers['set-cookie'];
-check(
-  'login sets bare_session cookie',
-  typeof setCookie === 'string' && setCookie.startsWith('bare_session='),
-);
+check('login with the raw token -> 401', r.status === 401);
+r = await request('POST', '/login', { body: creds.bootstrap });
+check('login with the bootstrap nonce -> 200', r.status === 200);
+const setCookie = [r.headers['set-cookie'] ?? []].flat()[0] ?? '';
+check('login sets bare_session cookie', setCookie.startsWith('bare_session='));
 check('cookie is HttpOnly', setCookie.includes('HttpOnly'));
-check('cookie is SameSite=Lax', setCookie.includes('SameSite=Lax'));
+check('cookie is SameSite=Strict', setCookie.includes('SameSite=Strict'));
 
-// 4. Wrong token -> 401
+// 4. Wrong credential -> 401; a replayed nonce -> 409
 r = await request('POST', '/login', { body: 'nope' });
 check('bad login -> 401', r.status === 401);
+r = await request('POST', '/login', { body: creds.bootstrap });
+check('replayed bootstrap nonce -> 409', r.status === 409);
 
 // 5. Cookie auth serves media
 const cookie = setCookie.split(';')[0];
@@ -84,9 +86,9 @@ check(
   r.status === 200 && r.body === 'console.log("app")',
 );
 
-// 6. Query token fallback works on protected mounts
+// 6. A token in the URL is never accepted
 r = await request('GET', `/media/sample.png?token=${creds.token}`);
-check('query token -> 200', r.status === 200);
+check('query token -> 401', r.status === 401);
 
 // 7. Header token fallback works on protected mounts
 r = await request('GET', '/media/sample.png', {
@@ -100,29 +102,38 @@ check(
 // 8. Traversal is rejected outright (raw request line — the HTTP client
 // normalizes `..` away before sending)
 const port = Number(creds.origin.slice(creds.origin.lastIndexOf(':') + 1));
-const rawResp = await new Promise((resolve, reject) => {
-  let data = '';
-  const socket = tcp.connect({ host: '127.0.0.1', port });
-  socket.on('connect', () =>
-    socket.write(
-      `GET /../etc/passwd HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n`,
-    ),
-  );
-  socket.on('data', (d) => {
-    data += String(d);
-    // The server keeps the connection alive after responding; resolve on the
-    // first complete status line.
-    if (data.includes('\r\n')) {
-      socket.destroy();
-      resolve(data);
-    }
+const rawStatus = (target, host = `127.0.0.1:${port}`) =>
+  new Promise((resolve, reject) => {
+    let data = '';
+    const socket = tcp.connect({ host: '127.0.0.1', port });
+    socket.on('connect', () =>
+      socket.write(
+        `GET ${target} HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`,
+      ),
+    );
+    socket.on('data', (d) => {
+      data += String(d);
+      // The server keeps the connection alive after responding; resolve on
+      // the first complete status line.
+      if (data.includes('\r\n')) {
+        socket.destroy();
+        resolve(data.split('\r\n')[0]);
+      }
+    });
+    socket.on('error', reject);
+    setTimeout(() => {
+      if (!data) reject(new Error('raw request timeout'));
+    }, 3000);
   });
-  socket.on('error', reject);
-  setTimeout(() => {
-    if (!data) reject(new Error('raw request timeout'));
-  }, 3000);
-});
-check('traversal rejected', /400/.test(rawResp.split('\r\n')[0]));
+check('traversal rejected', /400/.test(await rawStatus('/../etc/passwd')));
+check(
+  'encoded traversal rejected',
+  /400/.test(await rawStatus('/%2e%2e/etc/passwd')),
+);
+check(
+  'DNS-rebinding Host rejected',
+  /403/.test(await rawStatus('/', 'evil.example')),
+);
 
 // 9. SPA fallback: unknown navigation path serves index.html
 r = await request('GET', '/some/route', {
@@ -167,13 +178,15 @@ check(
   r.headers['referrer-policy'] === 'no-referrer',
 );
 
-// 15. WS with query token -> handshake, echo a frame
+// 15. WS with the header token from the bound origin -> handshake, echo
 const protocol = new MessageProtocol({
   encode: (str) => new TextEncoder().encode(str),
   decode: (bytes) => new TextDecoder().decode(bytes),
 });
 const wsResult = await new Promise((resolve) => {
-  const socket = new ws.Socket(`${creds.origin}/ws?token=${creds.token}`);
+  const socket = new ws.Socket(`${creds.origin}/ws`, {
+    headers: { Origin: creds.origin, 'X-Bare-Token': creds.token },
+  });
   let done = false;
   const finish = (v) => {
     if (!done) {
@@ -203,7 +216,9 @@ check('ws with token opens and receives a frame', wsResult.opened === true);
 
 // 16. WS without token is rejected
 const noAuthWs = await new Promise((resolve) => {
-  const socket = new ws.Socket(`${creds.origin}/ws`);
+  const socket = new ws.Socket(`${creds.origin}/ws`, {
+    headers: { Origin: creds.origin },
+  });
   let done = false;
   const finish = (v) => {
     if (!done) {
@@ -219,43 +234,52 @@ const noAuthWs = await new Promise((resolve) => {
 });
 check('ws without token is rejected', noAuthWs.opened === false);
 
-// 17. Dev mode (auth off): public content, and a cross-origin WS upgrade from
-// the Vite dev server (different Origin) must complete.
-const dev = createLoopbackServer({ auth: false, port: 0 });
-dev.mountDir('/', dir);
-const devCreds = await dev.credentials();
-const devUpgrade = await new Promise((resolve) => {
-  let data = '';
-  const socket = tcp.connect({ host: '127.0.0.1', port: devCreds.port });
-  socket.on('connect', () =>
-    socket.write(
-      [
-        'GET /ws HTTP/1.1',
-        `Host: 127.0.0.1:${devCreds.port}`,
-        'Upgrade: websocket',
-        'Connection: Upgrade',
-        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
-        'Sec-WebSocket-Version: 13',
-        'Origin: http://localhost:5173',
-        '\r\n',
-      ].join('\r\n'),
-    ),
-  );
-  socket.on('data', (d) => {
-    data += String(d);
-    if (data.includes('\r\n')) {
-      socket.destroy();
-      resolve(data);
-    }
-  });
-  socket.on('error', () => resolve(''));
-  setTimeout(() => {
-    if (!data) resolve('');
-  }, 3000);
+// 17. Dev mode (auth off): a cross-origin WS upgrade from the allowed Vite dev
+// server origin completes; any other page origin is still refused.
+const dev = createLoopbackServer({
+  auth: false,
+  port: 0,
+  allowedOrigins: ['http://localhost:5173'],
 });
+dev.mountDir('/', dir, { public: true });
+const devCreds = await dev.credentials();
+const devUpgrade = (pageOrigin) =>
+  new Promise((resolve) => {
+    let data = '';
+    const socket = tcp.connect({ host: '127.0.0.1', port: devCreds.port });
+    socket.on('connect', () =>
+      socket.write(
+        [
+          'GET /ws HTTP/1.1',
+          `Host: 127.0.0.1:${devCreds.port}`,
+          'Upgrade: websocket',
+          'Connection: Upgrade',
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+          'Sec-WebSocket-Version: 13',
+          `Origin: ${pageOrigin}`,
+          '\r\n',
+        ].join('\r\n'),
+      ),
+    );
+    socket.on('data', (d) => {
+      data += String(d);
+      if (data.includes('\r\n')) {
+        socket.destroy();
+        resolve(data);
+      }
+    });
+    socket.on('error', () => resolve(''));
+    setTimeout(() => {
+      if (!data) resolve('');
+    }, 3000);
+  });
 check(
   'dev cross-origin WS upgrade succeeds',
-  /101/.test(devUpgrade.split('\r\n')[0]),
+  /101/.test((await devUpgrade('http://localhost:5173')).split('\r\n')[0]),
+);
+check(
+  'dev WS upgrade from a foreign page origin is refused',
+  !/101/.test((await devUpgrade('http://evil.example')).split('\r\n')[0]),
 );
 await new Promise((resolve) => dev.close(resolve));
 
