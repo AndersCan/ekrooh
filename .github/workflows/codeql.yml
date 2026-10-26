@@ -9,6 +9,10 @@ on:
     # Weekly scheduled scan (issue #66).
     - cron: '31 4 * * 1'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
   security-events: write
