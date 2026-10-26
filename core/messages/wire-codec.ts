@@ -41,6 +41,23 @@ function clampFrameBytes(value: number): number {
   return Math.min(Math.max(fallback, MIN_FRAME_BYTES), MAX_FRAME_BYTES);
 }
 
+// Created on first use and then reused: the global `TextEncoder`/`TextDecoder`
+// do not exist on Bare (the runtime passes its own), so they must not be
+// constructed at import time. Decoding is non-streaming, so one decoder is safe
+// to share across calls.
+let sharedEncoder: TextEncoder | undefined;
+let sharedDecoder: TextDecoder | undefined;
+
+function defaultEncode(str: string): Uint8Array {
+  sharedEncoder ??= new TextEncoder();
+  return sharedEncoder.encode(str);
+}
+
+function defaultDecode(bytes: Uint8Array): string {
+  sharedDecoder ??= new TextDecoder(undefined, { fatal: true });
+  return sharedDecoder.decode(bytes);
+}
+
 export class MessageProtocol {
   private encodeStr: Encoder;
   private decodeStr: Decoder;
@@ -50,11 +67,8 @@ export class MessageProtocol {
   readonly maxFrameBytes: number;
 
   constructor(options?: ProtocolOptions) {
-    this.encodeStr =
-      options?.encode || ((str) => new TextEncoder().encode(str));
-    this.decodeStr =
-      options?.decode ||
-      ((bytes) => new TextDecoder(undefined, { fatal: true }).decode(bytes));
+    this.encodeStr = options?.encode || defaultEncode;
+    this.decodeStr = options?.decode || defaultDecode;
     this.allowUnknownTypes = options?.allowUnknownTypes ?? false;
     this.maxFrameBytes = clampFrameBytes(
       options?.maxFrameBytes ?? MAX_FRAME_BYTES,
@@ -196,8 +210,12 @@ export class MessageProtocol {
   }
 }
 
+const KNOWN_MESSAGE_TYPES: ReadonlySet<number> = new Set(
+  Object.values(MessageType),
+);
+
 function isKnownMessageType(type: number): type is MessageTypeValue {
-  return Object.values(MessageType).includes(type as MessageTypeValue);
+  return KNOWN_MESSAGE_TYPES.has(type);
 }
 
 function parseAndValidateHeader(headerJson: string): MessageHeader {

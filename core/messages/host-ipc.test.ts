@@ -96,6 +96,26 @@ describe('createHostIpcBridge', () => {
     expect(out?.result).toEqual({ granted: true });
   });
 
+  it('writes an already-encoded Buffer to the IPC without copying it again', async () => {
+    vi.useFakeTimers();
+    const ipc = new FakeIpc();
+    const bridge = createHostIpcBridge({
+      ipc,
+      protocol: new MessageProtocol(),
+    });
+    const fromSpy = vi.spyOn(Buffer, 'from');
+    try {
+      const pending = bridge.queryCapabilities(10);
+      const settled = expect(pending).rejects.toThrow(/timeout/);
+      await vi.advanceTimersByTimeAsync(11);
+      await settled;
+      expect(ipc.writes).toHaveLength(1);
+      expect(fromSpy).not.toHaveBeenCalled();
+    } finally {
+      fromSpy.mockRestore();
+    }
+  });
+
   it('returns null when invoked without a request id', async () => {
     const ipc = new FakeIpc();
     const protocol = new MessageProtocol();
