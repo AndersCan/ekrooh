@@ -235,7 +235,8 @@ function writeIpc(
   bytes: Uint8Array,
 ) {
   if (typeof Buffer !== 'undefined' && typeof Buffer.from === 'function') {
-    ipc.write(Buffer.from(bytes));
+    // `encode` already returns a Buffer on Bare; `Buffer.from` would copy it.
+    ipc.write(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes));
   } else {
     ipc.write(bytes as unknown as Buffer);
   }
@@ -254,9 +255,12 @@ export function createWorkletRuntime(
   const auth = options.auth ?? deviceMode;
   const port = options.port ?? (deviceMode ? 0 : 8080);
 
+  // One encoder/decoder per runtime, not one per frame.
+  const textEncoder = new TextEncoder();
+  const textDecoder = new TextDecoder();
   const protocol = new MessageProtocol({
-    encode: (str) => new TextEncoder().encode(str),
-    decode: (bytes) => new TextDecoder().decode(bytes),
+    encode: (str) => textEncoder.encode(str),
+    decode: (bytes) => textDecoder.decode(bytes),
   });
 
   let ipc: ReturnType<typeof getIPC> | undefined;

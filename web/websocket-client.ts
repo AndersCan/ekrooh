@@ -71,15 +71,13 @@ export interface CreateWebSocketTransportOptions {
 }
 
 /**
- * `websocket.send` needs a `BufferSource` backed by a plain `ArrayBuffer`;
- * the codec may produce a view into a pooled Buffer, so slice a standalone
- * copy of just the frame.
+ * `websocket.send` sends exactly the bytes a typed-array view covers (its
+ * offset and length), so the frame goes out as is. This was a `slice()` copy of
+ * the whole frame, kept for a pooled-`Buffer` view that the browser never
+ * produces.
  */
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength,
-  ) as ArrayBuffer;
+function toSendable(bytes: Uint8Array): BufferSource {
+  return bytes as BufferSource;
 }
 
 /** Upper bound on server-log lines folded into a give-up error (it lands in
@@ -216,7 +214,7 @@ export function createWebSocketTransport(
 
   const flushQueued = () => {
     for (const queuedMessage of queued) {
-      socket?.send(toArrayBuffer(queuedMessage.bytes));
+      socket?.send(toSendable(queuedMessage.bytes));
     }
     queued.length = 0;
   };
@@ -374,7 +372,7 @@ export function createWebSocketTransport(
         socket &&
         socket.readyState === WebSocket.OPEN
       ) {
-        socket.send(toArrayBuffer(encoded));
+        socket.send(toSendable(encoded));
         return;
       }
       if (machine.isGaveUp()) {

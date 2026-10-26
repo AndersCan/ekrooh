@@ -1,5 +1,6 @@
 import { MessageType } from './constants';
 import { MessageProtocol } from './wire-codec';
+import { createRequestId } from './request-id';
 import type {
   CapabilityDescriptor,
   HostCapabilitiesResponseHeader,
@@ -15,14 +16,6 @@ function toUint8Array(data: Uint8Array | ArrayBuffer | Buffer): Uint8Array {
   if (typeof Buffer !== 'undefined' && Buffer.isBuffer(data))
     return new Uint8Array(data);
   return new Uint8Array(data);
-}
-
-function newCorrelationId(): string {
-  // CSPRNG-backed (not Math.random): unguessable request ids for host IPC.
-  const bytes = new Uint8Array(16);
-  globalThis.crypto.getRandomValues(bytes);
-  const rand = bytes.reduce((acc, b) => acc + b.toString(36), '').slice(0, 22);
-  return `${Date.now().toString(36)}-${rand}`;
 }
 
 type Pending = {
@@ -46,7 +39,8 @@ export type BareIpcLike = {
 
 function writeEncoded(ipc: BareIpcLike, bytes: Uint8Array) {
   if (typeof Buffer !== 'undefined' && typeof Buffer.from === 'function') {
-    ipc.write(Buffer.from(bytes));
+    // `encode` already returns a Buffer on Bare; `Buffer.from` would copy it.
+    ipc.write(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes));
   } else {
     ipc.write(bytes as unknown as Buffer);
   }
@@ -164,7 +158,8 @@ export function createHostIpcBridge(config: {
     },
 
     async queryCapabilities(timeoutMs = 5000): Promise<CapabilityDescriptor[]> {
-      const requestId = newCorrelationId();
+      // CSPRNG-backed (not Math.random): unguessable request ids for host IPC.
+      const requestId = createRequestId();
       const promise = waitFor<HostCapabilitiesResponseHeader>(
         requestId,
         'HOST_CAPABILITIES_RESPONSE',
