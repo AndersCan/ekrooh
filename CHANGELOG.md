@@ -7,6 +7,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Linux desktop reference app** (`examples/desktop-app`): same Zig host and
+  sidecar `bare` as macOS, on GTK/WebKitGTK 4.1, packaged by
+  `npm run build:desktop` as `ekrooh-linux-<arch>.tar.gz` with a `.sha256`.
+  Verified in CI only (`desktop-linux`).
+
 ### Changed
 
 - **Backpressure in both directions** (`core/messages/backpressure.ts`,

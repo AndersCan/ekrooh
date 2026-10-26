@@ -1,4 +1,4 @@
-# Desktop reference app (macOS)
+# Desktop reference app (macOS, Linux)
 
 A thin native launcher around the same Bare backend and web UI the mobile apps
 use. The result runs with **no Node, Bun or other runtime installed**.
@@ -11,6 +11,20 @@ Ekrooh.app/Contents
   Resources/node_modules/     native addons (udx, sodium, rocksdb, ...)
   Resources/WebAssets/        the reference web build
 ```
+
+Linux ships as a tarball (`dist/ekrooh-linux-<arch>.tar.gz` + `.sha256`):
+
+```
+ekrooh-linux-x64/
+  bin/ekrooh                  Zig host
+  resources/                  bare, desktop.bundle, node_modules/, WebAssets/
+```
+
+Run `bin/ekrooh`. It needs the system's **GTK 3 and WebKitGTK 4.1**
+(`libwebkit2gtk-4.1-0`; Debian/Ubuntu 22.04+, Fedora 36+). Storage defaults to
+`$XDG_DATA_HOME/ekrooh` (else `~/.local/share/ekrooh`). x64 and arm64 are
+separate builds; build on the oldest distro you support (CI: Ubuntu 22.04) so
+the glibc requirement stays low.
 
 ## How it works
 
@@ -39,7 +53,8 @@ when it is closed.
 
 ## Build and run
 
-Needs `zig` >= 0.17 (build-time only) and Xcode command line tools.
+Needs `zig` >= 0.17 (build-time only) and, on macOS, the Xcode command line
+tools or, on Linux, `libgtk-3-dev` and `libwebkit2gtk-4.1-dev`.
 
 ```sh
 npm run build:desktop            # add `-- --skip-web` to reuse the last web build
@@ -57,6 +72,8 @@ backend crash, and orphan cleanup (CI job `desktop`).
 
 ## Not done yet
 
-- Windows and Linux hosts (`build.zig` panics on non-macOS targets).
+- A Windows host (`build.zig` panics on other targets).
+- Linux is CI-verified only (job `desktop-linux`); only a tarball is produced
+  (no AppImage/.deb/Flatpak).
 - Developer ID signing / notarization (the build ad-hoc signs only).
 - Intel macOS is untested.

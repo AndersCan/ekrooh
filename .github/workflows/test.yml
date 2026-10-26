@@ -279,6 +279,47 @@ jobs:
       - name: Two instances launch, the webview redeems each nonce, no orphans
         run: npm run smoke:desktop
 
+  desktop-linux:
+    name: desktop (Linux tarball smoke)
+    # Oldest supported glibc: binaries built here run on newer distros.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
+
+      - name: Install GTK, WebKitGTK, Xvfb and lsof
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev xvfb lsof
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build the npm package (build:web resolves through dist)
+        run: npm run build:pkg
+
+      - name: Host unit tests
+        run: xvfb-run -a zig build test
+        working-directory: examples/desktop-app
+
+      - name: Build the Linux tarball (host, packed backend, sidecar bare, web assets)
+        run: npm run build:desktop
+
+      - name: Two instances launch, the webview redeems each nonce, no orphans
+        run: xvfb-run -a npm run smoke:desktop
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ekrooh-linux-tarball
+          path: examples/desktop-app/dist/ekrooh-linux-*.tar.gz*
+
   # Supply-chain / vulnerability scanning (issue #66).
   dependency-scan:
     name: Dependency / vuln scan

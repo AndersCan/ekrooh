@@ -39,7 +39,12 @@ pub fn build(b: *std.Build) void {
             exe.root_module.linkFramework("WebKit", .{});
             exe.root_module.linkFramework("AppKit", .{});
         },
-        else => @panic("desktop host: only macOS is wired up so far"),
+        .linux => {
+            // pkg-config names; webview/webview needs the 4.1 (libsoup3) ABI.
+            exe.root_module.linkSystemLibrary("gtk+-3.0", .{});
+            exe.root_module.linkSystemLibrary("webkit2gtk-4.1", .{});
+        },
+        else => @panic("desktop host: only macOS and Linux are wired up so far"),
     }
 
     b.installArtifact(exe);
