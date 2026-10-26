@@ -9,6 +9,17 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Backpressure in both directions** (`core/messages/backpressure.ts`,
+  `core/server/static-file-server.ts`, `core/server/websocket-server.ts`):
+  - Writes to the protocol socket honour `write() === false` through one
+    bounded queue (`wsMaxQueuedBytes`, default 2 MiB). When the client stops
+    reading, server pushes past the limit are dropped **newest first** and
+    counted in `core.logs`; `push()` returns false for a dropped frame. A
+    response is never dropped: it queues up to 8x the limit, then the socket is
+    closed so the client reconnects.
+  - The protocol socket stops being read while 32 routed calls are pending and
+    resumes at 16. The host IPC channel is not paused (a pending host call
+    waits for responses on that same stream).
 - **Reconnect, heartbeat and socket replacement** (`core/server/static-file-server.ts`,
   `web/connection-machine.ts`, `web/websocket-client.ts`):
   - The protocol socket now has a protocol-level ping/pong dead-peer timeout

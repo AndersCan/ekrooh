@@ -1,4 +1,12 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vite-plus/test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vite-plus/test';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -43,6 +51,13 @@ vi.mock('bare-crypto', async () => {
   };
 });
 const wsSocketOptions = vi.hoisted(() => [] as Array<Record<string, unknown>>);
+/** Lets a test stall the mocked protocol socket's writes (a reader that has
+ * stopped reading) and later release it with a `drain` event. */
+const wsControl = vi.hoisted(() => ({
+  stall: false,
+  written: [] as Uint8Array[],
+  instances: [] as Array<{ emit(event: string): boolean }>,
+}));
 
 vi.mock('bare-ws', async () => {
   const crypto = await import('node:crypto');
@@ -77,6 +92,7 @@ vi.mock('bare-ws', async () => {
         constructor(opts?: { socket?: net.Socket }) {
           super();
           wsSocketOptions.push({ ...opts });
+          wsControl.instances.push(this);
           this.socket = opts?.socket;
           // The real ws library closes the client when the TCP socket dies;
           // mirror that so the server's `client.on('close')` (activeSocket
@@ -94,6 +110,8 @@ vi.mock('bare-ws', async () => {
         write(data: unknown) {
           // Forward to the underlying TCP socket so a server `push` reaches the
           // test client (the real ws.Socket writes through to the TCP socket).
+          wsControl.written.push(data as Uint8Array);
+          if (wsControl.stall) return false;
           if (this.socket) {
             return this.socket.write(data as Buffer);
           }
@@ -1114,6 +1132,113 @@ describe('loopback server WebSocket upgrade', () => {
         expect(wsSocketOptions.at(-1)).toMatchObject({ idleTimeout: 10_000 });
         conn.socket.destroy();
       });
+    });
+  });
+
+  describe('outbound backpressure', () => {
+    afterEach(() => {
+      wsControl.stall = false;
+      vi.restoreAllMocks();
+    });
+
+    const f = (size: number, fill: number) => new Uint8Array(size).fill(fill);
+
+    async function stalledConnection(
+      options: Parameters<typeof createLoopbackServer>[0] = {},
+    ) {
+      wsControl.stall = false;
+      wsControl.written = [];
+      wsControl.instances = [];
+      const sc = createLoopbackServer({ auth: true, token: TOKEN, ...options });
+      sc.mountDir('/', dir);
+      let handlerSocket: { write(d: Uint8Array): boolean } | null = null;
+      sc.onConnection((socket) => {
+        handlerSocket = socket as never;
+      });
+      const creds = await sc.credentials();
+      const conn = await openUpgrade({
+        token: TOKEN,
+        origin: creds.origin,
+        port: Number(creds.origin.slice(creds.origin.lastIndexOf(':') + 1)),
+      });
+      await vi.waitFor(() => expect(handlerSocket).not.toBeNull());
+      const release = () => {
+        wsControl.stall = false;
+        wsControl.instances.at(-1)!.emit('drain');
+      };
+      return {
+        sc,
+        conn,
+        handlerSocket: handlerSocket!,
+        release,
+        close: () =>
+          new Promise<void>((resolve) => {
+            conn.socket.destroy();
+            const timer = setTimeout(resolve, 2000);
+            sc.close(() => {
+              clearTimeout(timer);
+              resolve();
+            });
+          }),
+      };
+    }
+
+    it('drops the newest pushes past wsMaxQueuedBytes and delivers the rest in order', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const t = await stalledConnection({ wsMaxQueuedBytes: 50 });
+      wsControl.stall = true;
+
+      expect(t.sc.push(f(20, 1))).toBe(true); // written; stream signals pressure
+      expect(t.sc.push(f(20, 2))).toBe(true); // queued
+      expect(t.sc.push(f(20, 3))).toBe(true); // queued
+      expect(t.sc.push(f(20, 4))).toBe(false); // over the cap: dropped
+      expect(t.sc.push(f(20, 5))).toBe(false);
+      expect(wsControl.written).toHaveLength(1);
+
+      t.release();
+      expect(wsControl.written.map((w) => w[0])).toEqual([1, 2, 3]);
+      expect(warn.mock.calls.some((c) => /dropped 2 /.test(String(c[0])))).toBe(
+        true,
+      );
+      warn.mockRestore();
+      await t.close();
+    });
+
+    it('never drops a response written through the connection handler', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const t = await stalledConnection({ wsMaxQueuedBytes: 50 });
+      wsControl.stall = true;
+
+      t.handlerSocket.write(f(20, 1));
+      for (let i = 2; i <= 6; i++) {
+        expect(t.handlerSocket.write(f(20, i))).toBe(true);
+      }
+      expect(t.sc.push(f(20, 9))).toBe(false); // pushes are shed first
+
+      t.release();
+      expect(wsControl.written.map((w) => w[0])).toEqual([1, 2, 3, 4, 5, 6]);
+      await t.close();
+    });
+
+    it('destroys the socket instead of dropping a response past the hard cap', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const t = await stalledConnection({ wsMaxQueuedBytes: 10 });
+      wsControl.stall = true;
+      t.handlerSocket.write(f(10, 1));
+      // Hard cap is 8x the soft cap (80 bytes).
+      for (let i = 0; i < 8; i++) t.handlerSocket.write(f(10, 2));
+      expect(t.handlerSocket.write(f(10, 3))).toBe(false);
+
+      const closed = await new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), 2000);
+        t.conn.socket.once('close', () => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+      });
+      expect(closed).toBe(true);
+      await t.close();
     });
   });
 

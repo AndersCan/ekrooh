@@ -9,6 +9,10 @@ import ws from 'bare-ws';
 import crypto from 'bare-crypto';
 import path from 'bare-path';
 import { TextDecoder, TextEncoder } from 'bare-encoding';
+import {
+  createBoundedWriter,
+  type BoundedWriter,
+} from '../messages/backpressure';
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   html: 'text/html',
@@ -195,9 +199,13 @@ export function collectRequestBody(
 export type WebSocketLike = {
   on(event: 'data', listener: (chunk: unknown) => void): unknown;
   on(event: 'close', listener: () => void): unknown;
+  on(event: 'drain', listener: () => void): unknown;
   on(event: 'error', listener: (err: Error) => void): unknown;
   write(data: unknown): boolean;
   destroy(): void;
+  /** Stops/restarts `data` events (inbound backpressure). */
+  pause?(): void;
+  resume?(): void;
 };
 
 /** Handler for a registered HTTP route on the loopback server. */
@@ -242,6 +250,11 @@ export interface LoopbackServerOptions {
    * that may replace it. Bounds eviction churn if two live clients compete.
    * Defaults to 1000. */
   wsReplaceMinIntervalMs?: number;
+  /** Most bytes queued behind a protocol socket whose reader has stopped reading
+   * before server pushes are dropped, newest first. Responses are queued past
+   * this (to 8x) and then the socket is closed rather than lose one. Defaults to
+   * 2 MiB. */
+  wsMaxQueuedBytes?: number;
 }
 
 export interface LoopbackServer {
@@ -313,6 +326,7 @@ export function createLoopbackServer(
   const wsIdleTimeoutMs = options.wsIdleTimeoutMs ?? 60_000;
   const wsDeadPeerTimeoutMs = options.wsDeadPeerTimeoutMs ?? 10_000;
   const wsReplaceMinIntervalMs = options.wsReplaceMinIntervalMs ?? 1_000;
+  const wsMaxQueuedBytes = options.wsMaxQueuedBytes ?? 2 * 1024 * 1024;
 
   /** URL-safe random secret for the session token / bootstrap nonce. */
   const randomSecret = () =>
@@ -336,6 +350,7 @@ export function createLoopbackServer(
   let boundOrigin = '';
   let originPromise: Promise<string> | null = null;
   let activeSocket: WebSocketLike | null = null;
+  let activeWriter: BoundedWriter | null = null;
   let activeSince = 0;
 
   /** Non-fatal, never-throwing debug for skipped work (a missing file, a failed
@@ -821,15 +836,37 @@ export function createLoopbackServer(
         reject(`handshake failed (${err.message})`);
         return;
       }
-      const client = new ws.Socket({
+      const raw = new ws.Socket({
         socket,
         isServer: true,
         idleTimeout: wsDeadPeerTimeoutMs,
       } as unknown as ConstructorParameters<
         typeof ws.Socket
       >[0]) as unknown as WebSocketLike;
+      // Every write goes through one bounded queue so a reader that stops
+      // reading cannot grow worklet memory: pushes are shed first (newest
+      // first); a response is never dropped, and past the hard cap the socket
+      // is closed so the client reconnects instead.
+      const writer = createBoundedWriter(raw as never, {
+        maxQueuedBytes: wsMaxQueuedBytes,
+        onOverflow: () => {
+          console.error(
+            '[loopback] client is not reading and responses are backing up; closing the protocol socket',
+          );
+          raw.destroy();
+        },
+      });
+      const client = {
+        on: (event: string, listener: (...args: never[]) => void) =>
+          raw.on(event as 'close', listener as () => void),
+        write: (data: unknown) => writer.write(data as Uint8Array),
+        destroy: () => raw.destroy(),
+        pause: () => raw.pause?.(),
+        resume: () => raw.resume?.(),
+      } as WebSocketLike;
       const previous = activeSocket;
       activeSocket = client;
+      activeWriter = writer;
       activeSince = Date.now();
       if (previous) {
         console.warn('[loopback] replaced the existing protocol socket');
@@ -839,12 +876,16 @@ export function createLoopbackServer(
           debugSkip('[static-server] replace: previous socket already closed');
         }
       }
-      client.on('close', () => {
-        if (activeSocket === client) activeSocket = null;
+      raw.on('close', () => {
+        writer.clear();
+        if (activeSocket === client) {
+          activeSocket = null;
+          activeWriter = null;
+        }
       });
       // Idle timeout: bare-ws sockets are duplex streams; the underlying TCP
       // socket resets its timer on any traffic.
-      socket.setTimeout(wsIdleTimeoutMs, () => client.destroy());
+      socket.setTimeout(wsIdleTimeoutMs, () => raw.destroy());
       for (const handler of connectionHandlers) {
         try {
           handler(client, req);
@@ -893,10 +934,9 @@ export function createLoopbackServer(
       routeHandlers.set(`${method.toUpperCase()} ${path}`, handler);
     },
     push(frame) {
-      if (!activeSocket) return false;
+      if (!activeWriter) return false;
       try {
-        activeSocket.write(frame);
-        return true;
+        return activeWriter.write(frame, { droppable: true });
       } catch {
         debugSkip('[static-server] push: socket.write failed — frame dropped');
         return false;

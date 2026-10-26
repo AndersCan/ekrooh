@@ -80,6 +80,8 @@ function fakeSocket() {
   return {
     write: vi.fn((_data: unknown) => true),
     destroy: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
     on(event: string, listener: (data: unknown) => unknown) {
       const list = listeners.get(event) ?? [];
       list.push(listener);
@@ -589,5 +591,77 @@ describe('attachWebSocketProtocol oversized results', () => {
     expect(header.result).toBeUndefined();
     expect(header.error?.code).toBe('FRAME_TOO_LARGE');
     expect(header.error?.message).toContain('test.big.big');
+  });
+});
+
+describe('attachWebSocketProtocol inbound backpressure', () => {
+  function slowContext() {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'test.slow',
+      events: ['slow'],
+      runtimes: {
+        bare: {
+          invoke: async () => {
+            await gate;
+            return [null, {}] as [null, unknown];
+          },
+        },
+      },
+    });
+    return {
+      release,
+      context: {
+        protocol,
+        pluginRegistry: registry,
+        pluginRouter: createPluginRouter(registry, 'bare', {
+          maxInflight: 1000,
+        }),
+      },
+    };
+  }
+  const frames = (n: number) =>
+    concatBytes(
+      ...Array.from({ length: n }, (_, i) =>
+        invokeFrame({
+          type: 'INVOKE_REQUEST',
+          pluginId: 'test.slow',
+          event: 'slow',
+          requestId: `r${i}`,
+        }),
+      ),
+    );
+
+  it('pauses the socket when too much routed work is pending and resumes as it drains', async () => {
+    const { release, context } = slowContext();
+    const harness = serverHarness();
+    attachWebSocketProtocol(harness.server as never, context as never);
+    const socket = fakeSocket();
+    harness.handler!(socket as never, { headers: {} });
+
+    socket.emit('data', frames(40));
+    expect(socket.pause).toHaveBeenCalledTimes(1);
+    expect(socket.resume).not.toHaveBeenCalled();
+
+    release();
+    await vi.waitFor(() => expect(socket.resume).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(socket.write).toHaveBeenCalledTimes(40));
+  });
+
+  it('does not pause for a handful of calls', async () => {
+    const { release, context } = slowContext();
+    const harness = serverHarness();
+    attachWebSocketProtocol(harness.server as never, context as never);
+    const socket = fakeSocket();
+    harness.handler!(socket as never, { headers: {} });
+
+    socket.emit('data', frames(3));
+    expect(socket.pause).not.toHaveBeenCalled();
+    release();
+    await vi.waitFor(() => expect(socket.write).toHaveBeenCalledTimes(3));
   });
 });
