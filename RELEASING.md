@@ -53,6 +53,9 @@ the release, publish the framework on the same tag so consumers resolve it from 
 
 4. Commit this as part of `chore: release vX.Y.Z` before tagging, so the tag carries the `url` form.
 5. After creating the GitHub release, upload `BareKit.xcframework.zip` to it.
+6. After tagging, restore the `path:` form on `main` in a follow-up commit. The tag
+   keeps the `url` form for consumers. Left on `main`, the `url` form makes the `ios`
+   CI job fail with `Multiple commands produce '…/BareKit.framework'`.
 
 `url` and `checksum` must match the tag's artifact. SwiftPM validates the checksum at resolve time.
 Consumers then add `.package(url: "https://github.com/AndersCan/ekrooh", exact: "X.Y.Z")`.

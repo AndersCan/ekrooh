@@ -107,11 +107,20 @@ function declFileFor(subpath) {
   return null;
 }
 
-/** Names exported by a built .d.mts file (parses the final `export {...}`). */
+/**
+ * Names exported by a built .d.mts file: `export {...}` / `export type {...}`
+ * lists plus inline `export declare function X` / `export interface X` forms
+ * (TypeScript 7 emits the latter instead of one trailing export list).
+ */
 function extractDeclExports(file) {
   const source = read(file);
   const names = new Set();
-  for (const m of source.matchAll(/export\s*\{([^}]+)\}/g)) {
+  for (const m of source.matchAll(
+    /^export\s+(?:declare\s+)?(?:abstract\s+)?(?:function|const|let|var|class|interface|type|enum|namespace)\s+([A-Za-z_$][\w$]*)/gm,
+  )) {
+    names.add(m[1]);
+  }
+  for (const m of source.matchAll(/export\s+(?:type\s*)?\{([^}]+)\}/g)) {
     for (const raw of m[1].split(',')) {
       let name = raw.trim().replace(/^type\s+/, '');
       name = name.split(' as ')[0].trim();
