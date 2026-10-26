@@ -1,9 +1,9 @@
 /**
  * CSPRNG-backed correlation id for RPC requests.
  *
- * Shared by the production messenger (`rpc-messenger.ts`) and the mantaq
- * prototype (`rpc-messenger.mantaq.ts`) so the unguessable,
- * collision-resistant guarantee can never regress in a single copy. Request
+ * Shared by the RPC messenger (`rpc-messenger.ts`) and the host IPC bridge
+ * (`host-ipc.ts`) so the unguessable, collision-resistant guarantee can never
+ * regress in a single copy. Request
  * IDs must never be derived from `Math.random()` — a guessable id lets a peer
  * spoof or collide with an in-flight request and corrupt correlation. See
  * ekrooh#141.
