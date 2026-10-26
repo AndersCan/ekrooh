@@ -1,7 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vite-plus/test';
 import http from 'node:http';
+import { PassThrough } from 'node:stream';
 import type { HashOptions } from 'node:crypto';
-import { createLoopbackServer } from '../server/static-file-server';
+import {
+  createLoopbackServer,
+  type LoopbackServer,
+} from '../server/static-file-server';
 import { registerLogRoutes } from './routes';
 import { createLogRingBuffer } from './store';
 import type { LogStore } from './types';
@@ -157,19 +161,71 @@ describe('registerLogRoutes', () => {
     expect(bad.status).toBe(400);
   });
 
-  it('rejects an oversized /logs body with 413 (unbounded-body DoS guard)', async () => {
+  it('refuses an oversized /logs body over a real socket and ingests nothing', async () => {
     store.clear();
     const big = JSON.stringify({
       source: 'web',
       entries: [{ message: 'x'.repeat(2 * 1024 * 1024) }],
     });
-    const post = await request('/logs', {
+    // The server answers 413 while the client is still writing and then closes
+    // the connection. Whether the client sees that 413 or a reset first is a
+    // TCP race (the reset can discard the unread response), so either outcome
+    // is a refusal. The exact 413 is asserted without a socket just below.
+    const outcome = await request('/logs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: big,
-    });
-    expect(post.status).toBe(413);
+    }).then(
+      (res) => res.status,
+      (err: NodeJS.ErrnoException) => err.code,
+    );
+    expect([413, 'ECONNRESET', 'EPIPE']).toContain(outcome);
     // The oversized batch must not have been ingested.
     expect(store.view().length).toBe(0);
+  });
+
+  it('answers an oversized /logs body with 413 and ingests nothing (no socket)', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const routes = new Map<string, (req: unknown, res: unknown) => void>();
+      const ownStore = createLogRingBuffer(10);
+      registerLogRoutes(
+        {
+          registerRoute: (method: string, path: string, handler: never) => {
+            routes.set(`${method} ${path}`, handler);
+          },
+        } as unknown as LoopbackServer,
+        ownStore,
+      );
+
+      const req = new PassThrough();
+      const responded = new Promise<{ status: number; body: string }>(
+        (resolve) => {
+          let status = 0;
+          routes.get('POST /logs')!(req, {
+            writeHead(code: number) {
+              status = code;
+            },
+            end(body: string) {
+              resolve({ status, body });
+            },
+          });
+        },
+      );
+      req.write(
+        JSON.stringify({
+          source: 'web',
+          entries: [{ message: 'x'.repeat(2 * 1024 * 1024) }],
+        }),
+      );
+      req.end();
+
+      const res = await responded;
+      expect(res.status).toBe(413);
+      expect(res.body).toBe('Request Entity Too Large');
+      expect(ownStore.view()).toHaveLength(0);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
