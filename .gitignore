@@ -100,3 +100,10 @@ scripts/smoke-loopback.gen.mjs
 
 # Astro build cache (apps/docs)
 apps/docs/.astro/
+
+# Desktop reference app generated inputs (see scripts/build-desktop-app.mjs)
+core/desktop.core.gen.js
+examples/desktop-app/.zig-cache/
+examples/desktop-app/zig-pkg/
+examples/desktop-app/zig-out/
+examples/desktop-app/dist/

@@ -63,7 +63,7 @@ never see TypeScript source.
 | Browser (test) | first-class                    | Mock      | Deterministic Playwright runs                                                                   |
 | Android        | first-class                    | WebSocket | Same-origin loopback socket, cookie auth                                                        |
 | iOS            | first-class (reference parity) | WebSocket | Same-origin loopback socket, cookie auth; host ships as source (`ios/`, SPM) on the release tag |
-| Desktop        | contract                       | none      | Adapters follow the same plugin contracts                                                       |
+| Desktop        | reference (macOS)              | WebSocket | Zig host + system webview + sidecar `bare`; see `examples/desktop-app`                          |
 
 Parity policy: core protocol and plugin contracts are runtime-agnostic.
 Capabilities are opt-in plugins and may be runtime-specific. Plugins report

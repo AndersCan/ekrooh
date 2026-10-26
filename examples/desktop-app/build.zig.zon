@@ -1,0 +1,13 @@
+.{
+    .name = .ekrooh_desktop,
+    .version = "0.0.1",
+    .dependencies = .{
+        .webview = .{
+            .url = "https://github.com/webview/webview/archive/f244320ab0d82fdab98a094e02996fc26d0ffd0c.tar.gz",
+            .hash = "N-V-__8AAMfrCgCF0cMUaxkjVk3iobB7ybLJ26Kk-ddFjr83",
+        },
+    },
+    .minimum_zig_version = "0.17.0",
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
+    .fingerprint = 0xe4fec71a281e32cf,
+}
