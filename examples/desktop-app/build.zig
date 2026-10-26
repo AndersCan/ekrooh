@@ -28,6 +28,14 @@ pub fn build(b: *std.Build) void {
 
     switch (target.result.os.tag) {
         .macos => {
+            // An explicit `-Dtarget` (e.g. `aarch64-macos.12.0`, to set the
+            // deployment target) turns off native SDK detection; pass the SDK
+            // with `-Dsdk="$(xcrun --show-sdk-path)"`.
+            if (b.option([]const u8, "sdk", "macOS SDK path, needed with an explicit -Dtarget")) |sdk| {
+                exe.root_module.addSystemFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "System/Library/Frameworks" }) });
+                exe.root_module.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "usr/include" }) });
+                exe.root_module.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "usr/lib" }) });
+            }
             exe.root_module.linkFramework("WebKit", .{});
             exe.root_module.linkFramework("AppKit", .{});
         },

@@ -257,10 +257,11 @@ jobs:
           node-version: lts/*
           cache: npm
 
-      - name: Install Zig (build-time only; the app needs no runtime)
-        run: |
-          brew install zig
-          zig version
+      # Build-time only; the app needs no runtime. Pinned: std.Io and
+      # std.process still change between Zig releases.
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
 
       - name: Install npm dependencies
         run: npm ci

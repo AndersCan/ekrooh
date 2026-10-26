@@ -37,6 +37,7 @@ const bundleDir = path.join(appDir, 'dist/Ekrooh.app');
 const resources = path.join(bundleDir, 'Contents/Resources');
 const macosDir = path.join(bundleDir, 'Contents/MacOS');
 
+const minMacos = '12.0';
 const hosts = { arm64: 'darwin-arm64', x64: 'darwin-x64' };
 const host = hosts[process.arch];
 if (process.platform !== 'darwin' || !host) {
@@ -98,7 +99,22 @@ cpSync(path.join(webBuildOut, 'assets'), path.join(webAssets, 'assets'), {
 });
 
 console.log('Building the Zig host...');
-run('zig', ['build', '-Doptimize=ReleaseSafe'], appDir);
+// An explicit target pins the deployment target to LSMinimumSystemVersion
+// below; a native build would stamp the build machine's macOS as the minimum.
+const zigArch = { arm64: 'aarch64', x64: 'x86_64' }[process.arch];
+const sdk = execFileSync('xcrun', ['--show-sdk-path'], {
+  encoding: 'utf8',
+}).trim();
+run(
+  'zig',
+  [
+    'build',
+    '-Doptimize=ReleaseSafe',
+    `-Dtarget=${zigArch}-macos.${minMacos}`,
+    `-Dsdk=${sdk}`,
+  ],
+  appDir,
+);
 copyFileSync(
   path.join(appDir, 'zig-out/bin/ekrooh'),
   path.join(macosDir, 'ekrooh'),
@@ -117,7 +133,7 @@ writeFileSync(
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleShortVersionString</key><string>0.0.1</string>
-  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSMinimumSystemVersion</key><string>${minMacos}</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>
