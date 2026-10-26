@@ -17,6 +17,7 @@
 
 const std = @import("std");
 const Io = std.Io;
+const builtin = @import("builtin");
 const posix = std.posix;
 
 // webview/webview C API (core/include/webview/api.h). Declared by hand: the
@@ -70,7 +71,8 @@ fn run(init: std.process.Init) !u8 {
     // user-only, also when the dir already existed.
     const storage_dir = try Io.Dir.cwd().createDirPathOpen(io, opts.storage, .{ .permissions = .fromMode(0o700) });
     defer storage_dir.close(io);
-    try storage_dir.setPermissions(io, .fromMode(0o700));
+    // By path: on Linux the dir handle is O_PATH, which fchmod rejects (EBADF).
+    try Io.Dir.cwd().setFilePermissions(io, opts.storage, .fromMode(0o700), .{});
     try storage_dir.createDirPath(io, "cache");
 
     // One instance per storage dir. The flock follows the open file into the
@@ -287,6 +289,21 @@ fn shutdownBackend(io: Io, backend: *Backend, pid: posix.pid_t, stdin: Io.File, 
     supervisor.join();
 }
 
+/// macOS: `~/Library/Application Support/Ekrooh`. Linux: `$XDG_DATA_HOME/ekrooh`
+/// (absolute values only, per the XDG spec), else `~/.local/share/ekrooh`.
+fn defaultStorage(init: std.process.Init, arena: std.mem.Allocator) ![]const u8 {
+    if (builtin.os.tag != .macos) {
+        if (init.environ_map.get("XDG_DATA_HOME")) |xdg| {
+            if (std.fs.path.isAbsolute(xdg)) return std.fs.path.join(arena, &.{ xdg, "ekrooh" });
+        }
+    }
+    const home = init.environ_map.get("HOME") orelse return error.HomeNotSet;
+    return switch (builtin.os.tag) {
+        .macos => std.fs.path.join(arena, &.{ home, "Library", "Application Support", "Ekrooh" }),
+        else => std.fs.path.join(arena, &.{ home, ".local", "share", "ekrooh" }),
+    };
+}
+
 /// `--resources <dir>` / `--storage <dir>` (or `--flag=value`) / `--debug`.
 /// Defaults suit an `.app` bundle: resources next to `Contents/MacOS`, storage
 /// in Application Support. Arguments macOS itself may pass (`-psn_*`,
@@ -330,11 +347,13 @@ fn resolveOptions(init: std.process.Init, arena: std.mem.Allocator) !Options {
 
     if (resources == null) {
         const exe_dir = try std.process.executableDirPathAlloc(init.io, arena);
-        resources = try std.fs.path.resolve(arena, &.{ exe_dir, "..", "Resources" });
+        // `.app`: Contents/MacOS/ekrooh next to Contents/Resources.
+        // Linux tarball: bin/ekrooh next to resources/.
+        const res_dir = if (builtin.os.tag == .macos) "Resources" else "resources";
+        resources = try std.fs.path.resolve(arena, &.{ exe_dir, "..", res_dir });
     }
     if (storage == null) {
-        const home = init.environ_map.get("HOME") orelse return error.HomeNotSet;
-        storage = try std.fs.path.join(arena, &.{ home, "Library", "Application Support", "Ekrooh" });
+        storage = try defaultStorage(init, arena);
     }
     // The child runs with its own cwd, so everything handed to it is absolute.
     const cwd = try std.process.currentPathAlloc(init.io, arena);

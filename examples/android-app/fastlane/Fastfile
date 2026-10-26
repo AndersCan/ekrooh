@@ -1,0 +1,32 @@
+# EXAMPLE ONLY. Copy into your own app and replace the placeholders.
+# Ekrooh owns the build prerequisites (Gradle runs build:web / build:core);
+# keystore, applicationId and Play upload are app decisions.
+
+default_platform(:android)
+
+REPO_ROOT = File.expand_path('../../..', __dir__)
+
+platform :android do
+  desc 'Fetch Bare Kit prebuilds (required before any Gradle build)'
+  lane :prepare do
+    sh("cd #{REPO_ROOT} && npm run prebuilds")
+  end
+
+  desc 'Build a debug APK'
+  lane :build do
+    prepare
+    gradle(project_dir: REPO_ROOT, task: ':examples:android-app:assembleDebug')
+  end
+
+  desc 'Build a signed release bundle and upload to Play internal track'
+  lane :beta do
+    prepare
+    # Provide your own keystore via gradle properties or env vars.
+    gradle(project_dir: REPO_ROOT, task: ':examples:android-app:bundleRelease')
+    # upload_to_play_store(
+    #   track: 'internal',
+    #   json_key_data: ENV['PLAY_JSON_KEY'],
+    #   aab: lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH],
+    # )
+  end
+end

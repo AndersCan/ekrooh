@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Smoke test for the built macOS desktop app (`npm run build:desktop` first).
+ * Smoke test for the built desktop app (macOS .app or Linux tarball dir) (`npm run build:desktop` first).
  *
  * Launches TWO host instances side by side with separate storage dirs and
  * asserts, for each:
@@ -36,9 +36,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const app = path.join(root, 'examples/desktop-app/dist/Ekrooh.app/Contents');
-const host = path.join(app, 'MacOS/ekrooh');
-const bare = path.join(app, 'Resources/bare');
+const dist = path.join(root, 'examples/desktop-app/dist');
+const layout =
+  process.platform === 'darwin'
+    ? { dir: 'Ekrooh.app/Contents', host: 'MacOS', res: 'Resources' }
+    : {
+        dir: `ekrooh-linux-${process.arch}`,
+        host: 'bin',
+        res: 'resources',
+      };
+const host = path.join(dist, layout.dir, layout.host, 'ekrooh');
+const bare = path.join(dist, layout.dir, layout.res, 'bare');
 
 /** How long the page gets to log in once the webview has connected. */
 const redeemGraceMs = 5_000;

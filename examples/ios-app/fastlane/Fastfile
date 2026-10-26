@@ -1,0 +1,37 @@
+# EXAMPLE ONLY. Copy into your own app and replace the placeholders.
+# Ekrooh owns the build prerequisites (see `prepare`); signing, bundle IDs and
+# store upload are app decisions and are deliberately not configured here.
+
+default_platform(:ios)
+
+REPO_ROOT = File.expand_path('../../..', __dir__)
+
+platform :ios do
+  desc 'Build the Bare core, web assets and native addons the Xcode project needs'
+  lane :prepare do
+    sh("cd #{REPO_ROOT} && npm run prebuilds && npm run build:ios")
+    sh('cd .. && xcodegen generate')
+  end
+
+  desc 'Run the host XCTest + UI tests on the simulator'
+  lane :test do
+    sh("cd #{REPO_ROOT} && npm run test:ios")
+  end
+
+  desc 'Build a signed archive and upload to TestFlight (needs your signing + API key)'
+  lane :beta do
+    prepare
+    # Replace with your own signing setup, e.g. `match(type: 'appstore')`.
+    # api_key = app_store_connect_api_key(
+    #   key_id: ENV['ASC_KEY_ID'],
+    #   issuer_id: ENV['ASC_ISSUER_ID'],
+    #   key_content: ENV['ASC_KEY_CONTENT'],
+    # )
+    build_app(
+      project: 'ios-app.xcodeproj',
+      scheme: 'ios-app',
+      export_method: 'app-store',
+    )
+    # upload_to_testflight(api_key: api_key)
+  end
+end
