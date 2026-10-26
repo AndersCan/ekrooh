@@ -58,7 +58,12 @@ jobs:
         # so a partial release can be re-run after a failed later step.
         # npm refuses prerelease versions without an explicit dist-tag: derive
         # it from the version (beta/alpha/rc → that identifier, stable → latest).
+        # Drop the node_modules/@ekrooh/bare -> ../.. self-link (from the
+        # consumer-basic workspace's file:../.. dep) first: npm's arborist
+        # crashes on it while packing ("Cannot read properties of null
+        # (reading 'edgesOut')"), and nothing after the gates needs it.
         run: |
+          rm -f node_modules/@ekrooh/bare
           VERSION=$(node -e "console.log(require('./package.json').version)")
           if npm view "@ekrooh/bare@$VERSION" version >/dev/null 2>&1; then
             echo "npm: @ekrooh/bare@$VERSION already published — skipping"
