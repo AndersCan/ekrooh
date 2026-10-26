@@ -1,6 +1,7 @@
 import { MessageType } from '../messages';
 import { BareRuntimeContext } from '../messages/create-bare-runtime-context';
 import { encodeResponse } from '../messages/encode-response';
+import { createInboundGate } from '../messages/backpressure';
 import { createFrameDecoder } from '../messages/framing';
 import type { MessageHeader, MessageProtocol } from '../messages';
 import type { LoopbackServer } from './static-file-server';
@@ -13,6 +14,9 @@ function toUint8Array(data: unknown): Uint8Array {
 
 /** Envelope encoder bound to a loopback server's connected protocol socket —
  * the server-initiated (backend → web) push seam. */
+/** Routed calls pending on one socket before it stops being read. */
+const MAX_PENDING_ROUTES = 32;
+
 export type LoopbackPush = (
   header: MessageHeader,
   payload?: Uint8Array | ArrayBuffer | null,
@@ -54,6 +58,15 @@ export function attachWebSocketProtocol(
     // concurrent data events can never interleave on a shared buffer. Calls
     // then route concurrently, so a slow call never delays the ones behind it.
     const decoder = createFrameDecoder(protocol);
+    // Stop reading while too much routed work is pending, so a fast sender
+    // cannot queue calls faster than they complete. Not applied to the host
+    // IPC channel: a pending host call waits for responses on that same stream.
+    const gate = createInboundGate({
+      high: MAX_PENDING_ROUTES,
+      low: MAX_PENDING_ROUTES / 2,
+      pause: () => socket.pause?.(),
+      resume: () => socket.resume?.(),
+    });
 
     socket.on('data', (raw) => {
       const data = toUint8Array(raw);
@@ -75,7 +88,7 @@ export function attachWebSocketProtocol(
       if (messages.length === 0) return;
 
       for (const parsed of messages) {
-        pluginRouter
+        const work = pluginRouter
           .route(parsed.header, parsed.payload)
           .then((pluginResponse) => {
             if (pluginResponse) {
@@ -89,6 +102,7 @@ export function attachWebSocketProtocol(
             const message = err instanceof Error ? err.message : String(err);
             console.error('Error handling WebSocket message:', message);
           });
+        gate.track(work);
       }
     });
 

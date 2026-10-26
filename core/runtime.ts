@@ -179,6 +179,9 @@ export type WorkletRuntimeOptions = {
   /** Minimum gap (ms) before an accepted protocol socket may be replaced by a
    * new authenticated one. Defaults to 1s. */
   wsReplaceMinIntervalMs?: number;
+  /** Bytes queued behind a protocol socket whose reader stopped reading before
+   * server pushes are dropped (newest first). Defaults to 2 MiB. */
+  wsMaxQueuedBytes?: number;
   /** Ring capacity for the `core.logs` capture store (retention knob; the
    * rotating file sink is a consumer/app decision). Defaults to 500. */
   logsCapacity?: number;
@@ -276,6 +279,7 @@ export function createWorkletRuntime(
     wsIdleTimeoutMs: options.wsIdleTimeoutMs,
     wsDeadPeerTimeoutMs: options.wsDeadPeerTimeoutMs,
     wsReplaceMinIntervalMs: options.wsReplaceMinIntervalMs,
+    wsMaxQueuedBytes: options.wsMaxQueuedBytes,
   });
 
   // `core.logs`: the worklet capture seam (console interception), the shared
