@@ -190,7 +190,7 @@ jobs:
             adb logcat -c
             ./gradlew :examples:android-app:connectedDebugAndroidTest || { adb logcat -d -t 1500 > logcat.txt; grep -iE "fatal|crash|signal|abort|dlopen|UnsatisfiedLink|bare|p2p" logcat.txt | tail -120; exit 1; }
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: android-emulator-reports
@@ -298,7 +298,7 @@ jobs:
       - name: Two instances launch, the webview redeems each nonce, no orphans
         run: xvfb-run -a npm run smoke:desktop
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ekrooh-linux-tarball
           path: examples/desktop-app/dist/ekrooh-linux-*.tar.gz*
