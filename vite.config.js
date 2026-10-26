@@ -52,6 +52,9 @@ export default defineConfig({
       exclude: [
         'core/main.core.ts',
         'core/main.core.gen.js',
+        'core/desktop.core.ts',
+        'core/desktop.core.gen.js',
+        'core/install-web-crypto.ts',
         'core/harness.core.ts',
         'core/harness.core.gen.js',
         // Dev p2p verification worklet (+ its esbuild bundle): verified via

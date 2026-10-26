@@ -245,6 +245,40 @@ jobs:
       - name: iOS XCTest + UI test on the simulator
         run: npm run test:ios
 
+  desktop:
+    name: desktop (macOS app smoke)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+
+      # Build-time only; the app needs no runtime. Pinned: std.Io and
+      # std.process still change between Zig releases.
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build the npm package (build:web resolves through dist)
+        run: npm run build:pkg
+
+      - name: Host unit tests
+        run: zig build test
+        working-directory: examples/desktop-app
+
+      - name: Build Ekrooh.app (host, packed backend, sidecar bare, web assets)
+        run: npm run build:desktop
+
+      - name: Two instances launch, the webview redeems each nonce, no orphans
+        run: npm run smoke:desktop
+
   # Supply-chain / vulnerability scanning (issue #66).
   dependency-scan:
     name: Dependency / vuln scan

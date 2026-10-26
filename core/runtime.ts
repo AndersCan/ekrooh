@@ -164,6 +164,11 @@ export type WorkletRuntimeOptions = {
   port?: number;
   /** Require the per-session token/cookie. Defaults to on in device mode. */
   auth?: boolean;
+  /** Write the credentials to `<storage>/handoff.json` for the host to read
+   * (auth on only). Defaults to true; a host that receives them over its own
+   * channel (the desktop host reads them from a pipe) sets false so the
+   * session token never touches disk. */
+  handoffFile?: boolean;
   /** Explicit device-mode override. Defaults to on whenever `storage` is set
    * (the on-device 3-arg contract); `resolveCliConfig` resolves it to false so
    * a dev backend keeps auth off + fixed port even with a storage dir. */
@@ -395,7 +400,7 @@ export function createWorkletRuntime(
     // handoff.json exists for the host to find origin/port/token; only device
     // mode (auth on) writes it — a dev backend with `auth: false` and a
     // storage dir for persistence must not leave a stale handoff behind.
-    if (auth && options.storage) {
+    if (auth && options.storage && options.handoffFile !== false) {
       try {
         fs.writeFileSync(
           path.join(options.storage, 'handoff.json'),

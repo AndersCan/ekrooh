@@ -243,6 +243,24 @@ describe('createWorkletRuntime', () => {
     runtime.close();
   });
 
+  it('handoffFile: false keeps the credentials off disk', async () => {
+    const quietStorage = path.join(root, 'no-handoff-storage');
+    fs.mkdirSync(quietStorage, { recursive: true });
+    // A stale file from an earlier run is still cleared.
+    fs.writeFileSync(path.join(quietStorage, 'handoff.json'), '{}');
+    const runtime = createWorkletRuntime({
+      webAssets: webDir,
+      storage: quietStorage,
+      handoffFile: false,
+    });
+
+    const creds = await runtime.start();
+    expect(creds.token.length).toBeGreaterThan(0);
+    expect(fs.existsSync(path.join(quietStorage, 'handoff.json'))).toBe(false);
+
+    runtime.close();
+  });
+
   it('dev mode: auth off, no handoff file', async () => {
     const runtime = createWorkletRuntime({ webAssets: webDir, port: 0 });
     expect(runtime.config.deviceMode).toBe(false);
