@@ -16,7 +16,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   Cross-origin dev pages must be listed in `allowedOrigins` (CLI `origin=`).
 - **Secure defaults** (`@ekrooh/bare/runtime`): `createWorkletRuntime`
   defaults to device mode (auth on, ephemeral port) whether or not `storage` is
-  set, and `resolveCliConfig` keeps those defaults unless `mode=dev` is passed.
+  set, and `resolveCliConfig` keeps those defaults unless `mode=dev` is passed
+  (`auth=off` without `mode=dev` is ignored with a warning).
   The desktop sidecar forces auth on. A broken host configuration no longer
   falls back to an unauthenticated dev server.
 - **Nonce-only login**: `POST /login` no longer accepts the raw session token,
@@ -27,12 +28,19 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - **No error detail in responses**: a throwing route or handler answers a bare
   `500 Internal Server Error`; the cause goes to the log.
 - **Tighter headers**: the session cookie is `SameSite=Strict`; HTML
-  `connect-src` names the one protocol socket instead of any `ws:` host.
+  `connect-src` names the one protocol socket instead of any `ws:` host, and
+  the policy adds `object-src 'none'`, `base-uri 'none'`, `form-action 'self'`
+  and `frame-ancestors 'none'`. Mounted session files (media) are served with a
+  sandboxing CSP so a hostile file opened as a document cannot run script at
+  the app origin. Every file response sends `X-Content-Type-Options: nosniff`.
 - **Protocol socket**: an `error` on the WebSocket (a peer reset) is contained
   even when no connection handler listens, instead of crashing the worklet;
   inbound messages are capped at the protocol's 16 MiB frame size.
 - **Log ingest**: `POST /logs` records every entry as `source: 'web'` and
-  validates `level`/`tag`; a malformed `GET /logs` query is a 400.
+  validates `level`/`tag`; a non-object body or a malformed `GET /logs` query
+  is a 400, and only an oversized body is reported as 413.
+- **Mount paths** are normalized like request paths (`/media/a%20b/` and
+  `/media/a b` name one mount); a mount path no request could match throws.
 
 ### Changed
 

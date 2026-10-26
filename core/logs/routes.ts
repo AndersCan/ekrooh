@@ -13,7 +13,7 @@ type LogBatchEntry = {
 type LogIngestPayload = {
   /** Ignored: every HTTP ingest is recorded as `web`. */
   source?: unknown;
-  entries: LogBatchEntry[];
+  entries?: unknown;
 };
 
 const LOG_LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error'];
@@ -103,53 +103,74 @@ export function registerLogRoutes(
   });
 
   server.registerRoute('POST', '/logs', (req, res) => {
-    void collectRequestBody(req, 1024 * 1024)
-      .then((body) => {
-        let parsed: LogIngestPayload;
-        try {
-          parsed = JSON.parse(body) as LogIngestPayload;
-        } catch {
-          res.writeHead(400, {
+    collectRequestBody(req, 1024 * 1024)
+      .then(
+        (body) => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            parsed = null;
+          }
+          if (typeof parsed !== 'object' || parsed === null) {
+            res.writeHead(400, {
+              'Content-Type': 'text/plain',
+              'Referrer-Policy': 'no-referrer',
+            });
+            res.end('Bad request');
+            return;
+          }
+          // Everything that arrives over HTTP is page output. `backend` entries
+          // come only from the worklet's own console capture, so a page cannot
+          // write lines that read as backend diagnostics.
+          const source: LogSource = 'web';
+          const entries = (parsed as LogIngestPayload).entries;
+          const batch: unknown[] = Array.isArray(entries) ? entries : [];
+          let accepted = 0;
+          for (const item of batch) {
+            if (typeof item !== 'object' || item === null) continue;
+            const raw = item as Partial<LogBatchEntry>;
+            if (typeof raw.message !== 'string') continue;
+            store.append({
+              ts: Date.now(),
+              level: isLogLevel(raw.level) ? raw.level : 'info',
+              source,
+              tag: typeof raw.tag === 'string' ? raw.tag : undefined,
+              message: raw.message,
+            });
+            accepted++;
+          }
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Referrer-Policy': 'no-referrer',
+            'Cache-Control': 'no-store',
+          });
+          res.end(JSON.stringify({ accepted }));
+        },
+        (err: unknown) => {
+          // An oversized ingest is a 413, never an OOM DoS — drop the batch and
+          // move on (the worklet is single-tenant, so nothing else can be hurt).
+          const message = err instanceof Error ? err.message : String(err);
+          console.error('Discarding oversized /logs batch:', message);
+          res.writeHead(413, {
             'Content-Type': 'text/plain',
             'Referrer-Policy': 'no-referrer',
           });
-          res.end('Bad request');
+          res.end('Request Entity Too Large');
+        },
+      )
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[loopback] POST /logs failed: ${message}`);
+        if (res.headersSent) {
+          res.destroy();
           return;
         }
-        // Everything that arrives over HTTP is page output. `backend` entries
-        // come only from the worklet's own console capture, so a page cannot
-        // write lines that read as backend diagnostics.
-        const source: LogSource = 'web';
-        const batch = Array.isArray(parsed.entries) ? parsed.entries : [];
-        let accepted = 0;
-        for (const raw of batch) {
-          if (!raw || typeof raw.message !== 'string') continue;
-          store.append({
-            ts: Date.now(),
-            level: isLogLevel(raw.level) ? raw.level : 'info',
-            source,
-            tag: typeof raw.tag === 'string' ? raw.tag : undefined,
-            message: raw.message,
-          });
-          accepted++;
-        }
-        res.writeHead(200, {
-          'Content-Type': 'application/json',
-          'Referrer-Policy': 'no-referrer',
-          'Cache-Control': 'no-store',
-        });
-        res.end(JSON.stringify({ accepted }));
-      })
-      .catch((err) => {
-        // An oversized ingest is a 413, never an OOM DoS — drop the batch and
-        // move on (the worklet is single-tenant, so nothing else can be hurt).
-        const message = err instanceof Error ? err.message : String(err);
-        console.error('Discarding oversized /logs batch:', message);
-        res.writeHead(413, {
+        res.writeHead(500, {
           'Content-Type': 'text/plain',
           'Referrer-Policy': 'no-referrer',
         });
-        res.end('Request Entity Too Large');
+        res.end('Internal Server Error');
       });
   });
 }

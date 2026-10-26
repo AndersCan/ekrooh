@@ -185,8 +185,19 @@ describe('resolveCliConfig', () => {
       port: 9000,
       host: '0.0.0.0',
     });
-    expect(resolveCliConfig(['auth=off'])).toEqual({ auth: false });
-    expect(resolveCliConfig(['auth=0'])).toEqual({ auth: false });
+    expect(resolveCliConfig(['mode=dev', 'auth=off'])).toMatchObject({
+      auth: false,
+    });
+  });
+
+  it('ignores auth=off outside dev mode', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(resolveCliConfig(['auth=off'])).toEqual({});
+    expect(resolveCliConfig(['auth=0', 'port=0'])).toEqual({ port: 0 });
+    expect(warn).toHaveBeenCalledWith(
+      '[bare] ignoring auth=off without mode=dev',
+    );
+    warn.mockRestore();
   });
 
   it('collects repeatable origin= tokens', () => {

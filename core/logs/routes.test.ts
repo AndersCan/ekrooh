@@ -161,6 +161,33 @@ describe('registerLogRoutes', () => {
     expect(bad.status).toBe(400);
   });
 
+  it('answers a non-object body with 400 and records page entries as web', async () => {
+    store.clear();
+    for (const body of ['null', '42', '"text"']) {
+      const r = await request('/logs', { method: 'POST', body });
+      expect(r.status).toBe(400);
+    }
+    const spoof = await request('/logs', {
+      method: 'POST',
+      body: JSON.stringify({
+        source: 'backend',
+        entries: [{ message: 'fake', level: 'fatal', tag: 7 }, null, 5],
+      }),
+    });
+    expect(JSON.parse(spoof.body)).toEqual({ accepted: 1 });
+    expect(store.view()[0]).toMatchObject({
+      source: 'web',
+      level: 'info',
+      tag: undefined,
+      message: 'fake',
+    });
+  });
+
+  it('answers a malformed GET /logs query with 400', async () => {
+    const r = await request('/logs?tail=%E0%A4%A');
+    expect(r.status).toBe(400);
+  });
+
   it('refuses an oversized /logs body over a real socket and ingests nothing', async () => {
     store.clear();
     const big = JSON.stringify({

@@ -39,7 +39,7 @@ ADR 0003 hardened the loopback server for device mode. Three gaps remained:
 - **Device mode is the default.** `createWorkletRuntime` defaults
   `deviceMode` to `true` (auth on, ephemeral port). Dev mode is chosen only by
   `deviceMode: false` or the CLI token `mode=dev`. `resolveCliConfig` keeps the
-  device defaults without `mode=dev`. `core/desktop.core.ts` forces
+  device defaults without `mode=dev` and ignores `auth=off` there. `core/desktop.core.ts` forces
   `deviceMode: true, auth: true`.
 - **Only the bootstrap nonce (or a live session) logs a page in.** `/login`
   no longer accepts the raw token; the web transport no longer reads

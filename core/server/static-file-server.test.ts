@@ -590,7 +590,7 @@ describe('loopback server HTTP', () => {
     const r = await request('/');
     expect(r.status).toBe(200);
     expect(r.headers['content-security-policy']).toBe(
-      `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:${port}`,
+      `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:${port}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
     );
     expect(firstHeader(r.headers, 'access-control-allow-origin')).toBeNull();
   });
@@ -640,6 +640,30 @@ describe('loopback server HTTP', () => {
       fs.rmSync(path.join(dir, 'leak.txt'));
       fs.rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  it('matches a mount registered with an encoded or trailing-slash path', async () => {
+    server!.mount('/media/a%20b/', path.join(dir, 'app.js'));
+    try {
+      const r = await request('/media/a%20b', { headers: { cookie } });
+      expect(r.status).toBe(200);
+    } finally {
+      server!.unmount('/media/a b');
+    }
+    const gone = await request('/media/a%20b', { headers: { cookie } });
+    expect(gone.status).toBe(404);
+    expect(() => server!.mount('/media/../x', 'x')).toThrow(
+      /invalid mount path/,
+    );
+  });
+
+  it('sandboxes mounted session files opened as a document', async () => {
+    const r = await request('/media/sample.png', { headers: { cookie } });
+    expect(r.status).toBe(200);
+    expect(r.headers['content-security-policy']).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    );
+    expect(r.headers['x-content-type-options']).toBe('nosniff');
   });
 
   it('answers a throwing route with a bare 500 that leaks no detail', async () => {

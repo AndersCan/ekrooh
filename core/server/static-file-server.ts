@@ -270,6 +270,17 @@ export function pathSegments(target: string): string[] | null {
   return segments;
 }
 
+/** The key a mount path is stored under: the same decoded, normalized form a
+ * request path is matched in, so `/media/a%20b` and `/media/a b/` name one
+ * mount. A path no request could ever match is a programming error. */
+function mountKey(mountPath: string): string {
+  const segments = pathSegments(mountPath);
+  if (segments === null) {
+    throw new Error(`invalid mount path: '${mountPath}'`);
+  }
+  return `/${segments.join('/')}`;
+}
+
 /** Whether `candidate` is `root` or lies below it. Both must be absolute,
  * normalized paths. */
 function isWithin(root: string, candidate: string): boolean {
@@ -344,23 +355,26 @@ export function createLoopbackServer(
     // /login runs before the credential check, so bound the body a local
     // client can pump at the worklet: an oversized body is a 413, never an
     // OOM.
-    void collectRequestBody(req, 4096)
-      .then((body) => {
-        const verdict = gate.login(body, req.headers);
-        if (!verdict.ok) {
-          writeError(res, verdict.status, 'Unauthorized');
-          return;
-        }
-        const headers: Record<string, string> = {
-          'Content-Type': 'text/plain',
-          'Cache-Control': 'no-store',
-          'Referrer-Policy': 'no-referrer',
-        };
-        if (verdict.cookie !== null) headers['Set-Cookie'] = verdict.cookie;
-        res.writeHead(200, headers);
-        res.end('ok');
-      })
-      .catch(() => writeError(res, 413, 'Request Entity Too Large'));
+    collectRequestBody(req, 4096)
+      .then(
+        (body) => {
+          const verdict = gate.login(body, req.headers);
+          if (!verdict.ok) {
+            writeError(res, verdict.status, 'Unauthorized');
+            return;
+          }
+          const headers: Record<string, string> = {
+            'Content-Type': 'text/plain',
+            'Cache-Control': 'no-store',
+            'Referrer-Policy': 'no-referrer',
+          };
+          if (verdict.cookie !== null) headers['Set-Cookie'] = verdict.cookie;
+          res.writeHead(200, headers);
+          res.end('ok');
+        },
+        () => writeError(res, 413, 'Request Entity Too Large'),
+      )
+      .catch((err: unknown) => writeInternalError(res, 'POST /login', err));
   }
 
   /** Resolves a request path to a file mount, or a directory mount + the path
@@ -460,8 +474,15 @@ export function createLoopbackServer(
    * `style-src` needs `'unsafe-inline'` for the bundled web app's inline
    * styles. */
   function cspFor(socketSource: string): string {
-    return `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${socketSource}`;
+    return `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${socketSource}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
   }
+
+  /** Policy for mounted session files (media). They are loaded by `<img>` and
+   * `<video>`, where a response CSP has no effect; it only bites when one is
+   * opened as a document, so a hostile file (an SVG with script) runs in an
+   * opaque, script-less sandbox instead of the app origin. */
+  const MOUNTED_FILE_CSP =
+    "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 
   function serveFile(
     req: HTTPIncomingMessage,
@@ -469,6 +490,7 @@ export function createLoopbackServer(
     filePath: string,
     knownStat?: ResolvedFile['stat'],
     cache: CachePolicy = 'no-store',
+    sandboxed = false,
   ) {
     let stat: ReturnType<typeof fs.statSync>;
     if (knownStat) {
@@ -489,10 +511,16 @@ export function createLoopbackServer(
       return;
     }
     const contentType = mimeTypeFor(filePath);
-    const cspHeader: Record<string, string> =
-      contentType === 'text/html'
-        ? { 'Content-Security-Policy': cspFor(gate.socketSource(req.headers)) }
-        : {};
+    const cspHeader: Record<string, string> = {
+      'X-Content-Type-Options': 'nosniff',
+      ...(sandboxed
+        ? { 'Content-Security-Policy': MOUNTED_FILE_CSP }
+        : contentType === 'text/html'
+          ? {
+              'Content-Security-Policy': cspFor(gate.socketSource(req.headers)),
+            }
+          : {}),
+    };
     const range = parseRange(req.headers['range'], stat.size);
     if (range) {
       res.writeHead(206, {
@@ -637,7 +665,7 @@ export function createLoopbackServer(
     if (mount.kind === 'file') {
       // Mounted files (e.g. media) can be replaced under the same URL and
       // are session-gated: never cacheable.
-      serveFile(req, res, mount.filePath);
+      serveFile(req, res, mount.filePath, undefined, 'no-store', true);
       return;
     }
     const resolved = resolveDirFile(mount, headers);
@@ -715,15 +743,16 @@ export function createLoopbackServer(
       };
     },
     mount(path, filePath) {
-      fileMounts.set(path, filePath);
+      fileMounts.set(mountKey(path), filePath);
     },
     unmount(path) {
-      fileMounts.delete(path);
+      fileMounts.delete(mountKey(path));
     },
     mountDir(prefix, dirPath, opts) {
-      dirMounts.set(prefix, dirPath);
-      if (opts?.public) publicDirMounts.add(prefix);
-      else publicDirMounts.delete(prefix);
+      const key = mountKey(prefix);
+      dirMounts.set(key, dirPath);
+      if (opts?.public) publicDirMounts.add(key);
+      else publicDirMounts.delete(key);
     },
     onConnection: (handler) => slot.onConnection(handler),
     registerRoute(method, path, handler) {

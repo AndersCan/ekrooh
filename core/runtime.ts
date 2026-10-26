@@ -90,7 +90,7 @@ export function resolveWorkletConfig(): WorkletRuntimeOptions {
  * `bootstrap=127.0.0.1:49737`) are ignored and stay consumer-owned.
  *
  * Without `mode=dev` the result keeps the secure device defaults (auth on, an
- * ephemeral port). `mode=dev` selects the dev backend: `deviceMode: false`,
+ * ephemeral port), and `auth=off` is ignored with a warning. `mode=dev` selects the dev backend: `deviceMode: false`,
  * `auth: false`, `port: 8080`, each overridable by a token. Returns `{}` when
  * no labeled tokens are present.
  */
@@ -151,9 +151,14 @@ export function resolveCliConfig(
 
   if (!matched) return {};
   if (allowedOrigins.length > 0) parsed.allowedOrigins = allowedOrigins;
-  return dev
-    ? { deviceMode: false, auth: false, port: 8080, ...parsed }
-    : parsed;
+  if (dev) return { deviceMode: false, auth: false, port: 8080, ...parsed };
+  // Outside dev mode the command line can only keep auth on: an `auth=off`
+  // left in a launch script must not quietly open a device-mode server.
+  if (parsed.auth === false) {
+    console.warn('[bare] ignoring auth=off without mode=dev');
+    delete parsed.auth;
+  }
+  return parsed;
 }
 
 export type WorkletRuntimeOptions = {

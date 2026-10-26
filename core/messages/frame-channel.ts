@@ -102,7 +102,14 @@ export function createFrameChannel(options: FrameChannelOptions): FrameChannel {
       try {
         bytes = toBytes(chunk);
       } catch (err) {
-        malformed(err instanceof Error ? err.message : String(err));
+        const reason = err instanceof Error ? err.message : String(err);
+        if (health === null) {
+          malformed(reason);
+          return;
+        }
+        // A stray non-binary chunk on a stream with no reconnect seam carries
+        // no bytes of a frame, so the partial frame already buffered stays.
+        console.error(`${name} non-binary chunk dropped: ${reason}`);
         return;
       }
       if (bytes.byteLength === 0) return;

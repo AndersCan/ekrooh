@@ -97,16 +97,16 @@ selects the dev backend (auth off, fixed port 8080, `deviceMode: false`).
 `resolveWorkletConfig()` tries the on-device positional shape first, then falls
 back to these tokens — one entry serves both.
 
-| Token        | Maps to          | Notes                                                      |
-| ------------ | ---------------- | ---------------------------------------------------------- |
-| `webassets=` | `webAssets`      | built web app dir served at `/` same-origin                |
-| `storage=`   | `storage`        | durable app-sandbox (persists across runs)                 |
-| `cache=`     | `cache`          | ephemeral app-sandbox                                      |
-| `mode=`      | `deviceMode`     | `dev` selects the dev backend; default `device`            |
-| `port=`      | `port`           | dev default `8080`; invalid values warn + ignore           |
-| `host=`      | `host`           | bind address, default `127.0.0.1`                          |
-| `auth=`      | `auth`           | `on`/`off`/`true`/`false`/`1`/`0`; default on (off in dev) |
-| `origin=`    | `allowedOrigins` | repeatable; an extra allowed page origin                   |
+| Token        | Maps to          | Notes                                                                                           |
+| ------------ | ---------------- | ----------------------------------------------------------------------------------------------- |
+| `webassets=` | `webAssets`      | built web app dir served at `/` same-origin                                                     |
+| `storage=`   | `storage`        | durable app-sandbox (persists across runs)                                                      |
+| `cache=`     | `cache`          | ephemeral app-sandbox                                                                           |
+| `mode=`      | `deviceMode`     | `dev` selects the dev backend; default `device`                                                 |
+| `port=`      | `port`           | dev default `8080`; invalid values warn + ignore                                                |
+| `host=`      | `host`           | bind address, default `127.0.0.1`                                                               |
+| `auth=`      | `auth`           | `on`/`off`/`true`/`false`/`1`/`0`; default on (off in dev); `off` is ignored without `mode=dev` |
+| `origin=`    | `allowedOrigins` | repeatable; an extra allowed page origin                                                        |
 
 ```bash
 bare worklet/app.core.js mode=dev origin=http://localhost:5173 \

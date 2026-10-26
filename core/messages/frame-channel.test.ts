@@ -137,6 +137,27 @@ describe('createFrameChannel', () => {
     expect(close).toHaveBeenCalled();
   });
 
+  it('keeps a buffered partial frame when a non-binary chunk arrives (tolerate)', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const write = vi.fn();
+    const channel = createFrameChannel({
+      name: '[ipc]',
+      protocol,
+      router: echoRouter(),
+      write,
+      onMalformed: { kind: 'tolerate' },
+    });
+    const frame = invoke('kept');
+    channel.push(frame.subarray(0, 4));
+    channel.push('stray');
+    channel.push(frame.subarray(4));
+    await flush();
+    expect(responseIds(write)).toEqual(['kept']);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('[ipc] non-binary chunk dropped'),
+    );
+  });
+
   it('tolerates a burst of malformed frames, then stops parsing for good', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const router = echoRouter();
