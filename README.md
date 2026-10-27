@@ -4,6 +4,7 @@
 web, and desktop.
 
 [![CI](https://github.com/AndersCan/ekrooh/actions/workflows/test.yml/badge.svg)](https://github.com/AndersCan/ekrooh/actions/workflows/test.yml)
+[![Release](https://img.shields.io/github/v/release/AndersCan/ekrooh)](https://github.com/AndersCan/ekrooh/releases/latest)
 
 The boring bootstrap for cross-platform apps on the Bare runtime (holepunch): a
 binary wire protocol, plugin kernel, RPC messenger, transports, and native host
