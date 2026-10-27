@@ -13,23 +13,23 @@ here is the exact flow.
    `[<webAssets>, <storage>, <cache>]`. `webAssets` is your built web app;
    `storage` is durable (photos, p2p corestore); `cache` is ephemeral.
 2. The worklet binds `127.0.0.1` on an **ephemeral** port and writes
-   `handoff.json` (`{ origin, port, token, bootstrap }`) into `storage`.
-3. The host polls for `handoff.json`. It keeps **`token`** for its own IPC
-   needs and injects **only `bootstrap`** (the one-time nonce) into the page
-   **before** any page script runs:
+   `handoff.json` (`{ origin, port, bootstrap }`) into `storage`. The session
+   token is never written.
+3. The host polls for `handoff.json`, injects `bootstrap` (the one-time nonce)
+   into the page **before** any page script runs, and deletes the file:
 
    ```js
    window.__ekrooh = { bootstrap: '<bootstrap>' };
    window.BareShell = true;
    ```
 
-   Never inject the raw `token` into the page — page JS (third-party scripts, a
-   consumer plugin dispatch handler) could read it and mint authorized requests
-   to every other gated resource.
+   The page never sees the session token: page JS (third-party scripts, a
+   consumer plugin dispatch handler) could otherwise read it and mint
+   authorized requests to every other gated resource.
 
 4. The host loads `http://127.0.0.1:<port>/index.html`.
 5. The page's WebSocket transport reads `window.__ekrooh.bootstrap`, calls
-   `POST /login` once (the nonce is single-use), gets the `bare_session`
+   `POST /login` once (the nonce is single-use), gets the `bare_session_<port>`
    cookie, and connects to `ws://127.0.0.1:<port>` — same origin, so
    cookie-authenticated. The transport never places the credential in a URL.
 6. Media URLs returned by plugins are same-origin too — `<img>`/`fetch` ride
@@ -51,9 +51,9 @@ injected at `.atDocumentStart`.
 
 - `handoff.json` must be written to the **host-provided** sandbox dir, never a
   shared location.
-- The **page** receives only a one-time bootstrap nonce; the real token stays
-  in `handoff.json` for the host only, and is never accepted as a `/login`
-  body. The cookie is `HttpOnly; SameSite=Strict`.
+- The **page** receives only a one-time bootstrap nonce. The session token
+  stays inside the worklet (`runtime.start()` returns it) and is never
+  accepted as a `/login` body. The cookie is `HttpOnly; SameSite=Strict`.
 - Non-browser clients use the `X-Bare-Token` header. There is no `?token=`
   URL fallback.
 - All loopback responses send `Referrer-Policy: no-referrer`.

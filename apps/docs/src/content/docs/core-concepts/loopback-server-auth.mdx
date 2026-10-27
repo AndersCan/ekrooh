@@ -9,18 +9,22 @@ web app at `/`, the media files mounted by plugins, and the framed-protocol
 WebSocket socket. On device it binds `127.0.0.1` on an ephemeral port, and
 every gated request is authorized by a per-session credential:
 
-1. The host starts the worklet, which writes `{ origin, port, token, bootstrap }`
-   to `handoff.json`. The host injects **only the one-time `bootstrap` nonce**
+1. The host starts the worklet, which writes `{ origin, port, bootstrap }` to
+   `handoff.json` (never the session token). The host injects **only the one-time `bootstrap` nonce**
    into the page (`window.__ekrooh = { bootstrap }`), never the raw token.
-2. The page exchanges the bootstrap nonce for a `bare_session` cookie via
-   `POST /login` (`HttpOnly; SameSite=Strict; Path=/`). The nonce is
+2. The page exchanges the bootstrap nonce for a `bare_session_<port>` cookie
+   via `POST /login` (`HttpOnly; SameSite=Strict; Path=/`). Cookies are scoped
+   to the host, not the port, so the port in the name keeps two loopback
+   servers sharing one cookie store from overwriting each other's session. The nonce is
    single-use: after the page redeems it, it is spent. The raw session token
    is never accepted as a login body.
 3. The cookie then authorizes `<img>`/`<video>`/`fetch` and the WebSocket
    upgrade. Non-browser clients use the `X-Bare-Token` header. There is **no**
    `?token=` query-param path — a token must never appear in a URL.
-4. The host keeps the real `token` from `handoff.json` for its own IPC needs
-   and loads `http://127.0.0.1:<port>/index.html`.
+4. The host loads `http://127.0.0.1:<port>/index.html` and deletes
+   `handoff.json`. A host that needs the session token for its own
+   `X-Bare-Token` calls gets it from `runtime.start()` inside the worklet, not
+   from disk.
 
 Every request, in every mode, must also pass the **origin rule**: its `Host`
 must name the bound server (`127.0.0.1`, `localhost` or `[::1]` on the bound

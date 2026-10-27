@@ -32,7 +32,7 @@ transport.send('INVOKE_REQUEST', {
   so it connects to `ws://<location.host>` — no mixed content, no custom scheme.
 - **Cookie bootstrap**: when the shell injected `window.__ekrooh = { bootstrap }`
   (a one-time nonce — never the raw token), the transport exchanges it for a
-  `bare_session` cookie via `POST /login` before opening the socket.
+  `bare_session_<port>` cookie via `POST /login` before opening the socket.
 - **Reconnect**: exponential backoff (250ms → 2s), 5 tries. No `?token=` URL
   fallback — a credential is never placed in a URL.
 - Browser dev is cross-origin — pass an explicit URL (`VITE_BARE_WS_URL`).

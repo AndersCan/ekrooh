@@ -110,23 +110,73 @@ describe('createProtocolSocketSlot', () => {
     expect(s.push(new Uint8Array([3]))).toBe(false);
   });
 
-  it('replaces the live socket, but not faster than the minimum interval', () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const limited = slot(60_000);
-    accept(limited);
-    const second = accept(limited);
-    expect(second.reject).toHaveBeenCalledWith(
-      expect.stringContaining('replacement rate limit'),
-    );
-    expect(ws.sockets).toHaveLength(1);
+  it('replaces the live socket, holding a replacement until the interval passes', () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const limited = slot(1_000);
+      accept(limited);
+      const second = accept(limited);
+      expect(second.reject).not.toHaveBeenCalled();
+      expect(ws.sockets).toHaveLength(1);
+
+      vi.advanceTimersByTime(1_000);
+      expect(ws.sockets).toHaveLength(2);
+      expect(ws.sockets[0].destroyed).toBe(true);
+      expect(second.reject).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
 
     const open = slot(0);
     accept(open);
     accept(open);
-    expect(ws.sockets[1].destroyed).toBe(true);
-    expect(ws.sockets[2].destroyed).toBe(false);
+    expect(ws.sockets[2].destroyed).toBe(true);
+    expect(ws.sockets[3].destroyed).toBe(false);
     open.push(new Uint8Array([9]));
-    expect(ws.sockets[2].written).toEqual([new Uint8Array([9])]);
+    expect(ws.sockets[3].written).toEqual([new Uint8Array([9])]);
+  });
+
+  it('answers a held upgrade superseded by a newer one with 429', () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const limited = slot(1_000);
+      accept(limited);
+      const held = accept(limited);
+      const newest = accept(limited);
+      expect(held.reject).toHaveBeenCalledWith(
+        'superseded by a newer upgrade',
+        429,
+      );
+      vi.advanceTimersByTime(1_000);
+      expect(newest.reject).not.toHaveBeenCalled();
+      expect(ws.sockets).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops a held upgrade whose peer hangs up, and close() destroys one', () => {
+    vi.useFakeTimers();
+    try {
+      const limited = slot(1_000);
+      accept(limited);
+      const gone = accept(limited);
+      gone.tcp.emit('close');
+      vi.advanceTimersByTime(1_000);
+      expect(ws.sockets).toHaveLength(1);
+
+      const closing = slot(1_000);
+      accept(closing);
+      const held = accept(closing);
+      closing.close();
+      expect(held.tcp.destroy).toHaveBeenCalled();
+      vi.advanceTimersByTime(1_000);
+      expect(ws.sockets).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects a failed handshake', () => {

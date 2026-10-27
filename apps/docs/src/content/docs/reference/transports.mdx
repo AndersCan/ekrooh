@@ -19,7 +19,7 @@ The transports subpath exports the UI-facing transport surface.
 
 - `url?` — default `ws://<location.host>`; browser dev passes
   `VITE_BARE_WS_URL` explicitly.
-- `login?` — default `true`: bootstrap the `bare_session` cookie via
+- `login?` — default `true`: bootstrap the `bare_session_<port>` cookie via
   `POST /login` when `window.__ekrooh.bootstrap` is present. The raw session
   token is never a login credential.
 - `maxRetries?` — default 5.

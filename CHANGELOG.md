@@ -9,6 +9,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- **Per-port session cookie**: the session cookie is now `bare_session_<port>`
+  (was `bare_session`). Cookies are scoped to the host, not the port, so two
+  loopback servers sharing one cookie store overwrote each other's session.
+- **No session token in `handoff.json`**: the file now holds
+  `{ origin, port, bootstrap }`. A host that read `token` from it gets it from
+  `runtime.start()` inside the worklet instead.
+
 - **Origin rule in every mode** (`core/server/loopback-gate.ts`): with auth
   off (the dev backend), the loopback server no longer accepts any `Host` or
   page `Origin`. A website open in the same browser could previously open the
@@ -50,6 +57,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   port 5173.
 - **BREAKING:** `getIPC()` returns `null` when there is no host (it returned
   `undefined` typed as the channel).
+- **BREAKING:** `handoff.json` no longer carries `token`, and the session
+  cookie is named `bare_session_<port>` (see Security).
+- A protocol socket upgrade inside the replacement interval
+  (`wsReplaceMinIntervalMs`) is held until the interval passes instead of being
+  dropped, so a quick reconnect no longer costs the page one of its 5 retries.
+  A refused upgrade is answered with its HTTP status (401, 403, or 429 for a
+  held upgrade superseded by a newer one) instead of a bare connection close.
 - The loopback server is split into the loopback gate (admission), the
   protocol socket slot (`core/server/protocol-socket.ts`) and the HTTP serving
   that remains in `static-file-server.ts`. The host IPC and the WebSocket share

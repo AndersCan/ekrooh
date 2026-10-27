@@ -80,7 +80,7 @@ const transport = createWebSocketTransport();
 
 On device the page is served by the loopback server, so the WebSocket defaults
 to the page's own origin (`ws://<location.host>`) and the injected
-`window.__ekrooh = { bootstrap }` (a one-time nonce) boots the `bare_session`
+`window.__ekrooh = { bootstrap }` (a one-time nonce) boots the `bare_session_<port>`
 cookie automatically — the raw token is never given to page JS. In browser
 dev, pass the backend URL explicitly:
 

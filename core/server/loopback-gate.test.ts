@@ -3,6 +3,7 @@ import type { HashOptions } from 'node:crypto';
 import {
   cookieSession,
   createLoopbackGate,
+  sessionCookieName,
   sessionNonce,
   tokenFromHeaders,
 } from './loopback-gate';
@@ -23,7 +24,7 @@ vi.mock('bare-crypto', async () => {
 const ORIGIN = 'http://127.0.0.1:4000';
 const HOST = '127.0.0.1:4000';
 const TOKEN = 'test-token';
-const COOKIE = `bare_session=${sessionNonce(TOKEN)}`;
+const COOKIE = `bare_session_4000=${sessionNonce(TOKEN)}`;
 
 function boundGate(
   options: { auth?: boolean; allowedOrigins?: string[] } = {},
@@ -43,11 +44,16 @@ describe('request header helpers', () => {
     expect(tokenFromHeaders({ authorization: 'nope' })).toBeNull();
   });
 
-  it('cookieSession reads bare_session from the Cookie header', () => {
-    expect(cookieSession({ cookie: 'a=1; bare_session=s3' })).toBe('s3');
-    expect(cookieSession({ cookie: 'bare_session=' })).toBe('');
-    expect(cookieSession({ cookie: 'a=1' })).toBeNull();
-    expect(cookieSession({})).toBeNull();
+  it('cookieSession reads the named cookie from the Cookie header', () => {
+    const name = sessionCookieName(4000);
+    expect(name).toBe('bare_session_4000');
+    expect(cookieSession({ cookie: 'a=1; bare_session_4000=s3' }, name)).toBe(
+      's3',
+    );
+    expect(cookieSession({ cookie: 'bare_session_4000=' }, name)).toBe('');
+    expect(cookieSession({ cookie: 'bare_session_4001=s3' }, name)).toBeNull();
+    expect(cookieSession({ cookie: 'a=1' }, name)).toBeNull();
+    expect(cookieSession({}, name)).toBeNull();
   });
 
   it('sessionNonce hashes so the raw token never appears in a cookie', () => {
@@ -128,7 +134,10 @@ describe('createLoopbackGate', () => {
       on.admitRequest({ host: HOST, 'x-bare-token': TOKEN }, 'gated'),
     ).toEqual({ ok: true });
     expect(
-      on.admitRequest({ host: HOST, cookie: `bare_session=${TOKEN}` }, 'gated'),
+      on.admitRequest(
+        { host: HOST, cookie: `bare_session_4000=${TOKEN}` },
+        'gated',
+      ),
     ).toMatchObject({ ok: false, status: 401 });
 
     const off = boundGate({ auth: false });
@@ -148,13 +157,13 @@ describe('createLoopbackGate', () => {
     const gate = boundGate();
     expect(gate.admitUpgrade({ host: HOST, origin: ORIGIN })).toMatchObject({
       status: 401,
-      reason: 'unauthorized (no bare_session cookie)',
+      reason: 'unauthorized (no bare_session_4000 cookie)',
     });
     expect(
       gate.admitUpgrade({
         host: HOST,
         origin: ORIGIN,
-        cookie: 'bare_session=x',
+        cookie: 'bare_session_4000=x',
       }),
     ).toMatchObject({
       status: 401,
@@ -193,6 +202,22 @@ describe('createLoopbackGate', () => {
     const nonce = gate.bootstrap();
     expect(gate.login('stale', { host: HOST, cookie: COOKIE }).ok).toBe(true);
     expect(gate.bootstrap()).toBe(nonce);
+  });
+
+  it('names the cookie after the bound port so sibling servers keep theirs', () => {
+    const other = createLoopbackGate({ auth: true, token: TOKEN });
+    other.bind('http://127.0.0.1:4001');
+    const login = other.login(other.bootstrap(), { host: '127.0.0.1:4001' });
+    expect(login).toMatchObject({
+      ok: true,
+      cookie: expect.stringMatching(/^bare_session_4001=/),
+    });
+    // The browser sends both servers' cookies to either port; each server
+    // reads only its own.
+    const both = `${COOKIE}; bare_session_4001=x`;
+    expect(
+      boundGate().admitUpgrade({ host: HOST, origin: ORIGIN, cookie: both }),
+    ).toEqual({ ok: true });
   });
 
   it('answers login without a cookie when auth is off', () => {
