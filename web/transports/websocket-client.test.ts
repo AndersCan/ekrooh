@@ -114,7 +114,7 @@ describe('createWebSocketTransport /login bootstrap', () => {
     expect(lastSocket().url).toBe('ws://test');
   });
 
-  it('exchanges an injected legacy token for a session cookie before opening', async () => {
+  it('ignores an injected raw token (only the bootstrap nonce logs in)', async () => {
     vi.stubGlobal('window', { __ekrooh: { token: 'secret-token' } });
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);
@@ -122,10 +122,7 @@ describe('createWebSocketTransport /login bootstrap', () => {
     createWebSocketTransport('ws://test');
 
     await nextTick();
-    expect(fetchMock).toHaveBeenCalledWith('/login', {
-      method: 'POST',
-      body: 'secret-token',
-    });
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(lastSocket().url).toBe('ws://test');
   });
 

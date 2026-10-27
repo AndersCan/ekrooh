@@ -1,22 +1,14 @@
 import { MessageType } from '../messages';
-import { BareRuntimeContext } from '../messages/create-bare-runtime-context';
-import { encodeResponse } from '../messages/encode-response';
-import { createInboundGate } from '../messages/backpressure';
-import { createFrameDecoder } from '../messages/framing';
+import type { BareRuntimeContext } from '../messages/create-bare-runtime-context';
+import { createFrameChannel } from '../messages/frame-channel';
 import type { MessageHeader, MessageProtocol } from '../messages';
 import type { LoopbackServer } from './static-file-server';
 
-function toUint8Array(data: unknown): Uint8Array {
-  if (data instanceof Uint8Array) return data;
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  throw new Error('Expected Uint8Array or ArrayBuffer from socket data');
-}
-
-/** Envelope encoder bound to a loopback server's connected protocol socket —
- * the server-initiated (backend → web) push seam. */
 /** Routed calls pending on one socket before it stops being read. */
 const MAX_PENDING_ROUTES = 32;
 
+/** Envelope encoder bound to a loopback server's connected protocol socket —
+ * the server-initiated (backend → web) push seam. */
 export type LoopbackPush = (
   header: MessageHeader,
   payload?: Uint8Array | ArrayBuffer | null,
@@ -38,8 +30,9 @@ export function createLoopbackPush(
 /**
  * Attaches the framed-protocol socket to the unified loopback server. The
  * server owns the WebSocket upgrade (origin check, cookie/token auth, single
- * client, idle timeout); this layer only routes decoded envelopes through the
- * plugin router and writes responses back as raw frames.
+ * client, idle timeout); this layer runs one frame channel per socket. A peer
+ * that sends a malformed frame is not recoverable on that socket, so it is
+ * torn down and the client reconnects.
  */
 export function attachWebSocketProtocol(
   server: LoopbackServer,
@@ -47,77 +40,32 @@ export function attachWebSocketProtocol(
 ) {
   const { protocol, pluginRouter } = context;
 
-  server.onConnection((socket, _request) => {
-    // The wire format is `[version][type][headerLen(2)][payloadLen(3)]
-    // [header][payload]`: a reassembler reads the frame length from bytes 2-3
-    // (16-bit header) and bytes 4-6 (24-bit payload length), written by
-    // `encode` — payload-bearing invokes (e.g. `payloadEcho`) stay
-    // self-delimiting even when a peer transport strips unknown JSON header
-    // fields. The per-socket frame decoder drains synchronously: a single frame
-    // may arrive split across chunks, or several frames coalesced into one, and
-    // concurrent data events can never interleave on a shared buffer. Calls
-    // then route concurrently, so a slow call never delays the ones behind it.
-    const decoder = createFrameDecoder(protocol);
-    // Stop reading while too much routed work is pending, so a fast sender
-    // cannot queue calls faster than they complete. Not applied to the host
-    // IPC channel: a pending host call waits for responses on that same stream.
-    const gate = createInboundGate({
-      high: MAX_PENDING_ROUTES,
-      low: MAX_PENDING_ROUTES / 2,
-      pause: () => socket.pause?.(),
-      resume: () => socket.resume?.(),
+  server.onConnection((socket) => {
+    const channel = createFrameChannel({
+      name: '[ws]',
+      protocol,
+      router: pluginRouter,
+      write: (frame) => socket.write(frame),
+      onMalformed: { kind: 'close', close: () => socket.destroy() },
+      // Stop reading while too much routed work is pending, so a fast sender
+      // cannot queue calls faster than they complete.
+      inbound: {
+        maxPending: MAX_PENDING_ROUTES,
+        pause: () => socket.pause?.(),
+        resume: () => socket.resume?.(),
+      },
     });
 
-    socket.on('data', (raw) => {
-      const data = toUint8Array(raw);
-      if (data.byteLength === 0) {
-        console.debug('[ws] received empty data chunk, ignoring');
-        return;
-      }
-      const messages = decoder.push(data);
-      // A frame-level failure marks the decoder inert but still returns the
-      // frames decoded before it; a peer that emits a malformed frame is not
-      // recoverable on this socket, so tear it down.
-      if (decoder.error) {
-        console.error(
-          'Error handling WebSocket message: ' + decoder.error.message,
-        );
-        socket.destroy();
-        return;
-      }
-      if (messages.length === 0) return;
-
-      for (const parsed of messages) {
-        const work = pluginRouter
-          .route(parsed.header, parsed.payload)
-          .then((pluginResponse) => {
-            if (pluginResponse) {
-              socket.write(encodeResponse(protocol, pluginResponse));
-            }
-          })
-          .catch((err) => {
-            // A routing/encode failure must not affect other in-flight calls;
-            // the stream itself stays usable. Decode/framing failures already
-            // destroyed the socket above.
-            const message = err instanceof Error ? err.message : String(err);
-            console.error('Error handling WebSocket message:', message);
-          });
-        gate.track(work);
-      }
-    });
-
-    socket.on('close', () => {
-      decoder.clear();
-    });
-
-    // Contain transport errors (peer reset, ECONNRESET, TLS failure) instead of
-    // letting an unhandled 'error' throw out of the EventEmitter and crash the
-    // whole runtime. A single dropped peer must not take down every other
+    socket.on('data', (chunk) => channel.push(chunk));
+    socket.on('close', () => channel.close());
+    // Contain transport errors (peer reset, ECONNRESET) instead of letting an
+    // unhandled 'error' throw out of the EventEmitter and crash the whole
+    // runtime. A single dropped peer must not take down every other
     // connection.
     socket.on('error', (err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
-      console.error('WebSocket connection error:', message);
-      decoder.clear();
+      console.error('[ws] connection error:', message);
+      channel.close();
       socket.destroy();
     });
   });

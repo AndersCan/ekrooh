@@ -31,6 +31,9 @@ export default defineConfig({
   root: '.',
   base: './',
   plugins: lazyPlugins(() => [tailwindcss(), cleanAndroidHashedAssets()]),
+  // The dev backend allows exactly this page origin (scripts/dev-bare.mjs), so
+  // fail loudly instead of drifting to another port.
+  server: { port: 5173, strictPort: true },
   build: {
     outDir: '../android-app/src/main/assets',
     emptyOutDir: false,

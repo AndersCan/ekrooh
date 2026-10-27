@@ -7,7 +7,7 @@ declare const Bare: { argv: string[]; exit(code?: number): void };
 /**
  * Desktop backend entry, spawned by the desktop host as a sidecar `bare`
  * process with labeled CLI tokens (`webassets=`, `storage=`, `cache=`,
- * `auth=on`, `port=0`) plus `handoff=<fd>`:
+ * `port=0`) plus `handoff=<fd>`. Auth is forced on regardless of tokens:
  *
  * - **Handoff over a pipe.** Once bound, the origin and one-time bootstrap
  *   nonce go to the host as one JSON line on the inherited `handoff` fd, which
@@ -28,8 +28,12 @@ if (!Number.isInteger(handoffFd) || handoffFd < 3) {
   Bare.exit(2);
 }
 
+// The sidecar is always a device-mode backend: whatever tokens arrive, auth
+// stays on, so a host that drops `auth=on` cannot ship an open server.
 const runtime = createWorkletRuntime({
   ...resolveCliConfig(argv),
+  deviceMode: true,
+  auth: true,
   handoffFile: false,
 });
 

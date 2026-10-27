@@ -13,8 +13,9 @@ backend, the unified loopback server, and IPC helpers.
   plugin registry, and host IPC bridge. `options.plugins` registers consumer
   plugins after the canonical defaults.
 - `resolveWorkletConfig()` — reads the host-provided worklet configuration
-  from `Bare.argv`; a missing config means dev mode (auth off, fixed port, no
-  handoff file).
+  from `Bare.argv`, falling back to labeled CLI tokens (`resolveCliConfig()`).
+  A missing config keeps the secure device defaults (auth on, ephemeral port);
+  the dev backend needs an explicit `mode=dev` token.
 - `createLoopbackServer(...)` / `LoopbackServer` — the unified HTTP+WS server
   (web app at `/`, media mounts, protocol socket) plus `registerRoute` and
   `push` for custom endpoints and server-initiated dispatch. `mountDir(..., {
@@ -24,8 +25,8 @@ bootstrap }` — the host injects only `bootstrap` into the page.
 - `attachWebSocketProtocol(server, ...)` — wires the framed WS protocol onto
   the server.
 - `createLoopbackPush(server, protocol)` — the backend → web push seam.
-- `getIPC()` — access the worklet's IPC stream to the host (`undefined` when
-  no host is present).
+- `getIPC()` — access the worklet's IPC stream to the host (`null` when no
+  host is present).
 - `collectRequestBody(req)` — accumulate an HTTP request body into a UTF-8
   string (for `registerRoute` handlers).
 

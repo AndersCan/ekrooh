@@ -44,14 +44,23 @@ export function createAppRuntime(): WorkletRuntime {
 
 ## Device vs dev mode
 
-`deviceMode` is derived from `options.storage !== undefined`:
+Device mode is the default. Dev mode is only ever chosen explicitly, with
+`deviceMode: false` or the `mode=dev` CLI token, so a missing or broken host
+configuration can never leave the loopback server unauthenticated:
 
-|                | Device                               | Dev (`bare` CLI)        |
-| -------------- | ------------------------------------ | ----------------------- |
-| Config source  | `resolveWorkletConfig()` (Bare.argv) | `{}` (no storage → dev) |
-| Port           | ephemeral (`0`)                      | fixed `8080`            |
-| Auth           | on (cookie/token)                    | off (no token)          |
-| `handoff.json` | written to `storage`                 | not written             |
+|                | Device (default)                     | Dev (`deviceMode: false` / `mode=dev`) |
+| -------------- | ------------------------------------ | -------------------------------------- |
+| Config source  | `resolveWorkletConfig()` (Bare.argv) | `mode=dev` CLI token                   |
+| Port           | ephemeral (`0`)                      | fixed `8080`                           |
+| Auth           | on (cookie/token)                    | off (no token)                         |
+| Origin check   | on                                   | on (see `allowedOrigins`)              |
+| `handoff.json` | written to `storage`                 | not written                            |
+
+The origin check holds in both modes: a request must target the bound server
+(`127.0.0.1`, `localhost` or `[::1]` on the bound port), and a page `Origin`
+must be that server or one listed in `allowedOrigins` (CLI: `origin=`). Browser
+dev from the Vite server therefore passes its origin, e.g.
+`origin=http://localhost:5173`.
 
 See [Dev Mode & Storage](./dev-mode-storage) for running a stateful consumer
 backend under the CLI.
@@ -82,23 +91,26 @@ ephemeral data (asset cache, photo spool) doesn't pollute durable storage.
 
 ## CLI config tokens (dev / e2e)
 
-`resolveCliConfig()` parses the bare CLI argv as `key=value` tokens and returns
-a dev-mode `WorkletRuntimeOptions` (auth off, fixed port 8080, `deviceMode:
-false`), so a `storage=` token never flips auth on or makes the port ephemeral.
+`resolveCliConfig()` parses the bare CLI argv as `key=value` tokens. Without
+`mode=dev` it keeps the device defaults (auth on, ephemeral port); `mode=dev`
+selects the dev backend (auth off, fixed port 8080, `deviceMode: false`).
 `resolveWorkletConfig()` tries the on-device positional shape first, then falls
 back to these tokens — one entry serves both.
 
-| Token        | Maps to     | Notes                                          |
-| ------------ | ----------- | ---------------------------------------------- |
-| `webassets=` | `webAssets` | built web app dir served at `/` same-origin    |
-| `storage=`   | `storage`   | durable app-sandbox (persists across runs)     |
-| `cache=`     | `cache`     | ephemeral app-sandbox                          |
-| `port=`      | `port`      | default `8080`; invalid values warn + ignore   |
-| `host=`      | `host`      | bind address, default `127.0.0.1`              |
-| `auth=`      | `auth`      | `on`/`off`/`true`/`false`/`1`/`0`; default off |
+| Token        | Maps to          | Notes                                                                                           |
+| ------------ | ---------------- | ----------------------------------------------------------------------------------------------- |
+| `webassets=` | `webAssets`      | built web app dir served at `/` same-origin                                                     |
+| `storage=`   | `storage`        | durable app-sandbox (persists across runs)                                                      |
+| `cache=`     | `cache`          | ephemeral app-sandbox                                                                           |
+| `mode=`      | `deviceMode`     | `dev` selects the dev backend; default `device`                                                 |
+| `port=`      | `port`           | dev default `8080`; invalid values warn + ignore                                                |
+| `host=`      | `host`           | bind address, default `127.0.0.1`                                                               |
+| `auth=`      | `auth`           | `on`/`off`/`true`/`false`/`1`/`0`; default on (off in dev); `off` is ignored without `mode=dev` |
+| `origin=`    | `allowedOrigins` | repeatable; an extra allowed page origin                                                        |
 
 ```bash
-bare worklet/app.core.js webassets=dist storage=./.store cache=./.cache port=8080
+bare worklet/app.core.js mode=dev origin=http://localhost:5173 \
+  webassets=dist storage=./.store cache=./.cache
 ```
 
 Unknown labels (e.g. `bootstrap=127.0.0.1:49737`) are ignored and stay

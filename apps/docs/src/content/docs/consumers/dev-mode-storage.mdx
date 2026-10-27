@@ -3,37 +3,41 @@ title: Dev Mode & Storage
 description: Run a stateful consumer backend under the bare CLI.
 ---
 
-Under the `bare` CLI, `resolveWorkletConfig()` returns `{}`: no storage dir, so
-`deviceMode` is off, auth is off, and the port is fixed at `8080`. For a
-**stateful** consumer app (photos persisted across restarts) you need storage:
+The dev backend is opt-in: pass `mode=dev` on the `bare` command line (or
+`deviceMode: false` in code) for auth off and a fixed port `8080`. Without it
+the runtime keeps the device defaults (auth on, ephemeral port), whatever else
+is passed. For a **stateful** consumer app (photos persisted across restarts)
+you also need storage:
 
 ```ts
 import { createWorkletRuntime, resolveCliConfig } from '@ekrooh/bare/runtime';
 
-const config = resolveCliConfig(); // parses labeled bare CLI tokens (dev mode)
+// bare app.js mode=dev origin=http://localhost:5173 storage=./.store cache=./.cache
+const config = resolveCliConfig(); // parses labeled bare CLI tokens
 const runtime = createWorkletRuntime(config);
 ```
 
-`resolveCliConfig()` parses `key=value` tokens from the bare CLI argv and
-returns a dev-mode `WorkletRuntimeOptions` — auth off, fixed port 8080, no
-handoff — without flipping device mode on. That's the CLI equivalent of the
-hand-rolled options object:
+With `mode=dev`, `resolveCliConfig()` returns a dev-mode
+`WorkletRuntimeOptions` — auth off, fixed port 8080, no handoff. That's the
+CLI equivalent of the hand-rolled options object:
 
 ```ts
 const runtime = createWorkletRuntime({
+  deviceMode: false, // the dev backend: auth off, port 8080
   storage: './.justus-store', // durable app-sandbox dir
   cache: './.justus-cache', // ephemeral
-  auth: false, // dev backend has no token
-  port: 8080,
+  allowedOrigins: ['http://localhost:5173'], // the Vite dev server
 });
 ```
 
 What you get and what to watch for:
 
-- `deviceMode` defaults to `options.storage !== undefined` — passing `storage`
-  flips you into device mode (auth on, ephemeral port). Override it with an
-  explicit `deviceMode: false` to keep dev semantics with a storage dir;
-  `resolveCliConfig()` does exactly that.
+- `deviceMode` defaults to `true`. Only an explicit `deviceMode: false` (or
+  `mode=dev`) turns auth off; passing or omitting `storage` does not change it.
+- Auth off is not an open server: requests must still target the bound
+  loopback server, and a page `Origin` must be the server itself or listed in
+  `allowedOrigins`, so another site open in the same browser cannot drive the
+  dev backend.
 - With `auth: false`, **no `handoff.json` is written** even though `storage`
   is set — the handoff file is a host artifact, and a dev backend must not
   leave a stale one behind.
@@ -43,10 +47,9 @@ What you get and what to watch for:
 
 ```ts
 const runtime = createWorkletRuntime({
+  deviceMode: false,
   storage: './.justus-store',
   cache: './.justus-cache',
-  auth: false,
-  port: 8080,
   plugins: [photosPlugin], // your app.photos manifest
 });
 ```

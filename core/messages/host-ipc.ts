@@ -1,6 +1,7 @@
 import { MessageType } from './constants';
 import { MessageProtocol } from './wire-codec';
 import { createRequestId } from './request-id';
+import { toBytes, toIpcChunk } from './bytes';
 import type {
   CapabilityDescriptor,
   HostCapabilitiesResponseHeader,
@@ -10,13 +11,6 @@ import type {
   PluginInvokeResponseHeader,
   WireMessage,
 } from './types';
-
-function toUint8Array(data: Uint8Array | ArrayBuffer | Buffer): Uint8Array {
-  if (data instanceof Uint8Array) return data;
-  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(data))
-    return new Uint8Array(data);
-  return new Uint8Array(data);
-}
 
 type Pending = {
   resolve: (h: MessageHeader) => void;
@@ -34,17 +28,8 @@ const MAX_CONCURRENT_HOST_CALLS = 1024;
 const DEFAULT_HOST_INVOKE_TIMEOUT_MS = 30000;
 
 export type BareIpcLike = {
-  write(data: Uint8Array | Buffer | string): boolean;
+  write(data: Uint8Array | string): boolean;
 };
-
-function writeEncoded(ipc: BareIpcLike, bytes: Uint8Array) {
-  if (typeof Buffer !== 'undefined' && typeof Buffer.from === 'function') {
-    // `encode` already returns a Buffer on Bare; `Buffer.from` would copy it.
-    ipc.write(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes));
-  } else {
-    ipc.write(bytes as unknown as Buffer);
-  }
-}
 
 export function createHostIpcBridge(config: {
   ipc: BareIpcLike;
@@ -143,12 +128,10 @@ export function createHostIpcBridge(config: {
   return {
     tryConsumeDownstream: consumeDownstream,
 
-    tryConsumeDownstreamFromHost(
-      raw: Uint8Array | ArrayBuffer | Buffer,
-    ): boolean {
+    tryConsumeDownstreamFromHost(raw: Uint8Array | ArrayBuffer): boolean {
       let msg: WireMessage;
       try {
-        msg = protocol.decode(toUint8Array(raw));
+        msg = protocol.decode(toBytes(raw));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.debug(`[ipc] dropped undecodable host frame: ${message}`);
@@ -166,7 +149,9 @@ export function createHostIpcBridge(config: {
         timeoutMs,
       );
       const header = { type: 'HOST_CAPABILITIES_QUERY' as const, requestId };
-      writeEncoded(ipc, protocol.encode(MessageType.ENVELOPE, header, null));
+      ipc.write(
+        toIpcChunk(protocol.encode(MessageType.ENVELOPE, header, null)),
+      );
       const response = await promise;
       return response.capabilities ?? [];
     },
@@ -191,9 +176,8 @@ export function createHostIpcBridge(config: {
         event: header.event,
         args: header.args,
       };
-      writeEncoded(
-        ipc,
-        protocol.encode(MessageType.ENVELOPE, hostHeader, payload),
+      ipc.write(
+        toIpcChunk(protocol.encode(MessageType.ENVELOPE, hostHeader, payload)),
       );
       const hostResp = await promise;
       const out: PluginInvokeResponseHeader = {

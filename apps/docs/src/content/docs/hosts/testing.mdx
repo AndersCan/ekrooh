@@ -25,7 +25,8 @@ device.
 
 1. **Boot the worklet serving the built web app.** Build the web app, bundle
    the worklet entry, and start it with the web-assets directory mounted at
-   `/` (dev mode: `createWorkletRuntime({ webAssets, port: 8080 })`, auth off).
+   `/` (dev mode: `createWorkletRuntime({ webAssets, deviceMode: false })`,
+   auth off, port 8080).
 2. **Drive Playwright against the loopback origin** — `http://127.0.0.1:8080`,
    not the Vite dev server. The page, its WebSocket (same-origin cookie login),
    and its media URLs all come from one server, exactly like on device.

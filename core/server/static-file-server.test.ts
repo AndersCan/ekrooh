@@ -19,15 +19,15 @@ import type { HTTPIncomingMessage } from 'bare-http1';
 import {
   cachePolicyFor,
   collectRequestBody,
-  cookieSession,
   createLoopbackServer,
   etagFor,
   etagMatches,
   mimeTypeFor,
   parseRange,
-  sessionNonce,
-  tokenFromHeaders,
+  pathSegments,
 } from './static-file-server';
+import { sessionNonce } from './loopback-gate';
+import { toBytes } from '../messages/bytes';
 
 vi.mock('bare-http1', async () => ({
   default: (await import('node:http')).default,
@@ -305,20 +305,22 @@ beforeAll(async () => {
   server.mountDir('/', dir, { public: true });
   server.mount('/media/sample.png', path.join(dir, 'app.js'));
   server.onConnection((socket) => {
-    socket.on('data', (raw) => socket.write(raw));
+    socket.on('data', (raw) => socket.write(toBytes(raw)));
   });
 
   const creds = await server.credentials();
   origin = creds.origin;
   port = creds.port;
 
-  const login = await request('/login', {
-    method: 'POST',
-    body: TOKEN,
-  });
-  cookie = `${firstHeader(login.headers, 'set-cookie')?.split(';')[0] ?? ''}`;
+  // The session cookie a `/login` would set. Derived here so the server's
+  // single bootstrap nonce stays unspent for the tests that exercise it.
+  cookie = `bare_session=${sessionNonce(TOKEN)}`;
 
-  devServer = createLoopbackServer({ auth: false, port: 0 });
+  devServer = createLoopbackServer({
+    auth: false,
+    port: 0,
+    allowedOrigins: ['http://localhost:5173'],
+  });
   devServer.mountDir('/', dir, { public: true });
   await devServer.credentials();
 });
@@ -351,23 +353,17 @@ describe('pure request helpers', () => {
     expect(mimeTypeFor('c.unknown')).toBe('application/octet-stream');
   });
 
-  it('tokenFromHeaders reads the lowercased header', () => {
-    expect(tokenFromHeaders({ 'x-bare-token': 't' })).toBe('t');
-    expect(tokenFromHeaders({ authorization: 'nope' })).toBeNull();
-  });
-
-  it('cookieSession reads bare_session from the Cookie header', () => {
-    expect(cookieSession({ cookie: 'a=1; bare_session=s3' })).toBe('s3');
-    expect(cookieSession({ cookie: 'bare_session=' })).toBe('');
-    expect(cookieSession({ cookie: 'a=1' })).toBeNull();
-    expect(cookieSession({})).toBeNull();
-  });
-
-  it('sessionNonce hashes so the raw token never appears in a cookie', () => {
-    const nonce = sessionNonce('secret');
-    expect(nonce).toBe(sessionNonce('secret'));
-    expect(nonce).not.toContain('secret');
-    expect(nonce).toMatch(/^[0-9a-f]{64}$/);
+  it('pathSegments decodes segments and refuses anything that could escape', () => {
+    expect(pathSegments('/')).toEqual([]);
+    expect(pathSegments('/a//b/?x=1#f')).toEqual(['a', 'b']);
+    expect(pathSegments('/my%20file.txt')).toEqual(['my file.txt']);
+    expect(pathSegments('/../etc/passwd')).toBeNull();
+    expect(pathSegments('/%2e%2e/etc/passwd')).toBeNull();
+    expect(pathSegments('/a/%2fetc')).toBeNull();
+    expect(pathSegments('/a\\..\\b')).toBeNull();
+    expect(pathSegments('/a%00b')).toBeNull();
+    expect(pathSegments('/%E0%A4%A')).toBeNull();
+    expect(pathSegments('/./a')).toBeNull();
   });
 
   it('parseRange handles full, open-ended, suffix and overlong ranges', () => {
@@ -394,13 +390,12 @@ describe('loopback server HTTP', () => {
     expect(r.status).toBe(401);
   });
 
-  it('logs in with the token and sets a hardened cookie', async () => {
+  it('never accepts the raw session token as a /login credential', async () => {
+    // Only the single-use bootstrap nonce logs a page in (ADR 0003); the
+    // token is for the host's own `X-Bare-Token` calls.
     const r = await request('/login', { method: 'POST', body: TOKEN });
-    expect(r.status).toBe(200);
-    const setCookie = firstHeader(r.headers, 'set-cookie');
-    expect(setCookie).toMatch(/^bare_session=/);
-    expect(setCookie!).toContain('HttpOnly');
-    expect(setCookie!).toContain('SameSite=Lax');
+    expect(r.status).toBe(401);
+    expect(firstHeader(r.headers, 'set-cookie')).toBeNull();
   });
 
   it('rejects a bad login', async () => {
@@ -437,9 +432,11 @@ describe('loopback server HTTP', () => {
     // First use: the bootstrap nonce authorizes a login.
     const first = await request('/login', { method: 'POST', body: nonce });
     expect(first.status).toBe(200);
-    // It sets the same HttpOnly session cookie as a token login.
+    // It sets the hardened HttpOnly session cookie.
     const setCookie = firstHeader(first.headers, 'set-cookie');
-    expect(setCookie).toMatch(/^bare_session=/);
+    expect(setCookie).toBe(
+      `bare_session=${sessionNonce(TOKEN)}; HttpOnly; SameSite=Strict; Path=/`,
+    );
 
     // Single-use: a replay of the same nonce is not "bad credentials" but
     // "already consumed" — an honest 409 the shell can retry from, granting
@@ -450,13 +447,6 @@ describe('loopback server HTTP', () => {
   });
 
   it('re-login succeeds from a surviving session alone (reload path)', async () => {
-    // First load: normal login sets the session cookie.
-    const first = await request('/login', { method: 'POST', body: TOKEN });
-    expect(first.status).toBe(200);
-    const setCookie = firstHeader(first.headers, 'set-cookie');
-    if (!setCookie) throw new Error('expected a Set-Cookie session header');
-    const cookie = setCookie.split(';')[0]!;
-
     // Reload: the shell re-runs and replays a now-spent/invalid bootstrap
     // nonce, but the session cookie from the first load survives it →
     // accepted. This is the "reload reconnects to the same instance"
@@ -600,7 +590,7 @@ describe('loopback server HTTP', () => {
     const r = await request('/');
     expect(r.status).toBe(200);
     expect(r.headers['content-security-policy']).toBe(
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws:",
+      `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:${port}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
     );
     expect(firstHeader(r.headers, 'access-control-allow-origin')).toBeNull();
   });
@@ -612,15 +602,86 @@ describe('loopback server HTTP', () => {
     expect(firstHeader(r.headers, 'access-control-allow-origin')).toBeNull();
   });
 
-  it('validates the token/nonce with constant-time comparison', async () => {
-    const good = await request('/login', { method: 'POST', body: TOKEN });
+  it('validates the token with an exact (constant-time) comparison', async () => {
+    const good = await request('/media/sample.png', {
+      headers: { 'X-Bare-Token': TOKEN },
+    });
     expect(good.status).toBe(200);
     // A near-miss (same length, wrong byte) must fail, proving exact match.
-    const near = await request('/login', {
-      method: 'POST',
-      body: TOKEN.slice(0, -1) + 'x',
+    const near = await request('/media/sample.png', {
+      headers: { 'X-Bare-Token': TOKEN.slice(0, -1) + 'x' },
     });
     expect(near.status).toBe(401);
+  });
+
+  it('rejects an encoded traversal with a raw request', async () => {
+    const raw = await rawRequest([
+      'GET /%2e%2e/%2e%2e/etc/passwd HTTP/1.1',
+      `Host: 127.0.0.1:${port}`,
+      'Connection: close',
+    ]);
+    expect(raw.split('\r\n')[0]).toContain('400');
+  });
+
+  it('never serves a symlink that leads outside the mount root', async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'loopback-outside-'));
+    fs.writeFileSync(path.join(outside, 'secret.txt'), 'secret');
+    fs.symlinkSync(
+      path.join(outside, 'secret.txt'),
+      path.join(dir, 'leak.txt'),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const r = await request('/leak.txt');
+      expect(r.status).toBe(404);
+      expect(r.body).not.toContain('secret');
+    } finally {
+      warn.mockRestore();
+      fs.rmSync(path.join(dir, 'leak.txt'));
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('matches a mount registered with an encoded or trailing-slash path', async () => {
+    server!.mount('/media/a%20b/', path.join(dir, 'app.js'));
+    try {
+      const r = await request('/media/a%20b', { headers: { cookie } });
+      expect(r.status).toBe(200);
+    } finally {
+      server!.unmount('/media/a b');
+    }
+    const gone = await request('/media/a%20b', { headers: { cookie } });
+    expect(gone.status).toBe(404);
+    expect(() => server!.mount('/media/../x', 'x')).toThrow(
+      /invalid mount path/,
+    );
+  });
+
+  it('sandboxes mounted session files opened as a document', async () => {
+    const r = await request('/media/sample.png', { headers: { cookie } });
+    expect(r.status).toBe(200);
+    expect(r.headers['content-security-policy']).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    );
+    expect(r.headers['x-content-type-options']).toBe('nosniff');
+  });
+
+  it('answers a throwing route with a bare 500 that leaks no detail', async () => {
+    server!.registerRoute('GET', '/boom', () => {
+      throw new Error('/private/path/secret-detail');
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const r = await request('/boom', { headers: { cookie } });
+      expect(r.status).toBe(500);
+      expect(r.body).toBe('Internal Server Error');
+      expect(r.headers['referrer-policy']).toBe('no-referrer');
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('secret-detail'),
+      );
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it('handles a read-stream error without crashing the worklet (evicted file)', async () => {
@@ -754,7 +815,8 @@ describe('static caching', () => {
   });
 
   it('stats a directory-mounted file once per request', async () => {
-    const target = path.join(dir, 'app.js');
+    // The server serves a file by its real path (a tmpdir may be a symlink).
+    const target = fs.realpathSync(path.join(dir, 'app.js'));
     const spy = vi.spyOn(fs, 'statSync');
     try {
       const r = await request('/app.js');
@@ -860,7 +922,7 @@ describe('loopback server origin validation (auth mode)', () => {
           );
         },
       );
-      r.end(TOKEN);
+      r.end(creds.bootstrap);
     });
     ck = login;
   });
@@ -1459,6 +1521,69 @@ describe('dev mode (auth off)', () => {
       }, 3000);
     });
     expect(raw.split('\r\n')[0]).toContain('101');
+  });
+
+  /** Sends raw request lines to the dev server and returns the status line. */
+  async function devStatusLine(lines: string[]): Promise<string> {
+    const devOrigin = await devServer!.origin();
+    const devPort = Number(devOrigin.slice(devOrigin.lastIndexOf(':') + 1));
+    return new Promise<string>((resolve) => {
+      let data = '';
+      const socket = net.connect({ host: '127.0.0.1', port: devPort });
+      socket.on('connect', () => socket.write([...lines, '\r\n'].join('\r\n')));
+      socket.on('data', (d) => {
+        data += String(d);
+        if (data.includes('\r\n')) {
+          socket.destroy();
+          resolve(data.split('\r\n')[0]);
+        }
+      });
+      socket.on('close', () => resolve(data.split('\r\n')[0]));
+      socket.on('error', () => resolve(''));
+    });
+  }
+
+  it('still refuses a foreign page origin with auth off (any site could drive dev)', async () => {
+    const devOrigin = await devServer!.origin();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const line = await devStatusLine([
+        'GET /ws HTTP/1.1',
+        `Host: ${devOrigin.slice('http://'.length)}`,
+        'Upgrade: websocket',
+        'Connection: Upgrade',
+        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+        'Sec-WebSocket-Version: 13',
+        'Origin: http://evil.example',
+      ]);
+      expect(line).not.toContain('101');
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('upgrade rejected: origin mismatch'),
+      );
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('still refuses a DNS-rebinding Host with auth off', async () => {
+    const line = await devStatusLine([
+      'GET / HTTP/1.1',
+      'Host: evil.example',
+      'Connection: close',
+    ]);
+    expect(line).toContain('403');
+  });
+
+  it('accepts the localhost alias of the bound port', async () => {
+    const devOrigin = await devServer!.origin();
+    const devPort = devOrigin.slice(devOrigin.lastIndexOf(':') + 1);
+    const line = await devStatusLine([
+      'GET / HTTP/1.1',
+      `Host: localhost:${devPort}`,
+      `Origin: http://localhost:${devPort}`,
+      'Connection: close',
+    ]);
+    expect(line).toContain('200');
   });
 });
 

@@ -19,14 +19,14 @@ describe('createRequestId', () => {
     expect(ids.size).toBe(10000);
   });
 
-  it('is shared by both messengers (no Math.random divergence)', () => {
-    // Both rpc-messenger and rpc-messenger.mantaq import createRequestId from
-    // this module, so neither may ever emit a Math.random-derived id. Assert
-    // the scheme directly here so ekrooh#141 cannot regress.
-    const fromProduction = createRequestId();
-    const fromMantaqVariant = createRequestId();
-    expect(fromProduction).toMatch(/^[0-9a-z]+-[0-9a-z]{22}$/);
-    expect(fromMantaqVariant).toMatch(/^[0-9a-z]+-[0-9a-z]{22}$/);
-    expect(fromProduction).not.toBe(fromMantaqVariant);
+  it('matches the CSPRNG id scheme (no Math.random divergence)', () => {
+    // The messenger and the host IPC bridge both use this module, so neither
+    // may ever emit a Math.random-derived id. Assert the scheme directly here
+    // so ekrooh#141 cannot regress.
+    const a = createRequestId();
+    const b = createRequestId();
+    expect(a).toMatch(/^[0-9a-z]+-[0-9a-z]{22}$/);
+    expect(b).toMatch(/^[0-9a-z]+-[0-9a-z]{22}$/);
+    expect(a).not.toBe(b);
   });
 });

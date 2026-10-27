@@ -56,4 +56,8 @@ describe('getIPC', () => {
     g.Bare = { IPC: null };
     expect(getIPC()).toBeNull();
   });
+
+  it('returns null when there is no host runtime', () => {
+    expect(getIPC()).toBeNull();
+  });
 });
