@@ -3,12 +3,14 @@
 **One soul, many platforms.** One codebase and identity across Android, iOS,
 web, and desktop.
 
+**Docs: <https://anderscan.github.io/ekrooh>**
+
 [![CI](https://github.com/AndersCan/ekrooh/actions/workflows/test.yml/badge.svg)](https://github.com/AndersCan/ekrooh/actions/workflows/test.yml)
 [![Release](https://img.shields.io/github/v/release/AndersCan/ekrooh)](https://github.com/AndersCan/ekrooh/releases/latest)
 
 The boring bootstrap for cross-platform apps on the Bare runtime (holepunch): a
 binary wire protocol, plugin kernel, RPC messenger, transports, and native host
-bridges, plus a reference app. Public docs: <https://anderscan.github.io/ekrooh>.
+bridges, plus a reference app.
 
 - [`vision.md`](vision.md): what this project is and is not.
 - [`AGENTS.md`](AGENTS.md): how to develop it and the canonical commands.
