@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-28
+
 ### Security
 
 - **Per-port session cookie**: the session cookie is now `bare_session_<port>`
