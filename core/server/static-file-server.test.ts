@@ -314,7 +314,7 @@ beforeAll(async () => {
 
   // The session cookie a `/login` would set. Derived here so the server's
   // single bootstrap nonce stays unspent for the tests that exercise it.
-  cookie = `bare_session=${sessionNonce(TOKEN)}`;
+  cookie = `bare_session_${port}=${sessionNonce(TOKEN)}`;
 
   devServer = createLoopbackServer({
     auth: false,
@@ -435,7 +435,7 @@ describe('loopback server HTTP', () => {
     // It sets the hardened HttpOnly session cookie.
     const setCookie = firstHeader(first.headers, 'set-cookie');
     expect(setCookie).toBe(
-      `bare_session=${sessionNonce(TOKEN)}; HttpOnly; SameSite=Strict; Path=/`,
+      `bare_session_${port}=${sessionNonce(TOKEN)}; HttpOnly; SameSite=Strict; Path=/`,
     );
 
     // Single-use: a replay of the same nonce is not "bad credentials" but
@@ -457,7 +457,9 @@ describe('loopback server HTTP', () => {
       headers: { cookie },
     });
     expect(reload.status).toBe(200);
-    expect(firstHeader(reload.headers, 'set-cookie')).toMatch(/^bare_session=/);
+    expect(firstHeader(reload.headers, 'set-cookie')).toMatch(
+      new RegExp(`^bare_session_${port}=`),
+    );
 
     // The same invalid secret without a surviving session stays rejected.
     const anon = await request('/login', {
@@ -991,7 +993,7 @@ describe('loopback server WebSocket upgrade', () => {
 
   it('rejects an upgrade with a query token (?token= removed)', async () => {
     const raw = await upgradeRequest();
-    expect(raw.split('\r\n')[0]).not.toContain('101');
+    expect(raw.split('\r\n')[0]).toBe('HTTP/1.1 401 Unauthorized');
   });
 
   it('rejects a cross-origin upgrade when auth is on', async () => {
@@ -999,7 +1001,7 @@ describe('loopback server WebSocket upgrade', () => {
       token: TOKEN,
       origin: 'http://evil.example',
     });
-    expect(raw.split('\r\n')[0]).not.toContain('101');
+    expect(raw.split('\r\n')[0]).toBe('HTTP/1.1 403 Forbidden');
   });
 
   it('rejects an upgrade with no Origin header when auth is on', async () => {
@@ -1142,12 +1144,15 @@ describe('loopback server WebSocket upgrade', () => {
     it('does not let an unauthenticated upgrade evict the active socket', async () => {
       await withServer({ wsReplaceMinIntervalMs: 0 }, async ({ base }) => {
         const active = await openUpgrade(base);
-        await expect(
-          openUpgrade({ origin: base.origin, port: base.port }),
-        ).rejects.toThrow(/closed before the upgrade response/);
-        await expect(
-          openUpgrade({ ...base, token: 'wrong-token' }),
-        ).rejects.toThrow(/closed before the upgrade response/);
+        const anon = await openUpgrade({
+          origin: base.origin,
+          port: base.port,
+        });
+        expect(anon.response.split('\r\n')[0]).toContain('401');
+        const wrong = await openUpgrade({ ...base, token: 'wrong-token' });
+        expect(wrong.response.split('\r\n')[0]).toContain('401');
+        expect(await closedWithin(anon.socket, 2000)).toBe(true);
+        expect(await closedWithin(wrong.socket, 2000)).toBe(true);
         expect(await closedWithin(active.socket, 300)).toBe(false);
         active.socket.destroy();
       });
@@ -1156,19 +1161,43 @@ describe('loopback server WebSocket upgrade', () => {
     it('does not let a foreign-origin upgrade evict the active socket', async () => {
       await withServer({ wsReplaceMinIntervalMs: 0 }, async ({ base }) => {
         const active = await openUpgrade(base);
-        await expect(
-          openUpgrade({ ...base, origin: 'http://evil.example' }),
-        ).rejects.toThrow(/closed before the upgrade response/);
+        const foreign = await openUpgrade({
+          ...base,
+          origin: 'http://evil.example',
+        });
+        expect(foreign.response.split('\r\n')[0]).toContain('403');
+        foreign.socket.destroy();
         expect(await closedWithin(active.socket, 300)).toBe(false);
         active.socket.destroy();
       });
     });
 
-    it('rate-limits replacement so two live clients cannot evict each other in a loop', async () => {
+    it('holds a replacement inside the minimum interval instead of refusing it', async () => {
+      await withServer({ wsReplaceMinIntervalMs: 500 }, async ({ base }) => {
+        const active = await openUpgrade(base);
+        const startedAt = Date.now();
+        // A reconnect right after a connect (a reload) is answered once the
+        // interval has passed, not dropped.
+        const fresh = await openUpgrade(base);
+        expect(fresh.response.split('\r\n')[0]).toContain('101');
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(400);
+        expect(await closedWithin(active.socket, 2000)).toBe(true);
+        fresh.socket.destroy();
+      });
+    });
+
+    it('answers a held upgrade superseded by a newer one with 429', async () => {
       await withServer({ wsReplaceMinIntervalMs: 60_000 }, async ({ base }) => {
         const active = await openUpgrade(base);
-        await expect(openUpgrade(base)).rejects.toThrow(
-          /closed before the upgrade response/,
+        const held = openUpgrade(base);
+        await new Promise((r) => setTimeout(r, 100));
+        void openUpgrade(base).then(
+          (r) => r.socket.destroy(),
+          () => {},
+        );
+        const superseded = await held;
+        expect(superseded.response.split('\r\n')[0]).toBe(
+          'HTTP/1.1 429 Too Many Requests',
         );
         expect(await closedWithin(active.socket, 300)).toBe(false);
         active.socket.destroy();

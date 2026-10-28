@@ -24,15 +24,15 @@ final class BareRuntime {
     try? FileManager.default.createDirectory(
       at: storageDir, withIntermediateDirectories: true
     )
-    // The storage dir transitly holds session credentials (handoff.json,
-    // carrying the loopback bearer token); resolve the handoff path up front so
-    // every early-return path below has all stored properties initialized.
+    // The storage dir transiently holds handoff.json (origin + single-use
+    // bootstrap nonce); resolve the handoff path up front so every
+    // early-return path below has all stored properties initialized.
     self.handoffURL = storageDir.appendingPathComponent("handoff.json")
 
-    // The storage dir holds session credentials (handoff.json, carrying the
-    // loopback bearer token); keep the whole dir out of iCloud/iTunes backups.
-    // Failing here is fatal to the security model — a backed-up credential can
-    // leave the device, so abort attach rather than degrade silently.
+    // The storage dir holds handoff.json (a bootstrap nonce) and the p2p
+    // corestore; keep the whole dir out of iCloud/iTunes backups. Failing here
+    // is fatal to the security model — a backed-up credential can leave the
+    // device, so abort attach rather than degrade silently.
     var backupValues = URLResourceValues()
     backupValues.isExcludedFromBackup = true
     do {
@@ -57,7 +57,7 @@ final class BareRuntime {
 
     // The web app ships in the app bundle (Resources/WebAssets) and is served
     // by the worklet's loopback server; the storage dir transiently holds the
-    // port/token handoff file, deleted after the one-time page load.
+    // origin/bootstrap handoff file, deleted after the one-time page load.
     guard
       let webAssetsURL = Bundle.main.url(
         forResource: "WebAssets", withExtension: nil
@@ -168,10 +168,9 @@ final class BareRuntime {
         )
       )
       webView.load(URLRequest(url: url))
-      // The bootstrap is single-use in core and the token is a bearer
-      // credential; the handoff file is not needed after this one load (the
-      // page keeps its own HttpOnly session cookie). Core regenerates the
-      // credentials on the next boot, so drop them from disk now.
+      // The bootstrap is single-use in core; the handoff file is not needed
+      // after this one load (the page keeps its own HttpOnly session cookie).
+      // Core regenerates it on the next boot, so drop it from disk now.
       try? FileManager.default.removeItem(at: handoffURL)
     }
   }

@@ -180,10 +180,10 @@ export type WorkletRuntimeOptions = {
    * server (`http://localhost:5173`). The bound origin and its loopback
    * aliases are always allowed. */
   allowedOrigins?: readonly string[];
-  /** Write the credentials to `<storage>/handoff.json` for the host to read
-   * (auth on only). Defaults to true; a host that receives them over its own
-   * channel (the desktop host reads them from a pipe) sets false so the
-   * session token never touches disk. */
+  /** Write `{ origin, port, bootstrap }` to `<storage>/handoff.json` for the
+   * host to read (auth on only; the session token is never written). Defaults
+   * to true; a host that receives them over its own channel (the desktop host
+   * reads them from a pipe) sets false so nothing touches disk. */
   handoffFile?: boolean;
   /** Device mode (the default): auth on, an ephemeral port, and the handoff
    * file when `storage` is set. Pass `false` (or the `mode=dev` CLI token) for
@@ -198,7 +198,8 @@ export type WorkletRuntimeOptions = {
    * is destroyed, freeing the slot. Defaults to 10s. */
   wsDeadPeerTimeoutMs?: number;
   /** Minimum gap (ms) before an accepted protocol socket may be replaced by a
-   * new authenticated one. Defaults to 1s. */
+   * new authenticated one; an upgrade that arrives sooner is held until then.
+   * Defaults to 1s. */
   wsReplaceMinIntervalMs?: number;
   /** Bytes queued behind a protocol socket whose reader stopped reading before
    * server pushes are dropped (newest first). Defaults to 2 MiB. */
@@ -351,14 +352,18 @@ export function createWorkletRuntime(
     attachWebSocketProtocol(server, { protocol, pluginRegistry, pluginRouter });
 
     const credentials = await server.credentials();
-    // handoff.json exists for the host to find origin/port/token; only device
-    // mode (auth on) writes it — a dev backend with `auth: false` and a
-    // storage dir for persistence must not leave a stale handoff behind.
+    // handoff.json exists for the host to find the origin and the page's
+    // bootstrap nonce; only device mode (auth on) writes it — a dev backend
+    // with `auth: false` and a storage dir for persistence must not leave a
+    // stale handoff behind. The session token stays out of it: a host never
+    // needs it to load the page, and the file sits on disk until the host
+    // deletes it.
     if (auth && options.storage && options.handoffFile !== false) {
+      const { origin, port, bootstrap } = credentials;
       try {
         fs.writeFileSync(
           path.join(options.storage, 'handoff.json'),
-          JSON.stringify(credentials),
+          JSON.stringify({ origin, port, bootstrap }),
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

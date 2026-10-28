@@ -67,7 +67,7 @@ export interface LoopbackGate {
   socketSource(headers: RequestHeaders): string;
 }
 
-const COOKIE_NAME = 'bare_session';
+const COOKIE_PREFIX = 'bare_session';
 const ORIGIN_PATTERN = /^https?:\/\/[^/?#\s]+$/;
 
 /** Reads the token from the `X-Bare-Token` request header (parser-lowercased).
@@ -79,14 +79,25 @@ export function tokenFromHeaders(headers: RequestHeaders): string | null {
   return typeof value === 'string' ? value : null;
 }
 
-/** Reads the `bare_session` value from the `Cookie` request header. */
-export function cookieSession(headers: RequestHeaders): string | null {
+/** The session cookie name for a server bound on `port`. Cookies are scoped to
+ * the host, not the port, so two loopback servers sharing a browser cookie
+ * store (two apps' WebViews, or two desktop backends) would overwrite each
+ * other's session under one fixed name. */
+export function sessionCookieName(port: string | number): string {
+  return `${COOKIE_PREFIX}_${port}`;
+}
+
+/** Reads the `name` cookie's value from the `Cookie` request header. */
+export function cookieSession(
+  headers: RequestHeaders,
+  name: string,
+): string | null {
   const cookie = headers['cookie'];
   if (typeof cookie !== 'string') return null;
   for (const part of cookie.split(';')) {
     const eq = part.indexOf('=');
     if (eq === -1) continue;
-    if (part.slice(0, eq).trim() === COOKIE_NAME) {
+    if (part.slice(0, eq).trim() === name) {
       return part.slice(eq + 1).trim();
     }
   }
@@ -142,11 +153,12 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
   let spentBootstrapNonce: string | null = null;
   let allowedHosts = new Set<string>();
   let allowedOrigins = new Set<string>();
+  let cookieName = COOKIE_PREFIX;
 
   function hasCredential(headers: RequestHeaders): boolean {
     if (!auth) return true;
     if (secretEquals(tokenFromHeaders(headers) ?? '', token)) return true;
-    return secretEquals(cookieSession(headers) ?? '', cookieValue);
+    return secretEquals(cookieSession(headers, cookieName) ?? '', cookieValue);
   }
 
   /** The DNS-rebinding and cross-origin rule. `Host` must name the bound
@@ -189,6 +201,7 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
       const hostPort = origin.slice(origin.indexOf('://') + 3);
       const port = hostPort.slice(hostPort.lastIndexOf(':') + 1);
       allowedHosts = new Set([hostPort, ...loopbackHosts(port)]);
+      cookieName = sessionCookieName(port);
       allowedOrigins = new Set([
         origin,
         ...loopbackHosts(port).map((h) => `http://${h}`),
@@ -214,7 +227,7 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
         return {
           ok: false,
           status: 401,
-          reason: `unauthorized (${headers['cookie'] ? 'cookie present but invalid' : `no ${COOKIE_NAME} cookie`})`,
+          reason: `unauthorized (${headers['cookie'] ? 'cookie present but invalid' : `no ${cookieName} cookie`})`,
         };
       }
       return { ok: true };
@@ -245,7 +258,7 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
       }
       return {
         ok: true,
-        cookie: `${COOKIE_NAME}=${cookieValue}; HttpOnly; SameSite=Strict; Path=/`,
+        cookie: `${cookieName}=${cookieValue}; HttpOnly; SameSite=Strict; Path=/`,
       };
     },
     socketSource(headers) {

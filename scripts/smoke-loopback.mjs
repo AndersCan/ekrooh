@@ -68,7 +68,10 @@ check('login with the raw token -> 401', r.status === 401);
 r = await request('POST', '/login', { body: creds.bootstrap });
 check('login with the bootstrap nonce -> 200', r.status === 200);
 const setCookie = [r.headers['set-cookie'] ?? []].flat()[0] ?? '';
-check('login sets bare_session cookie', setCookie.startsWith('bare_session='));
+check(
+  'login sets the per-port session cookie',
+  setCookie.startsWith(`bare_session_${creds.port}=`),
+);
 check('cookie is HttpOnly', setCookie.includes('HttpOnly'));
 check('cookie is SameSite=Strict', setCookie.includes('SameSite=Strict'));
 

@@ -251,7 +251,12 @@ describe('createWorkletRuntime', () => {
     const handoff = JSON.parse(
       fs.readFileSync(path.join(storageDir, 'handoff.json'), 'utf8'),
     );
-    expect(handoff).toEqual(creds);
+    expect(handoff).toEqual({
+      origin: creds.origin,
+      port: creds.port,
+      bootstrap: creds.bootstrap,
+    });
+    expect(JSON.stringify(handoff)).not.toContain(creds.token);
 
     // The mounted web app is public content; the WS upgrade stays auth-gated.
     const page = await httpGet(`${creds.origin}/`);

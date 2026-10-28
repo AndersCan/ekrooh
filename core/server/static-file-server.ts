@@ -188,8 +188,8 @@ export interface LoopbackServerOptions {
    * application message. Defaults to 10s. */
   wsDeadPeerTimeoutMs?: number;
   /** Minimum gap, in ms, between an accepted protocol socket and the next one
-   * that may replace it. Bounds eviction churn if two live clients compete.
-   * Defaults to 1000. */
+   * that may replace it; an upgrade that arrives sooner is held until then.
+   * Bounds eviction churn if two live clients compete. Defaults to 1000. */
   wsReplaceMinIntervalMs?: number;
   /** Most bytes queued behind a protocol socket whose reader has stopped reading
    * before server pushes are dropped, newest first. Responses are queued past
@@ -709,17 +709,30 @@ export function createLoopbackServer(
 
   // WS upgrade: the gate decides before the handshake, so an unadmitted
   // client never receives a 101. Every rejection is logged with a stable
-  // `[loopback] upgrade rejected:` prefix — a silent `socket.destroy()` is
-  // indistinguishable on the client from "server unreachable". These lines are
-  // captured by the `core.logs` ring buffer.
+  // `[loopback] upgrade rejected:` prefix, and answered with its HTTP status
+  // where there is one — a silent `socket.destroy()` is indistinguishable on
+  // the client from "server unreachable". These lines are captured by the
+  // `core.logs` ring buffer.
   server.on('upgrade', (req, socket, head) => {
-    const reject = (reason: string) => {
+    const reject = (reason: string, status?: 401 | 403 | 429) => {
       console.error(`[loopback] upgrade rejected: ${reason}`);
-      socket.destroy();
+      if (status === undefined) {
+        socket.destroy();
+        return;
+      }
+      // The socket is half-open by default: close it once the answer is out
+      // rather than wait on the peer to hang up.
+      socket.on('finish', () => socket.destroy());
+      socket.on('error', () => socket.destroy());
+      socket.end(
+        `HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\n` +
+          'Connection: close\r\nContent-Length: 0\r\n' +
+          'Referrer-Policy: no-referrer\r\n\r\n',
+      );
     };
     const verdict = gate.admitUpgrade(req.headers);
     if (!verdict.ok) {
-      reject(verdict.reason);
+      reject(verdict.reason, verdict.status);
       return;
     }
     slot.accept(req, socket, head, reject);

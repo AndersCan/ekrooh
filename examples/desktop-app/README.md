@@ -37,9 +37,9 @@ the glibc requirement stays low.
    keeping the child's **stdin open** and passing it the write end of a private
    pipe.
 3. The backend binds an ephemeral loopback port and writes one JSON line,
-   `{ origin, bootstrap }`, to that pipe. Nothing is written to disk: the
-   session token never leaves the backend (`handoffFile: false`; the mobile
-   hosts still read `handoff.json` from their sandbox).
+   `{ origin, bootstrap }`, to that pipe. Nothing is written to disk
+   (`handoffFile: false`; the mobile hosts read `handoff.json`, which holds no
+   session token, from their sandbox).
 4. The host injects `window.__ekrooh = { bootstrap }` (on the backend's origin
    only) and navigates. The page does `POST /login` itself (ADR 0003); the
    WebSocket + nonce is the only contract.

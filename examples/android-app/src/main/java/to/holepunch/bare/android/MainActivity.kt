@@ -164,9 +164,8 @@ class MainActivity : AppCompatActivity() {
                     )
                     webView.loadUrl("$origin/index.html")
                     // The bootstrap nonce is single-use and the page exchanges
-                    // it for the HttpOnly session cookie immediately; the raw
-                    // session token is never needed by the host again. Delete
-                    // the handoff (and the token at rest) now that it is spent.
+                    // it for the HttpOnly session cookie immediately. Delete
+                    // the handoff now that it is spent.
                     handoff.delete()
                     return
                 } catch (e: Exception) {

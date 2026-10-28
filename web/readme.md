@@ -12,7 +12,7 @@ Transports for the binary message protocol, exported as `@ekrooh/bare/transports
 WebSocket transport:
 
 - Defaults to the page origin. On device the worklet's loopback server serves the page.
-- A one-time nonce (`window.__ekrooh.bootstrap`, never the raw token) is exchanged for a `bare_session` cookie via `POST /login`.
+- A one-time nonce (`window.__ekrooh.bootstrap`, never the raw token) is exchanged for a `bare_session_<port>` cookie via `POST /login`.
 - Reconnects with backoff (250 ms to 2 s, 5 tries). No `?token=` fallback.
 - Cross-origin browser dev needs `VITE_BARE_WS_URL` (see `examples/web`).
 
