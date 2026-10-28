@@ -56,11 +56,23 @@ function writeJson(
   status: HTTPStatusCode,
   body: Record<string, unknown>,
 ) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-  });
+  res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
+}
+
+/** The management API hands out instance credentials, so only a local
+ * non-browser client (the Playwright runner) may call it: a browser request
+ * carries `Origin`, and a DNS-rebinding page carries a foreign `Host`. */
+function isTrustedCaller(
+  headers: HTTPIncomingMessage['headers'],
+  boundHosts: ReadonlySet<string>,
+): boolean {
+  const host = headers['host'];
+  return (
+    headers['origin'] === undefined &&
+    typeof host === 'string' &&
+    boundHosts.has(host)
+  );
 }
 
 let nextInstanceId = 1;
@@ -75,6 +87,7 @@ export function createHarnessSupervisor(
   const origins = new Map<string, string>();
 
   let originPromise: Promise<string> | null = null;
+  let boundHosts = new Set<string>();
 
   function instanceDirs(id: string) {
     const dir = path.join(options.baseDir, id);
@@ -133,6 +146,10 @@ export function createHarnessSupervisor(
   const server = http.createServer(
     async (req: HTTPIncomingMessage, res: HTTPServerResponse) => {
       try {
+        if (!isTrustedCaller(req.headers, boundHosts)) {
+          writeJson(res, 403, { error: 'forbidden' });
+          return;
+        }
         const url = req.url ?? '/';
         const [rawPath] = url.split('?');
         const cleanPath = rawPath.replace(/\/+$/, '') || '/';
@@ -191,7 +208,14 @@ export function createHarnessSupervisor(
         server.on('error', reject);
         server.listen(port, host, () => {
           const address = server.address();
-          resolve(`http://${host}:${address?.port}`);
+          const bound = address?.port;
+          boundHosts = new Set([
+            `${host}:${bound}`,
+            `127.0.0.1:${bound}`,
+            `localhost:${bound}`,
+            `[::1]:${bound}`,
+          ]);
+          resolve(`http://${host}:${bound}`);
         });
       });
     }

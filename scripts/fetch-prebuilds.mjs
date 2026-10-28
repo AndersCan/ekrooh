@@ -13,11 +13,8 @@
  * checked against `scripts/prebuilds.lock.json` before it is unpacked. The
  * lockfile records the pinned `version` and the expected checksum of the
  * `prebuilds.zip` release asset (the archive that contains `android/*` and
- * `ios/*`). A checksum mismatch fails the script closed — nothing is
- * extracted. When a lockfile entry is still a `TODO:` placeholder (no real
- * hash populated yet), verification is skipped but a loud warning is printed;
- * the placeholder MUST be replaced with the real SHA-256 before relying on
- * the downloaded prebuilds in any trusted context.
+ * `ios/*`). A checksum mismatch, or a lockfile entry without a real SHA-256,
+ * fails the script closed — nothing is extracted.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -74,27 +71,29 @@ if (!existsSync(archive)) {
 // Verify integrity before unpacking (fail closed on mismatch).
 const expected = lock.artifacts?.[assetName]?.sha256;
 const actual = createHash('sha256').update(readFileSync(archive)).digest('hex');
-if (expected && /^[0-9a-f]{64}$/i.test(expected)) {
-  if (expected.toLowerCase() !== actual) {
-    rmSync(archive, { force: true });
-    console.error(
-      `Checksum verification FAILED for ${assetName} (${version}).\n` +
-        `  expected: ${expected}\n` +
-        `  actual:   ${actual}\n` +
-        `The downloaded prebuild was discarded. Do not bypass this check — ` +
-        `investigate whether the release was tampered with or the lockfile is ` +
-        `stale.`,
-    );
-    process.exit(1);
-  }
-  console.log(`Verified SHA-256 of ${assetName}: ${actual}`);
-} else {
-  console.warn(
-    `WARNING: ${assetName} has no real SHA-256 in prebuilds.lock.json ` +
-      `(${expected ?? 'missing'}). Checksum verification was SKIPPED. ` +
-      `Populate the real SHA-256 before trusting these prebuilds.`,
+if (!expected || !/^[0-9a-f]{64}$/i.test(expected)) {
+  rmSync(archive, { force: true });
+  console.error(
+    `${assetName} has no real SHA-256 in prebuilds.lock.json ` +
+      `(${expected ?? 'missing'}). Refusing to unpack an unverified prebuild.\n` +
+      `When bumping bare-kit, record this download's hash only after checking ` +
+      `it against the upstream release:\n  ${actual}`,
   );
+  process.exit(1);
 }
+if (expected.toLowerCase() !== actual) {
+  rmSync(archive, { force: true });
+  console.error(
+    `Checksum verification FAILED for ${assetName} (${version}).\n` +
+      `  expected: ${expected}\n` +
+      `  actual:   ${actual}\n` +
+      `The downloaded prebuild was discarded. Do not bypass this check — ` +
+      `investigate whether the release was tampered with or the lockfile is ` +
+      `stale.`,
+  );
+  process.exit(1);
+}
+console.log(`Verified SHA-256 of ${assetName}: ${actual}`);
 
 console.log('Unpacking android/* and ios/* into prebuilds/ ...');
 execFileSync(

@@ -103,6 +103,22 @@ describe('createMediaPlugin', () => {
     expect(error?.message).toContain('no picker');
   });
 
+  it('refuses an unknown kind before reaching the host', async () => {
+    const invokeOnHost = vi.fn(okHost({ path: '/tmp/sample.png' }));
+    const mount = vi.fn();
+    const staticServer = { ...stubServer(), mount };
+    const plugin = createMediaPlugin({ staticServer, invokeOnHost });
+    const invoke = plugin.runtimes.bare?.invoke;
+    if (!invoke) throw new Error('expected bare invoke adapter');
+
+    for (const kind of ['../logs', 'image/x', 42]) {
+      const [error] = await invoke('media.pick', { kind }, context);
+      expect(error?.code).toBe('PLUGIN_ERROR');
+    }
+    expect(invokeOnHost).not.toHaveBeenCalled();
+    expect(mount).not.toHaveBeenCalled();
+  });
+
   it('returns HOST_ERROR when the host returns no path', async () => {
     const plugin = createMediaPlugin({
       staticServer: stubServer(),

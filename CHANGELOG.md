@@ -15,6 +15,37 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - **No session token in `handoff.json`**: the file now holds
   `{ origin, port, bootstrap }`. A host that read `token` from it gets it from
   `runtime.start()` inside the worklet instead.
+- **Gated directory mounts are sandboxed**: files served from a `mountDir`
+  without `{ public: true }` now carry the same `sandbox` Content-Security-Policy
+  as file mounts. An HTML or SVG file in a mounted folder (for example one a
+  peer synced) could previously run script in the app origin and drive every
+  plugin. **Breaking** for a consumer that served app code from a gated mount:
+  move it to the public mount.
+- **No unauthenticated non-loopback bind**: `createLoopbackServer` (and so
+  `createWorkletRuntime`, CLI `host=`) throws when `host` is not a loopback
+  address and auth is off. The Host/Origin rule only stops browsers, so
+  `mode=dev host=0.0.0.0` exposed every plugin to the network.
+- **Host calls use their own request ids**: the host IPC bridge no longer
+  reuses the page-supplied `requestId` on the host channel, so a page cannot
+  supersede or cross-wire other pending host calls.
+- **`vendor.media` validates `kind`**: values other than `image`/`video` are
+  refused before reaching the host or the mount path.
+- **Bounded log ingest**: `POST /logs` truncates messages to 8 KiB and tags to
+  64 chars, and `GET /logs` (text) escapes line breaks so a page entry cannot
+  pose as a backend line.
+- **Android navigation confinement** (`BareWebViewClient`): new
+  `allowedOrigin`; main-frame navigations off the loopback origin are cancelled
+  and http(s) links open in the system browser, matching iOS. The reference app
+  sets it and disables WebView file and content access.
+- **Dev harness**: the supervisor no longer sends `Access-Control-Allow-Origin: *`
+  and refuses requests with an `Origin` or a foreign `Host`, so a website can no
+  longer read instance credentials from it.
+- **Supply chain**: the release job installs dependencies with
+  `--ignore-scripts` (esbuild rebuilt explicitly) while it holds the npm OIDC
+  token, and `fetch-prebuilds` refuses to unpack without a real lockfile hash.
+- **Security model**: `docs/security.md` (threat model and review checklist),
+  `SECURITY.md`, the `security-review` agent skill, and `security.test.ts`
+  guarding greppable invariants.
 
 - **Origin rule in every mode** (`core/server/loopback-gate.ts`): with auth
   off (the dev backend), the loopback server no longer accepts any `Host` or

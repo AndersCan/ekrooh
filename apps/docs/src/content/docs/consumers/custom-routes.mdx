@@ -44,6 +44,11 @@ default a directory mount is **gated** like a file mount. Pass
 at `/` is mounted that way); only a public mount applies the SPA fallback to
 `index.html` for unknown GET navigations — a non-public mount 404s them.
 
+Files from a gated mount are served as content, not app code: they carry the
+same `sandbox` Content-Security-Policy as file mounts, so an HTML or SVG file in
+a mounted folder (user files, a peer-synced folder) never runs script in the
+app origin. Ship app code only in the public mount.
+
 ## Bytes from the browser → worklet
 
 For chunked uploads of large files (photos), the wire protocol's

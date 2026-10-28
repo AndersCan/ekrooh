@@ -25,6 +25,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var worklet: Worklet
     private lateinit var ipc: IPC
     private lateinit var webView: WebView
+    private val webViewClient = BareWebViewClient()
     private val hostPlugins = HostPluginRegistry()
     private lateinit var storageDir: File
     private lateinit var webappDir: File
@@ -114,7 +115,11 @@ class MainActivity : AppCompatActivity() {
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
         webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-        webView.webViewClient = BareWebViewClient()
+        // The page is served over loopback HTTP; it never needs file:// or
+        // content:// access, so a hostile document cannot reach them either.
+        webView.settings.allowFileAccess = false
+        webView.settings.allowContentAccess = false
+        webView.webViewClient = webViewClient
 
         waitForHandoffAndLoad()
 
@@ -162,6 +167,8 @@ class MainActivity : AppCompatActivity() {
                         // handoff already knows the exact ephemeral port.
                         setOf("http://127.0.0.1:$port"),
                     )
+                    // Confine the WebView to this origin before the first load.
+                    webViewClient.allowedOrigin = "http://127.0.0.1:$port"
                     webView.loadUrl("$origin/index.html")
                     // The bootstrap nonce is single-use and the page exchanges
                     // it for the HttpOnly session cookie immediately. Delete

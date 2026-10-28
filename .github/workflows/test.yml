@@ -98,7 +98,11 @@ jobs:
           packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
 
       - name: Install npm dependencies
-        run: npm ci
+        # Same install as release.yml, so a dependency that starts needing its
+        # install script fails here before it can fail a release.
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
 
       - name: Fetch Bare Kit prebuilds
         run: npm run prebuilds

@@ -9,6 +9,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** The request id the bridge put on the host channel in its `index`th write. */
+function sentRequestId(
+  protocol: MessageProtocol,
+  ipc: FakeIpc,
+  index: number,
+): string {
+  return (protocol.decode(ipc.writes[index]).header as { requestId: string })
+    .requestId;
+}
+
 class FakeIpc implements BareIpcLike {
   writes: Uint8Array[] = [];
 
@@ -75,14 +85,15 @@ describe('createHostIpcBridge', () => {
 
     const sent = protocol.decode(ipc.writes[0]);
     expect(sent.header.type).toBe('HOST_INVOKE_REQUEST');
-    expect(sent.header.requestId).toBe('host-invoke-1');
+    // The page's id never reaches the host channel.
+    expect(sent.header.requestId).not.toBe('host-invoke-1');
     expect(Array.from(sent.payload)).toEqual([1, 2]);
 
     const response = protocol.encode(
       MessageType.ENVELOPE,
       {
         type: 'HOST_INVOKE_RESPONSE',
-        requestId: 'host-invoke-1',
+        requestId: sentRequestId(protocol, ipc, 0),
         pluginId: 'core.permissions',
         event: 'permissions.requestStorage',
         result: { granted: true },
@@ -93,7 +104,41 @@ describe('createHostIpcBridge', () => {
 
     const out = await promise;
     expect(out?.type).toBe('INVOKE_RESPONSE');
+    expect(out?.requestId).toBe('host-invoke-1');
     expect(out?.result).toEqual({ granted: true });
+  });
+
+  it('does not answer a host call with a response addressed by the page id', async () => {
+    vi.useFakeTimers();
+    const ipc = new FakeIpc();
+    const protocol = new MessageProtocol();
+    const bridge = createHostIpcBridge({ ipc, protocol });
+
+    const promise = bridge.invokeOnHost(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.permissions',
+        event: 'permissions.requestStorage',
+        requestId: 'page-chosen',
+        args: {},
+      },
+      new Uint8Array(0),
+    );
+    const settled = expect(promise).rejects.toThrow(/Host IPC timeout/);
+    const forged = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'HOST_INVOKE_RESPONSE',
+        requestId: 'page-chosen',
+        pluginId: 'core.permissions',
+        event: 'permissions.requestStorage',
+        result: { granted: true },
+      } satisfies MessageHeader,
+      null,
+    );
+    expect(bridge.tryConsumeDownstreamFromHost(forged)).toBe(false);
+    vi.advanceTimersByTime(30001);
+    await settled;
   });
 
   it('writes an already-encoded Buffer to the IPC without copying it again', async () => {
@@ -231,7 +276,7 @@ describe('createHostIpcBridge', () => {
       MessageType.ENVELOPE,
       {
         type: 'HOST_INVOKE_RESPONSE',
-        requestId: 'coal-1',
+        requestId: sentRequestId(protocol, ipc, 0),
         pluginId: 'core.permissions',
         event: 'permissions.requestStorage',
         result: { ok: 1 },
@@ -242,7 +287,7 @@ describe('createHostIpcBridge', () => {
       MessageType.ENVELOPE,
       {
         type: 'HOST_INVOKE_RESPONSE',
-        requestId: 'coal-2',
+        requestId: sentRequestId(protocol, ipc, 1),
         pluginId: 'core.permissions',
         event: 'permissions.requestStorage',
         result: { ok: 2 },
@@ -262,7 +307,7 @@ describe('createHostIpcBridge', () => {
     expect(await p2).toMatchObject({ type: 'INVOKE_RESPONSE' });
   });
 
-  it('rejects a superseded in-flight call instead of leaking its timer', async () => {
+  it('keeps two calls with the same page id apart', async () => {
     vi.useFakeTimers();
     const ipc = new FakeIpc();
     const protocol = new MessageProtocol();
@@ -289,28 +334,27 @@ describe('createHostIpcBridge', () => {
       new Uint8Array(0),
     );
 
-    // The second call supersedes the first: the first promise must reject
-    // (its timer is cleared, so advancing time must not also time it out).
-    await expect(first).rejects.toThrow(/superseded/);
-    expect(second).toBeDefined();
-
-    const response = protocol.encode(
-      MessageType.ENVELOPE,
-      {
-        type: 'HOST_INVOKE_RESPONSE',
-        requestId: 'dup-1',
-        pluginId: 'core.permissions',
-        event: 'permissions.requestStorage',
-        result: { ok: true },
-      } satisfies MessageHeader,
-      null,
-    );
-    bridge.tryConsumeDownstreamFromHost(response);
-    await expect(second).resolves.toMatchObject({ type: 'INVOKE_RESPONSE' });
-
-    // The superseded call's timer must be gone: advancing past the default
-    // timeout must not trigger a second rejection.
-    vi.advanceTimersByTime(30001);
+    // A repeated page id must not supersede the first call: each gets its own
+    // host-channel id and its own answer.
+    const ids = [0, 1].map((i) => sentRequestId(protocol, ipc, i));
+    expect(ids[0]).not.toBe(ids[1]);
+    ids.forEach((requestId, i) => {
+      bridge.tryConsumeDownstreamFromHost(
+        protocol.encode(
+          MessageType.ENVELOPE,
+          {
+            type: 'HOST_INVOKE_RESPONSE',
+            requestId,
+            pluginId: 'core.permissions',
+            event: 'permissions.requestStorage',
+            result: { call: i },
+          } satisfies MessageHeader,
+          null,
+        ),
+      );
+    });
+    await expect(first).resolves.toMatchObject({ result: { call: 0 } });
+    await expect(second).resolves.toMatchObject({ result: { call: 1 } });
   });
 
   it('logs a debug trace when a host frame cannot be decoded', () => {

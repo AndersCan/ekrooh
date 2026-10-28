@@ -164,7 +164,8 @@ export type LoopbackRouteHandler = (
 ) => void;
 
 export interface LoopbackServerOptions {
-  /** Bind address. Defaults to `127.0.0.1`. */
+  /** Bind address. Defaults to `127.0.0.1`. A non-loopback address throws
+   * unless `auth` is on. */
   host?: string;
   /** Port to bind; `0` picks an ephemeral port (on-device). */
   port?: number;
@@ -281,6 +282,16 @@ function mountKey(mountPath: string): string {
   return `/${segments.join('/')}`;
 }
 
+/** Whether a bind address names the loopback interface only. */
+export function isLoopbackHost(host: string): boolean {
+  return (
+    host === 'localhost' ||
+    host === '::1' ||
+    host === '[::1]' ||
+    /^127(\.\d{1,3}){3}$/.test(host)
+  );
+}
+
 /** Whether `candidate` is `root` or lies below it. Both must be absolute,
  * normalized paths. */
 function isWithin(root: string, candidate: string): boolean {
@@ -305,8 +316,17 @@ export function createLoopbackServer(
 ): LoopbackServer {
   const host = options.host ?? '127.0.0.1';
   const port = options.port ?? 0;
+  const auth = options.auth ?? true;
+  // The Host/Origin rule only stops browsers; a client on another machine
+  // sends whatever `Host` it likes. Without a credential, a non-loopback bind
+  // hands every plugin to the network.
+  if (!auth && !isLoopbackHost(host)) {
+    throw new Error(
+      `refusing to bind '${host}' with auth off: only a loopback address may serve without a credential`,
+    );
+  }
   const gate = createLoopbackGate({
-    auth: options.auth ?? true,
+    auth,
     token: options.token,
     allowedOrigins: options.allowedOrigins,
   });
@@ -675,12 +695,16 @@ export function createLoopbackServer(
     }
     // Policy is decided from the file actually served, so an SPA fallback to
     // `index.html` is revalidated rather than mistaken for a hashed asset.
+    // Only the bootstrap mount is app code. A gated directory mount holds
+    // content (user files, peer-synced folders), so it gets the same sandbox
+    // as a file mount: HTML or SVG in it must never run in the app origin.
     serveFile(
       req,
       res,
       resolved.filePath,
       resolved.stat,
       cachePolicyFor(resolved.rel, mount.public),
+      !mount.public,
     );
   }
 
