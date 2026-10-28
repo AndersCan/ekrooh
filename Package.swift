@@ -38,9 +38,11 @@ let package = Package(
   ],
   targets: [
     .binaryTarget(
+      // Path form for in-repo dev + CI (prebuilds on disk, gitignored). See
+      // RELEASING.md for the release-time switch to url + checksum against
+      // the vX.Y.Z tag artifact.
       name: "BareKitBinary",
-      url: "https://github.com/AndersCan/ekrooh/releases/download/v0.6.0/BareKit.xcframework.zip",
-      checksum: "cb3f1f309942ff0abf9b6bd729dcaf2406c035edae43868338ea709aae32e2a2"
+      path: "prebuilds/ios/BareKit.xcframework"
     ),
     .target(
       name: "BareKitBridge",
