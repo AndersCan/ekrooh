@@ -86,9 +86,10 @@ afterAll(() => {
 function jsonRequest(
   url: string,
   method: string,
+  headers: Record<string, string> = {},
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
-    const req = http.request(url, { method, agent: false }, (res) => {
+    const req = http.request(url, { method, headers, agent: false }, (res) => {
       let body = '';
       res.on('data', (c) => (body += c));
       res.on('end', () =>
@@ -101,6 +102,27 @@ function jsonRequest(
 }
 
 describe('createHarnessSupervisor', () => {
+  it('refuses browser and DNS-rebinding callers', async () => {
+    const sup = createHarnessSupervisor({ webAssets: webDir, baseDir });
+    const mgmt = await sup.origin();
+    try {
+      // A page on another site: credentials must not be readable cross-origin.
+      const fromPage = await jsonRequest(`${mgmt}/instances`, 'POST', {
+        origin: 'https://evil.example',
+      });
+      expect(fromPage.status).toBe(403);
+      expect(fromPage.body.token).toBeUndefined();
+      // A rebinding page reaches the port under its own hostname.
+      const rebound = await jsonRequest(`${mgmt}/instances`, 'GET', {
+        host: `evil.example:${new URL(mgmt).port}`,
+      });
+      expect(rebound.status).toBe(403);
+      expect(sup.registry.list()).toEqual([]);
+    } finally {
+      await new Promise<void>((resolve) => sup.close(() => resolve()));
+    }
+  });
+
   it('allocates instances with per-instance dirs and a working web app', async () => {
     const sup = createHarnessSupervisor({
       webAssets: webDir,

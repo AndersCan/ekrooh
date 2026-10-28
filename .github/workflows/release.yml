@@ -38,7 +38,12 @@ jobs:
           packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
 
       - name: Install npm dependencies
-        run: npm ci
+        # This job holds the npm OIDC token and the signing secrets, so no
+        # dependency install script runs here except the allowlisted ones
+        # (esbuild resolves its platform binary in its install script).
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
 
       - name: Fetch Bare Kit prebuilds
         run: npm run prebuilds

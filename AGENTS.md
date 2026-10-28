@@ -132,3 +132,11 @@ Five canonical roles mapped to default label strings (`needs-triage`, `needs-inf
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Security reviews
+
+`docs/security.md` is the threat model and review checklist; run reviews with the
+`security-review` skill. A change that moves a trust boundary (new route, mount,
+plugin argument used as a path, host plugin, workflow permission) updates
+`docs/security.md` in the same PR. Greppable invariants are enforced by
+`security.test.ts`.

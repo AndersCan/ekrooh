@@ -161,8 +161,11 @@ export function createHostIpcBridge(config: {
       payload: Uint8Array,
       timeoutMs = DEFAULT_HOST_INVOKE_TIMEOUT_MS,
     ): Promise<PluginInvokeResponseHeader | null> {
-      const requestId = header.requestId;
-      if (!requestId) return null;
+      if (!header.requestId) return null;
+      // The caller's id comes from the page, so it is never reused on the host
+      // channel: a page could otherwise supersede or answer-swap other pending
+      // host calls by repeating an id. The response is mapped back to it.
+      const requestId = createRequestId();
 
       const promise = waitFor<HostInvokeResponseHeader>(
         requestId,
@@ -184,7 +187,7 @@ export function createHostIpcBridge(config: {
         type: 'INVOKE_RESPONSE',
         pluginId: hostResp.pluginId,
         event: hostResp.event,
-        requestId: hostResp.requestId,
+        requestId: header.requestId,
         result: hostResp.result,
         error: hostResp.error,
       };

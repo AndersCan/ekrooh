@@ -72,6 +72,10 @@ const url = await server.url('/media/photo-1');
 - Tokens are never placed in URLs or exposed to page JS — only the one-time
   bootstrap nonce, and the session cookie is `HttpOnly`.
 - `Referrer-Policy: no-referrer` on all responses.
+- Files from file mounts and gated directory mounts carry a `sandbox`
+  Content-Security-Policy: opened as a document, they run in an opaque origin.
+- A non-loopback `host` is refused unless auth is on; the Host/Origin rule
+  only stops browsers.
 - WS upgrade origin check, single-client policy, idle timeout.
 - Media mounts are per-session URLs — the mount id is unguessable.
 

@@ -26,6 +26,11 @@ export type MediaPluginDeps = {
  * do not accumulate on the loopback server for the whole session. */
 const MEDIA_MOUNT_CAP = 4;
 
+const MEDIA_KINDS: readonly unknown[] = [
+  'image',
+  'video',
+] satisfies MediaKind[];
+
 function newRequestId(): string {
   // CSPRNG-backed mount id (not Math.random): a local client that can observe
   // one id must not be able to guess/enumerate other mounted media.
@@ -65,13 +70,19 @@ export function createMediaPlugin(deps: MediaPluginDeps): PluginManifest {
     event: 'media.pick' | 'media.capture',
     args: { kind?: MediaKind } | undefined,
   ) => {
+    // Event specs are types only; the page can send any value. `kind` reaches
+    // the native picker and the mount path, so only the known values pass.
+    const kind = args?.kind;
+    if (kind !== undefined && !MEDIA_KINDS.includes(kind)) {
+      return err(ErrorCode.PLUGIN_ERROR, `Unknown media kind for ${event}`);
+    }
     const host = await deps.invokeOnHost(
       {
         type: 'INVOKE_REQUEST',
         pluginId: 'vendor.media',
         event,
         requestId: newRequestId(),
-        args,
+        args: kind === undefined ? {} : { kind },
       },
       new Uint8Array(0),
     );
@@ -88,8 +99,7 @@ export function createMediaPlugin(deps: MediaPluginDeps): PluginManifest {
     if (!path) {
       return err(ErrorCode.HOST_ERROR, `Host returned no path for ${event}`);
     }
-    const kind = args?.kind ?? 'media';
-    const id = `${kind}-${newRequestId()}`;
+    const id = `${kind ?? 'media'}-${newRequestId()}`;
     mountMedia(id, path);
     const url = await deps.staticServer.url(`/media/${id}`);
     return ok({ url });

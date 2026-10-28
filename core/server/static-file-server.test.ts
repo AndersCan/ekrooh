@@ -22,6 +22,7 @@ import {
   createLoopbackServer,
   etagFor,
   etagMatches,
+  isLoopbackHost,
   mimeTypeFor,
   parseRange,
   pathSegments,
@@ -666,6 +667,44 @@ describe('loopback server HTTP', () => {
       "default-src 'none'; style-src 'unsafe-inline'; sandbox",
     );
     expect(r.headers['x-content-type-options']).toBe('nosniff');
+  });
+
+  it('sandboxes HTML and SVG from a gated directory mount', async () => {
+    // A gated mount holds content (e.g. a peer-synced folder), not app code:
+    // a hostile document in it must not run script in the app origin.
+    fs.writeFileSync(
+      path.join(dir, 'evil.svg'),
+      '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>',
+    );
+    server!.mountDir('/shared', dir);
+    try {
+      for (const file of ['index.html', 'evil.svg']) {
+        const r = await request(`/shared/${file}`, { headers: { cookie } });
+        expect(r.status).toBe(200);
+        expect(r.headers['content-security-policy']).toBe(
+          "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        );
+      }
+      // The public bootstrap mount keeps the app policy.
+      const app = await request('/index.html');
+      expect(app.headers['content-security-policy']).toContain(
+        "script-src 'self'",
+      );
+    } finally {
+      fs.rmSync(path.join(dir, 'evil.svg'));
+    }
+  });
+
+  it('refuses a non-loopback bind with auth off', () => {
+    expect(() =>
+      createLoopbackServer({ auth: false, host: '0.0.0.0' }),
+    ).toThrow(/auth off/);
+    expect(() =>
+      createLoopbackServer({ auth: false, host: '192.168.1.5' }),
+    ).toThrow(/auth off/);
+    for (const host of ['127.0.0.1', 'localhost', '::1', '127.0.0.2']) {
+      expect(isLoopbackHost(host)).toBe(true);
+    }
   });
 
   it('answers a throwing route with a bare 500 that leaks no detail', async () => {

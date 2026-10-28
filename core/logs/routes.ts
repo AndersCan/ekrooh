@@ -41,6 +41,25 @@ function isLogLevel(value: unknown): value is LogLevel {
   return LOG_LEVELS.includes(value as LogLevel);
 }
 
+/** Longest ingested message and tag, in UTF-16 code units. The ring holds a
+ * fixed number of entries, so this is what bounds its memory: without it a
+ * page could pin capacity × 1 MiB in the worklet. */
+export const MAX_INGEST_MESSAGE_CHARS = 8 * 1024;
+export const MAX_INGEST_TAG_CHARS = 64;
+
+function truncate(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+/** One entry per line: a line break inside a message would let a page write a
+ * line that reads as a backend diagnostic. */
+function oneLine(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n');
+}
+
 function formatText(e: {
   ts: number;
   level: LogLevel;
@@ -48,8 +67,8 @@ function formatText(e: {
   tag?: string;
   message: string;
 }): string {
-  const tag = e.tag ? `[${e.tag}] ` : '';
-  return `[${new Date(e.ts).toISOString()}] ${e.level.toUpperCase()} ${e.source} ${tag}${e.message}`;
+  const tag = e.tag ? `[${oneLine(e.tag)}] ` : '';
+  return `[${new Date(e.ts).toISOString()}] ${e.level.toUpperCase()} ${e.source} ${tag}${oneLine(e.message)}`;
 }
 
 /** Registers the loopback log routes on the unified server. They inherit the
@@ -135,8 +154,11 @@ export function registerLogRoutes(
               ts: Date.now(),
               level: isLogLevel(raw.level) ? raw.level : 'info',
               source,
-              tag: typeof raw.tag === 'string' ? raw.tag : undefined,
-              message: raw.message,
+              tag:
+                typeof raw.tag === 'string'
+                  ? truncate(raw.tag, MAX_INGEST_TAG_CHARS)
+                  : undefined,
+              message: truncate(raw.message, MAX_INGEST_MESSAGE_CHARS),
             });
             accepted++;
           }

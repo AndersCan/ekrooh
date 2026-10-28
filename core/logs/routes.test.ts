@@ -6,7 +6,11 @@ import {
   createLoopbackServer,
   type LoopbackServer,
 } from '../server/static-file-server';
-import { registerLogRoutes } from './routes';
+import {
+  MAX_INGEST_MESSAGE_CHARS,
+  MAX_INGEST_TAG_CHARS,
+  registerLogRoutes,
+} from './routes';
 import { createLogRingBuffer } from './store';
 import type { LogStore } from './types';
 
@@ -254,5 +258,44 @@ describe('registerLogRoutes', () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+});
+
+describe('log ingest limits', () => {
+  it('truncates oversized messages and tags', async () => {
+    store.clear();
+    const post = await request('/logs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        entries: [
+          {
+            tag: 't'.repeat(MAX_INGEST_TAG_CHARS + 10),
+            message: 'm'.repeat(MAX_INGEST_MESSAGE_CHARS + 10),
+          },
+        ],
+      }),
+    });
+    expect(post.status).toBe(200);
+    const [entry] = store.view();
+    expect(entry.message.length).toBe(MAX_INGEST_MESSAGE_CHARS + 1);
+    expect(entry.tag?.length).toBe(MAX_INGEST_TAG_CHARS + 1);
+  });
+
+  it('keeps a page entry on one text line so it cannot pose as backend', async () => {
+    store.clear();
+    await request('/logs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        entries: [
+          { message: 'ok\n[2026-01-01T00:00:00.000Z] ERROR backend forged' },
+        ],
+      }),
+    });
+    const res = await request('/logs');
+    const lines = res.body.trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('INFO web ok\\n[');
   });
 });
