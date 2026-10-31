@@ -7,10 +7,12 @@ import PackageDescription
 // checkout, no cross-repo npm step.
 //
 // The Bare Kit runtime (`BareKit.xcframework`) is bundled as a SwiftPM binary
-// target. In this working tree (and CI) it resolves from the gitignored
-// `prebuilds/ios/` via the `path` below; at release time (`RELEASING.md`) the
-// binary target is switched to a published `url` + `checksum` artifact on the
-// matching `vX.Y.Z` tag so consumers resolve it purely from SwiftPM.
+// target, always in `url` + `checksum` form — in this working tree, in CI, and
+// on every tag — so nothing is switched at release time. The asset is the zip
+// of the pinned bare-kit prebuild (`scripts/prebuilds.lock.json` → `spm`): it
+// changes only when bare-kit is bumped, not per ekrooh release, which is why
+// the URL can name an older tag. `security.test.ts` keeps the pair in sync
+// with the lockfile. Bumping bare-kit: RELEASING.md, "Bumping Bare Kit".
 //
 // `bare-kit-swift` (holepunchto) is vendored in as `BareKit` (`Worklet`/`IPC`)
 // and `BareKitBridge` (ObjC bridge) targets. Vendoring — rather than a git

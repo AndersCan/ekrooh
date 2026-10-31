@@ -122,6 +122,19 @@ describe('security invariants (docs/security.md)', () => {
     }
   });
 
+  it('Package.swift resolves the BareKit binary the lockfile pins', () => {
+    // One fixed url + checksum form on main and every tag: no release-time
+    // switch to forget (RELEASING.md, "Bumping Bare Kit").
+    const lock = JSON.parse(
+      fs.readFileSync(path.join(ROOT, 'scripts/prebuilds.lock.json'), 'utf8'),
+    ) as { spm: Record<string, { url: string; sha256: string }> };
+    const pin = lock.spm['BareKit.xcframework.zip'];
+    const manifest = fs.readFileSync(path.join(ROOT, 'Package.swift'), 'utf8');
+    expect(manifest).toContain(`url: "${pin.url}"`);
+    expect(manifest).toContain(`checksum: "${pin.sha256}"`);
+    expect(manifest).not.toMatch(/binaryTarget\([^)]*\bpath:/s);
+  });
+
   it('the reference FileProvider exposes only the captures directory', () => {
     const xml = fs.readFileSync(
       path.join(ROOT, 'examples/android-app/src/main/res/xml/file_paths.xml'),
