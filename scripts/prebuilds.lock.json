@@ -1,11 +1,17 @@
 {
-  "_comment": "Integrity lockfile for bare-kit prebuilds fetched by scripts/fetch-prebuilds.mjs (issue #55). `version` MUST match the pinned version in fetch-prebuilds.mjs (and the package bump). `artifacts` maps each downloaded release asset name to its expected SHA-256. The script fails closed on a checksum mismatch. When bumping the bare-kit version, delete and re-fetch the artifact, recompute its SHA-256, and update both `version` and the per-artifact hash here. Do NOT commit placeholder/TODO hashes into a release.",
+  "_comment": "Integrity lockfile for bare-kit prebuilds fetched by scripts/fetch-prebuilds.mjs (issue #55). `version` MUST match the pinned version in fetch-prebuilds.mjs (and the package bump). `artifacts` maps each downloaded release asset name to its expected SHA-256. The script fails closed on a checksum mismatch. When bumping the bare-kit version, delete and re-fetch the artifact, recompute its SHA-256, and update both `version` and the per-artifact hash here. Do NOT commit placeholder/TODO hashes into a release. `spm` pins the BareKit.xcframework.zip that the root Package.swift `.binaryTarget` resolves (zip of prebuilds/ios/BareKit.xcframework from this bare-kit version, hosted as a GitHub release asset). It changes only when bare-kit is bumped, never per ekrooh release; security.test.ts keeps Package.swift in sync with it.",
   "version": "v2.5.5",
   "repo": "holepunchto/bare-kit",
   "artifacts": {
     "prebuilds.zip": {
       "sha256": "fc68740347c8532ba49d45bf61fae9ca1f1040dc7d6c99f2f92dc30c40e84e46",
       "extract": ["android/*", "ios/*"]
+    }
+  },
+  "spm": {
+    "BareKit.xcframework.zip": {
+      "url": "https://github.com/AndersCan/ekrooh/releases/download/v0.6.0/BareKit.xcframework.zip",
+      "sha256": "cb3f1f309942ff0abf9b6bd729dcaf2406c035edae43868338ea709aae32e2a2"
     }
   }
 }

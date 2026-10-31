@@ -30,13 +30,9 @@ targets:
       # products of the root package; xcodegen links every library product of a
       # package, so a single `- package: BareHost` is sufficient.
       - package: BareHost
-      # BareKit is a SwiftPM `.binaryTarget` inside the root package. Its
-      # xcframework still has to be physically embedded into the app bundle,
-      # so point xcodegen at the gitignored prebuilds artifact the package
-      # binary also resolves (see scripts/fetch-prebuilds.mjs). External
-      # consumers embed the same framework resolved through SPM instead.
-      - framework: ../../prebuilds/ios/BareKit.xcframework
-        embed: true
+      # BareKit (the SwiftPM `.binaryTarget`) is embedded by Xcode through the
+      # package product above; embedding the prebuild here as well produces
+      # `Multiple commands produce '.../BareKit.framework'`.
       # Native addons produced by `bare-link --preset ios` (gitignored; see
       # scripts/build-ios-app.mjs). Keep in sync with that output.
       - framework: addons/bare-buffer.3.7.1.xcframework

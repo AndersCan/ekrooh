@@ -33,36 +33,27 @@ document with no human step beyond the tag decision.
 4. (Android) `npm run prebuilds` then `./gradlew :examples:android-app:assembleDebug`.
 5. (iOS) `npm run build:ios` then `npm run test:ios`. CI's macOS job also covers this.
 
-### iOS binary artifact (required)
+### iOS binary artifact
 
-The root `Package.swift` declares `BareKit.xcframework` as a `.binaryTarget`. Its
-committed form points at the gitignored `prebuilds/ios/` for local and CI use. For
-the release, publish the framework on the same tag so consumers resolve it from SPM alone:
+Nothing to do per release. The root `Package.swift` always resolves
+`BareKit.xcframework` by `url` + `checksum`, on `main` and on every tag, so
+there is no form to switch and nothing to restore afterwards. The asset is the
+zip of the pinned bare-kit prebuild, pinned in `scripts/prebuilds.lock.json`
+under `spm`. It only changes when bare-kit is bumped, which is why its URL may
+name an older ekrooh tag. Never delete the release that hosts it: SwiftPM
+consumers of every tag that names it would stop resolving.
 
-1. Zip it: `npm run prebuilds`, then `cd prebuilds/ios && zip -r BareKit.xcframework.zip BareKit.xcframework`.
-2. Checksum: `shasum -a 256 prebuilds/ios/BareKit.xcframework.zip`.
-3. In the root `Package.swift`, point `BareKitBinary` at the release asset:
+#### Bumping Bare Kit
 
-   ```swift
-   .binaryTarget(
-     name: "BareKitBinary",
-     url: "https://github.com/AndersCan/ekrooh/releases/download/vX.Y.Z/BareKit.xcframework.zip",
-     checksum: "<sha256>"
-   )
-   ```
+Only when the pinned bare-kit version changes (not part of a normal release):
 
-4. Commit this as part of `chore: release vX.Y.Z` before tagging, so the tag carries the `url` form.
-5. After creating the GitHub release, upload `BareKit.xcframework.zip` to it.
-6. After tagging, restore the `path:` form on `main` in a follow-up commit. The tag
-   keeps the `url` form for consumers. Left on `main`, the `url` form makes the `ios`
-   CI job fail with `Multiple commands produce '…/BareKit.framework'`.
-
-`url` and `checksum` must match the tag's artifact. SwiftPM validates the checksum at resolve time.
-Consumers then add `.package(url: "https://github.com/AndersCan/ekrooh", exact: "X.Y.Z")`.
-
-> Recommended CI gate: on `v*` tags, re-derive the expected `url` from the tag,
-> recompute the SHA-256 of the uploaded zip, and fail if `Package.swift` does not
-> carry the matching pair. Not yet implemented.
+1. Update `version` and the `prebuilds.zip` hash in `scripts/prebuilds.lock.json`
+   (and the default in `scripts/fetch-prebuilds.mjs`), then `npm run prebuilds`.
+2. `cd prebuilds/ios && zip -r BareKit.xcframework.zip BareKit.xcframework`
+3. Host it: `gh release create bare-kit-<version> --latest=false --title "Bare Kit <version> (SwiftPM binary)" --notes "BareKit.xcframework for Package.swift" prebuilds/ios/BareKit.xcframework.zip`.
+   The tag does not match `v*`, so `release.yml` does not run.
+4. Set the new `url` and `shasum -a 256` of the zip in both `scripts/prebuilds.lock.json`
+   (`spm`) and `Package.swift` in the same PR. `security.test.ts` fails if they differ.
 
 ## 2. Version and changelog
 

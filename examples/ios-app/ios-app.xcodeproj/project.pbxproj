@@ -11,7 +11,6 @@
 		1227E908B3B03DAE8A8FFA6C /* bare-fs.4.8.4.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 76D941ED3B440BDD43A4E483 /* bare-fs.4.8.4.xcframework */; };
 		13B95E1E6C3F3F85E944E2A0 /* IOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D1A2234F9E83EF38A5E1C7 /* IOSApp.swift */; };
 		18D52ECECC3CBF512E0F52EB /* DefaultHostPluginsTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF6B9A180D9F5B6D66FD6AE9 /* DefaultHostPluginsTest.swift */; };
-		27AF8F5818E489B763BA4788 /* BareKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A021468273BDA9ECF0BE0B04 /* BareKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		29C240A81BE97F1DA2631B5D /* BareHost in Frameworks */ = {isa = PBXBuildFile; productRef = 1A07DF693EDED0A38DE8D2AF /* BareHost */; };
 		2E08DBBD7219E8496F1E8D15 /* bare-hrtime.2.1.2.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8FB7C4148944F0B1A3EE3C9E /* bare-hrtime.2.1.2.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		39749658832CA87449A90A68 /* bare-crypto.1.15.4.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D7950B6BAF9622115AE139D6 /* bare-crypto.1.15.4.xcframework */; };
@@ -51,7 +50,6 @@
 		BF94C12A2D32BAB8D0D5B4AC /* main.core.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 7A5416083BDA6FC221B9A772 /* main.core.bundle */; };
 		BFCCF3C12BDC754486EA507A /* bare-inspect.3.1.10.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 492DB8D9051E37E8D03AF63A /* bare-inspect.3.1.10.xcframework */; };
 		C39B784DBB1A7164084BB2F8 /* bare-buffer.3.7.1.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = F406EF6F1793C67A3893328F /* bare-buffer.3.7.1.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		D17ED3082C769BA393A537A5 /* BareKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A021468273BDA9ECF0BE0B04 /* BareKit.xcframework */; };
 		D44C505B5596ACB60839A975 /* quickbit-native.2.4.8.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 94622613ED44A6A998F78A5C /* quickbit-native.2.4.8.xcframework */; };
 		D4C517401EC9EE5D395143C3 /* sodium-native.5.1.0.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B955CCC8D01552C46ABD4CA6 /* sodium-native.5.1.0.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		DEF2A24A74EEF3F12CB61563 /* bare-fs.4.8.4.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 76D941ED3B440BDD43A4E483 /* bare-fs.4.8.4.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -90,7 +88,6 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				27AF8F5818E489B763BA4788 /* BareKit.xcframework in Embed Frameworks */,
 				C39B784DBB1A7164084BB2F8 /* bare-buffer.3.7.1.xcframework in Embed Frameworks */,
 				6D82225FF51BC3C5C188174A /* bare-crypto.1.15.4.xcframework in Embed Frameworks */,
 				8F25C9B94F067D6A25EC96AE /* bare-dns.2.3.1.xcframework in Embed Frameworks */,
@@ -141,7 +138,6 @@
 		8FB7C4148944F0B1A3EE3C9E /* bare-hrtime.2.1.2.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-hrtime.2.1.2.xcframework"; path = "addons/bare-hrtime.2.1.2.xcframework"; sourceTree = "<group>"; };
 		94622613ED44A6A998F78A5C /* quickbit-native.2.4.8.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "quickbit-native.2.4.8.xcframework"; path = "addons/quickbit-native.2.4.8.xcframework"; sourceTree = "<group>"; };
 		9EE53FB9B162D33ED8B52E15 /* bare-url.2.5.5.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-url.2.5.5.xcframework"; path = "addons/bare-url.2.5.5.xcframework"; sourceTree = "<group>"; };
-		A021468273BDA9ECF0BE0B04 /* BareKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = BareKit.xcframework; path = ../../prebuilds/ios/BareKit.xcframework; sourceTree = "<group>"; };
 		AA58348B916C35B23DBDD3B9 /* fs-native-extensions.1.5.0.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "fs-native-extensions.1.5.0.xcframework"; path = "addons/fs-native-extensions.1.5.0.xcframework"; sourceTree = "<group>"; };
 		B77F41681FC1649B2DF6883C /* ErrorCodesParityTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorCodesParityTest.swift; sourceTree = "<group>"; };
 		B955CCC8D01552C46ABD4CA6 /* sodium-native.5.1.0.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "sodium-native.5.1.0.xcframework"; path = "addons/sodium-native.5.1.0.xcframework"; sourceTree = "<group>"; };
@@ -173,7 +169,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				084CA622D5E2F01CBAC4C399 /* BareHost in Frameworks */,
-				D17ED3082C769BA393A537A5 /* BareKit.xcframework in Frameworks */,
 				B2C7BFF97B2FA21BE7AB1623 /* bare-buffer.3.7.1.xcframework in Frameworks */,
 				39749658832CA87449A90A68 /* bare-crypto.1.15.4.xcframework in Frameworks */,
 				3D653ABA75015E2776558C5A /* bare-dns.2.3.1.xcframework in Frameworks */,
@@ -250,7 +245,6 @@
 				BFF34472C9302741E0C71AED /* bare-tls.3.1.14.xcframework */,
 				8CDB213EB13869D2E0D1D158 /* bare-type.1.4.0.xcframework */,
 				9EE53FB9B162D33ED8B52E15 /* bare-url.2.5.5.xcframework */,
-				A021468273BDA9ECF0BE0B04 /* BareKit.xcframework */,
 				AA58348B916C35B23DBDD3B9 /* fs-native-extensions.1.5.0.xcframework */,
 				94622613ED44A6A998F78A5C /* quickbit-native.2.4.8.xcframework */,
 				3E6AABF83FB9E0C74534C3EF /* rabin-native.2.0.0.xcframework */,
@@ -614,7 +608,6 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
-					"\"../../prebuilds/ios\"",
 					"\"addons\"",
 				);
 				INFOPLIST_FILE = app/Info.plist;
@@ -637,7 +630,6 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
-					"\"../../prebuilds/ios\"",
 					"\"addons\"",
 				);
 				INFOPLIST_FILE = app/Info.plist;
