@@ -34,7 +34,7 @@ dependencies: [
 // products: .product(name: "BareHost", package: "ekrooh"), .product(name: "BareKit", package: "ekrooh")
 ```
 
-`Package.swift` points the `.binaryTarget` at `prebuilds/ios/BareKit.xcframework` for in-repo dev. At release time (`RELEASING.md`) it is swapped to the published `url` and `checksum` on the tag, which is what consumers get.
+`Package.swift` resolves the `.binaryTarget` by a fixed `url` and `checksum` (pinned in `scripts/prebuilds.lock.json`), the same on `main` and on every tag. It changes only when bare-kit is bumped (`RELEASING.md`, "Bumping Bare Kit").
 
 ## Embed in an app target
 
