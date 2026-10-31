@@ -121,6 +121,7 @@ review checks that both still exist and still say this.
 `security.test.ts` (repo root, runs in `vp test`) fails the build when a cheap,
 greppable invariant regresses: HTML-injection sinks in shipped code, wildcard
 CORS anywhere in `core/` or `plugins/`, `Math.random` in id-minting code,
+a `globalThis.crypto` read outside the `Platform` seam,
 unpinned actions, `pull_request_target`, a release install that runs
 dependency scripts, a placeholder prebuild hash. Extend it when a new
 invariant can be checked by reading files; prefer a behavior test next to the

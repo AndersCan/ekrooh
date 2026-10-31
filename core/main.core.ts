@@ -1,4 +1,3 @@
-import './install-web-crypto';
 import { createWorkletRuntime, resolveWorkletConfig } from './runtime';
 
 /**
