@@ -1,6 +1,7 @@
 import { MessageType } from './constants';
 import { MessageProtocol } from './wire-codec';
 import { createRequestId } from './request-id';
+import type { Platform } from './platform';
 import { toBytes, toIpcChunk } from './bytes';
 import type {
   CapabilityDescriptor,
@@ -34,8 +35,10 @@ export type BareIpcLike = {
 export function createHostIpcBridge(config: {
   ipc: BareIpcLike;
   protocol: MessageProtocol;
+  /** Worklet entry points pass `barePlatform`; Bare has no Web Crypto global. */
+  platform: Platform;
 }) {
-  const { ipc, protocol } = config;
+  const { ipc, protocol, platform } = config;
   const pending = new Map<string, Pending>();
 
   function track(requestId: string, slot: Pending) {
@@ -142,7 +145,7 @@ export function createHostIpcBridge(config: {
 
     async queryCapabilities(timeoutMs = 5000): Promise<CapabilityDescriptor[]> {
       // CSPRNG-backed (not Math.random): unguessable request ids for host IPC.
-      const requestId = createRequestId();
+      const requestId = createRequestId(platform);
       const promise = waitFor<HostCapabilitiesResponseHeader>(
         requestId,
         'HOST_CAPABILITIES_RESPONSE',
@@ -165,7 +168,7 @@ export function createHostIpcBridge(config: {
       // The caller's id comes from the page, so it is never reused on the host
       // channel: a page could otherwise supersede or answer-swap other pending
       // host calls by repeating an id. The response is mapped back to it.
-      const requestId = createRequestId();
+      const requestId = createRequestId(platform);
 
       const promise = waitFor<HostInvokeResponseHeader>(
         requestId,

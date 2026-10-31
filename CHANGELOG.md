@@ -7,6 +7,17 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Host invokes work in consumer worklets** (#268): request ids no longer
+  read `globalThis.crypto`, which Bare does not provide, so every
+  `invokeOnHost` (photo picker, camera) threw before it was sent unless the
+  worklet entry installed a Web Crypto shim. Randomness is now injected
+  through a `Platform` object: the worklet runtime uses `bare-crypto`, and
+  `createProtocolMessenger(send, { platform })` defaults to Web Crypto and
+  throws (never falls back to `Math.random`) when none exists. Consumer
+  shims that set `globalThis.crypto` for this can be removed.
+
 ## [0.6.0] - 2026-10-28
 
 ### Security

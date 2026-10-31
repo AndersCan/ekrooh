@@ -1,4 +1,3 @@
-import './install-web-crypto';
 import Pipe from 'bare-pipe';
 import { createWorkletRuntime, resolveCliConfig } from './runtime';
 
