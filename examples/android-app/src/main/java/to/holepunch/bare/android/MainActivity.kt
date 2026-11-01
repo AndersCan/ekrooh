@@ -16,6 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.webkit.WebViewCompat
 import org.json.JSONObject
+import to.holepunch.bare.android.app.R
 import to.holepunch.bare.kit.IPC
 import to.holepunch.bare.kit.Worklet
 import java.io.File
