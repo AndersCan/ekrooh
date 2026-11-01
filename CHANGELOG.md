@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-01
+
 ### Fixed
 
 - **Host invokes work in consumer worklets** (#268): request ids no longer
@@ -21,6 +23,14 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   capabilities query now returns a `HOST_ERROR` response, and any invoke
   whose routing throws gets an error response. Before, the web caller got
   nothing and waited out its timeout.
+
+### Changed
+
+- **Android build toolchain** (#271): the build moved to AGP 9.5 and Gradle 9.6,
+  and AGP's built-in Kotlin replaces the `org.jetbrains.kotlin.android` plugin.
+  The published AAR is now built with a different Kotlin compiler.
+- **SwiftPM binary pin** (#270): `Package.swift` resolves BareKit by pinned
+  `url` and `checksum` on `main`, not by a local path.
 
 ## [0.6.0] - 2026-10-28
 
