@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-  namespace = "to.holepunch.bare.android"
+  namespace = "to.holepunch.bare.android.app"
   compileSdk = 36
   ndkVersion = "27.2.12479018"
 
