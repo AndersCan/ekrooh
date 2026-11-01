@@ -213,7 +213,7 @@ describe('createFrameChannel', () => {
     expect(resume).toHaveBeenCalledTimes(1);
   });
 
-  it('logs a routing failure without affecting later calls', async () => {
+  it('logs a routing failure and answers it without affecting later calls', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const write = vi.fn();
     const router = echoRouter();
@@ -229,7 +229,17 @@ describe('createFrameChannel', () => {
     channel.push(invoke('works'));
     await flush();
     expect(error).toHaveBeenCalledWith('[ipc] routing failed: boom');
-    expect(responseIds(write)).toEqual(['works']);
+    // The failed invoke is answered with an error, never left to time out.
+    expect(responseIds(write).sort()).toEqual(['fails', 'works']);
+    const failed = write.mock.calls
+      .map(([frame]) => protocol.decode(frame as Uint8Array).header)
+      .find(
+        (h) => (h as { requestId: string }).requestId === 'fails',
+      ) as PluginInvokeResponseHeader;
+    expect(failed.error).toEqual({
+      code: 'PLUGIN_ERROR',
+      message: 'core.health.ping failed: boom',
+    });
   });
 
   it('stops after close', async () => {

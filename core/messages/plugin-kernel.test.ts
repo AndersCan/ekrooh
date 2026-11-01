@@ -289,6 +289,39 @@ describe('createPluginRouter', () => {
     expect(response).toEqual(delegated);
   });
 
+  it('answers HOST_ERROR when the host capabilities query fails (ekrooh#268)', async () => {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'vendor.media',
+      events: ['media.pickMany'],
+      runtimes: {},
+    });
+    const delegateToHost = vi.fn(async () => null);
+    const router = createPluginRouter(registry, 'bare', {
+      delegateToHost,
+      getHostCapabilities: async () => {
+        throw new Error('no CSPRNG');
+      },
+    });
+    const response = await router.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'vendor.media',
+        event: 'media.pickMany',
+        requestId: 'r-caps',
+      },
+      new Uint8Array(0),
+    );
+    expect(response).toEqual({
+      type: 'INVOKE_RESPONSE',
+      pluginId: 'vendor.media',
+      event: 'media.pickMany',
+      requestId: 'r-caps',
+      error: { code: 'HOST_ERROR', message: 'no CSPRNG' },
+    });
+    expect(delegateToHost).not.toHaveBeenCalled();
+  });
+
   it('does NOT delegate a declared event the host has not registered', async () => {
     const registry = createPluginRegistry();
     registry.register({
@@ -617,7 +650,11 @@ describe('createPluginRouter', () => {
         if (attempt === 1) throw new Error('Host IPC timeout');
         return announce(['permissions.requestStorage']);
       });
-      await expect(invoke()).rejects.toThrow(/Host IPC timeout/);
+      // The failure answers the caller (ekrooh#268) and is not cached.
+      expect((await invoke())?.error).toEqual({
+        code: 'HOST_ERROR',
+        message: 'Host IPC timeout',
+      });
       expect((await invoke())?.error).toBeUndefined();
       expect(queries).toHaveBeenCalledTimes(2);
     });

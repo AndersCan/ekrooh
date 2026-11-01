@@ -17,6 +17,10 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   `createProtocolMessenger(send, { platform })` defaults to Web Crypto and
   throws (never falls back to `Math.random`) when none exists. Consumer
   shims that set `globalThis.crypto` for this can be removed.
+- **Failed host calls answer instead of hanging** (#268): a failed host
+  capabilities query now returns a `HOST_ERROR` response, and any invoke
+  whose routing throws gets an error response. Before, the web caller got
+  nothing and waited out its timeout.
 
 ## [0.6.0] - 2026-10-28
 

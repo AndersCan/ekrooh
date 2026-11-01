@@ -1,5 +1,6 @@
 import { createInboundGate, type InboundGateOptions } from './backpressure';
 import { ChannelHealth } from './channel-health';
+import { ErrorCode } from './constants';
 import { encodeResponse } from './encode-response';
 import { createFrameDecoder } from './framing';
 import { toBytes } from './bytes';
@@ -91,6 +92,28 @@ export function createFrameChannel(options: FrameChannelOptions): FrameChannel {
         // A routing failure affects only this call; the stream stays usable.
         const reason = err instanceof Error ? err.message : String(err);
         console.error(`${name} routing failed: ${reason}`);
+        // An invoke still gets an answer, so its caller fails fast instead of
+        // waiting out its timeout with nothing to explain why (ekrooh#268).
+        const header = message.header;
+        if (
+          header.type === 'INVOKE_REQUEST' &&
+          typeof header.requestId === 'string' &&
+          typeof header.pluginId === 'string' &&
+          typeof header.event === 'string'
+        ) {
+          options.write(
+            encodeResponse(protocol, {
+              type: 'INVOKE_RESPONSE',
+              pluginId: header.pluginId,
+              event: header.event,
+              requestId: header.requestId,
+              error: {
+                code: ErrorCode.PLUGIN_ERROR,
+                message: `${header.pluginId}.${header.event} failed: ${reason}`,
+              },
+            }),
+          );
+        }
       });
     gate?.track(work);
   }
