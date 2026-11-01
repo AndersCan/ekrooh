@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-01
+
 ### Fixed
 
 - **Host invokes work in consumer worklets** (#268): request ids no longer
