@@ -69,6 +69,18 @@ describe('security invariants (docs/security.md)', () => {
     expect(offendingLines(files, /Math\.random\(/)).toEqual([]);
   });
 
+  it('core and plugins read Web Crypto only through the Platform seam', () => {
+    // Bare has no Web Crypto global (ekrooh#268): randomness is injected via
+    // `Platform`, and only its web default may touch `globalThis.crypto`.
+    const files = sourceFiles(
+      ['core', 'plugins'],
+      ['core/messages/platform.ts'],
+    );
+    expect(offendingLines(files, /globalThis\.crypto|getRandomValues/)).toEqual(
+      [],
+    );
+  });
+
   it('every workflow action is pinned to a full commit SHA', () => {
     const dir = path.join(ROOT, '.github/workflows');
     const unpinned: string[] = [];

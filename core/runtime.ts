@@ -1,6 +1,7 @@
 import fs from 'bare-fs';
 import path from 'bare-path';
 import { createDefaultPlugins } from '../plugins';
+import { barePlatform } from './lib/bare-platform';
 import { getIPC } from './lib/get-ipc';
 import { toIpcChunk } from './messages/bytes';
 import { createBareRuntimeContext } from './messages/create-bare-runtime-context';
@@ -288,7 +289,9 @@ export function createWorkletRuntime(
       hostBridge?.queryCapabilities() ?? Promise.resolve([]),
   });
   const { protocol, pluginRegistry, pluginRouter } = context;
-  hostBridge = ipc ? createHostIpcBridge({ ipc, protocol }) : null;
+  hostBridge = ipc
+    ? createHostIpcBridge({ ipc, protocol, platform: barePlatform })
+    : null;
 
   // `core.logs`: the worklet capture seam (console interception), the shared
   // ring buffer fed by both the seam and the web ingest route, and the loopback

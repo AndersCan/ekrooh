@@ -285,8 +285,10 @@ export function createPluginRouter(
         }
       }
       if (header.requestId && options?.delegateToHost) {
-        if (await hostAnnounces(header.pluginId, header.event)) {
-          try {
+        // The capabilities query is host IPC too: a failure there must answer
+        // the caller, not escape `route` and leave it waiting (ekrooh#268).
+        try {
+          if (await hostAnnounces(header.pluginId, header.event)) {
             const delegated = await options.delegateToHost(header, payload);
             if (delegated) {
               // The host disowning the event means our snapshot is stale.
@@ -300,16 +302,16 @@ export function createPluginRouter(
               return delegated;
             }
             capsCache = null;
-          } catch (e) {
-            capsCache = null;
-            return invokeErrorResponse(
-              header,
-              new CoreError(
-                ErrorCode.HOST_ERROR,
-                e instanceof Error ? e.message : String(e),
-              ),
-            );
           }
+        } catch (e) {
+          capsCache = null;
+          return invokeErrorResponse(
+            header,
+            new CoreError(
+              ErrorCode.HOST_ERROR,
+              e instanceof Error ? e.message : String(e),
+            ),
+          );
         }
       }
       return invokeErrorResponse(

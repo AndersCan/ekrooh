@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { createHostIpcBridge, type BareIpcLike } from './host-ipc';
 import { createFrameDecoder } from './framing';
 import { MessageProtocol } from './wire-codec';
+import { barePlatform as platform } from '../lib/bare-platform';
 import { MessageType } from './constants';
 import type { MessageHeader, RuntimeTarget } from './types';
 
@@ -45,7 +46,7 @@ describe('createHostIpcBridge', () => {
   it('queries host capabilities', async () => {
     const ipc = new FakeIpc();
     const protocol = new MessageProtocol();
-    const bridge = createHostIpcBridge({ ipc, protocol });
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
 
     const promise = bridge.queryCapabilities();
     expect(ipc.writes).toHaveLength(1);
@@ -70,7 +71,7 @@ describe('createHostIpcBridge', () => {
   it('invokes an event on the host and maps the response back', async () => {
     const ipc = new FakeIpc();
     const protocol = new MessageProtocol();
-    const bridge = createHostIpcBridge({ ipc, protocol });
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
 
     const promise = bridge.invokeOnHost(
       {
@@ -112,7 +113,7 @@ describe('createHostIpcBridge', () => {
     vi.useFakeTimers();
     const ipc = new FakeIpc();
     const protocol = new MessageProtocol();
-    const bridge = createHostIpcBridge({ ipc, protocol });
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
 
     const promise = bridge.invokeOnHost(
       {
@@ -147,6 +148,7 @@ describe('createHostIpcBridge', () => {
     const bridge = createHostIpcBridge({
       ipc,
       protocol: new MessageProtocol(),
+      platform,
     });
     const fromSpy = vi.spyOn(Buffer, 'from');
     try {
@@ -164,7 +166,7 @@ describe('createHostIpcBridge', () => {
   it('returns null when invoked without a request id', async () => {
     const ipc = new FakeIpc();
     const protocol = new MessageProtocol();
-    const bridge = createHostIpcBridge({ ipc, protocol });
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
     const out = await bridge.invokeOnHost(
       {
         type: 'INVOKE_REQUEST',
@@ -179,7 +181,7 @@ describe('createHostIpcBridge', () => {
   it('does not consume messages that are not host responses', () => {
     const ipc = new FakeIpc();
     const protocol = new MessageProtocol();
-    const bridge = createHostIpcBridge({ ipc, protocol });
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
     const frame = protocol.encode(
       MessageType.ENVELOPE,
       {
@@ -196,7 +198,7 @@ describe('createHostIpcBridge', () => {
     vi.useFakeTimers();
     const ipc = new FakeIpc();
     const protocol = new MessageProtocol();
-    const bridge = createHostIpcBridge({ ipc, protocol });
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
     const promise = bridge.invokeOnHost(
       {
         type: 'INVOKE_REQUEST',
@@ -215,7 +217,7 @@ describe('createHostIpcBridge', () => {
   it('resolves a pending host call when its frame arrives split', async () => {
     const ipc = new FakeIpc();
     const protocol = new MessageProtocol();
-    const bridge = createHostIpcBridge({ ipc, protocol });
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
     const decoder = createFrameDecoder(protocol);
 
     const promise = bridge.queryCapabilities();
@@ -248,7 +250,7 @@ describe('createHostIpcBridge', () => {
   it('resolves coalesced host frames delivered in one chunk', async () => {
     const ipc = new FakeIpc();
     const protocol = new MessageProtocol();
-    const bridge = createHostIpcBridge({ ipc, protocol });
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
     const decoder = createFrameDecoder(protocol);
 
     const p1 = bridge.invokeOnHost(
@@ -311,7 +313,7 @@ describe('createHostIpcBridge', () => {
     vi.useFakeTimers();
     const ipc = new FakeIpc();
     const protocol = new MessageProtocol();
-    const bridge = createHostIpcBridge({ ipc, protocol });
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
 
     const first = bridge.invokeOnHost(
       {
@@ -362,7 +364,7 @@ describe('createHostIpcBridge', () => {
     try {
       const ipc = new FakeIpc();
       const protocol = new MessageProtocol();
-      const bridge = createHostIpcBridge({ ipc, protocol });
+      const bridge = createHostIpcBridge({ ipc, protocol, platform });
       // Bad version byte — decode fails and the bridge swallows it.
       expect(
         bridge.tryConsumeDownstreamFromHost(

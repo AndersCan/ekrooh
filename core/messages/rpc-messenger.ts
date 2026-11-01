@@ -4,6 +4,7 @@ import {
   PluginInvokeRequestHeader,
 } from './types';
 import { createRequestId } from './request-id';
+import { resolvePlatform, type Platform } from './platform';
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
   ? Omit<T, K>
@@ -45,7 +46,15 @@ export function createProtocolMessenger(
     request: InternalDispatchRequest,
     payload?: Uint8Array | ArrayBuffer | string | null,
   ) => void,
+  options: { platform?: Partial<Platform> } = {},
 ): ProtocolMessenger {
+  const platform = resolvePlatform(options.platform);
+  const withRequestId = <T extends object>(
+    request: T,
+  ): T & { requestId: string } => ({
+    ...request,
+    requestId: createRequestId(platform),
+  });
   const pending = new Map<
     string,
     {
@@ -153,12 +162,6 @@ export function createProtocolMessenger(
       pendingCall.resolve(header);
     },
   };
-}
-
-function withRequestId<T extends object>(
-  request: T,
-): T & { requestId: string } {
-  return { ...request, requestId: createRequestId() };
 }
 
 /** Cap on log lines appended to an invoke-timeout rejection. The string can
