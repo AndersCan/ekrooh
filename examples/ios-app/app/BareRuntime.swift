@@ -17,6 +17,11 @@ final class BareRuntime {
   private var navigationDelegate: BareNavigationDelegate?
   private weak var webView: WKWebView?
 
+  /// Cold worklet boot (corestore + swarm init) on a loaded CI simulator can
+  /// outlast the former 15s; a timeout renders a visible message so UI tests
+  /// can tell this stage from a blank page.
+  private static let handoffTimeout: TimeInterval = 45
+
   init() {
     let documents =
       FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -133,7 +138,7 @@ final class BareRuntime {
   /// single-use nonce the page exchanges once via `POST /login`.
   private func waitForHandoffAndLoad(webView: WKWebView) {
     handoffTask = Task { @MainActor in
-      let deadline = Date().addingTimeInterval(15)
+      let deadline = Date().addingTimeInterval(Self.handoffTimeout)
       var credentials: [String: Any]?
       while Date() < deadline && !Task.isCancelled {
         if let data = try? Data(contentsOf: handoffURL) {
@@ -151,6 +156,12 @@ final class BareRuntime {
         let url = URL(string: "\(origin)/index.html")
       else {
         BareHostLogger.log("Timed out waiting for worklet handoff")
+        if !Task.isCancelled {
+          webView.loadHTMLString(
+            "<p>Worklet handoff timed out after \(Int(Self.handoffTimeout))s</p>",
+            baseURL: nil
+          )
+        }
         return
       }
       // Confine the WebView to exactly this loopback origin (host + port); any
