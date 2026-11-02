@@ -17,10 +17,17 @@ final class BareRuntime {
   private var navigationDelegate: BareNavigationDelegate?
   private weak var webView: WKWebView?
 
-  /// Cold worklet boot (corestore + swarm init) on a loaded CI simulator can
-  /// outlast the former 15s; a timeout renders a visible message so UI tests
-  /// can tell this stage from a blank page.
-  private static let handoffTimeout: TimeInterval = 45
+  /// Debug builds (CI) get a longer handoff window for slow cold simulator
+  /// boots; release keeps 15s, matching the Android host. A timeout renders a
+  /// visible message so UI tests can tell this stage from a blank page. Debug
+  /// builds accept `-ekroohHandoffTimeoutSeconds N` to force the timeout path.
+  #if DEBUG
+  private static let handoffTimeout: TimeInterval =
+    UserDefaults.standard.object(forKey: "ekroohHandoffTimeoutSeconds") != nil
+    ? UserDefaults.standard.double(forKey: "ekroohHandoffTimeoutSeconds") : 45
+  #else
+  private static let handoffTimeout: TimeInterval = 15
+  #endif
 
   init() {
     let documents =
@@ -257,6 +264,11 @@ final class BareNavigationDelegate: NSObject, WKNavigationDelegate {
     }
     guard let url = navigationAction.request.url else {
       decisionHandler(.cancel)
+      return
+    }
+    // The handoff-timeout message is loaded via loadHTMLString (about:blank).
+    if url.absoluteString == "about:blank" {
+      decisionHandler(.allow)
       return
     }
     let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
