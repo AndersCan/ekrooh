@@ -17,6 +17,18 @@ final class BareRuntime {
   private var navigationDelegate: BareNavigationDelegate?
   private weak var webView: WKWebView?
 
+  /// Debug builds (CI) get a longer handoff window for slow cold simulator
+  /// boots; release keeps 15s, matching the Android host. A timeout renders a
+  /// visible message so UI tests can tell this stage from a blank page. Debug
+  /// builds accept `-ekroohHandoffTimeoutSeconds N` to force the timeout path.
+  #if DEBUG
+  private static let handoffTimeout: TimeInterval =
+    UserDefaults.standard.object(forKey: "ekroohHandoffTimeoutSeconds") != nil
+    ? UserDefaults.standard.double(forKey: "ekroohHandoffTimeoutSeconds") : 45
+  #else
+  private static let handoffTimeout: TimeInterval = 15
+  #endif
+
   init() {
     let documents =
       FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -133,7 +145,7 @@ final class BareRuntime {
   /// single-use nonce the page exchanges once via `POST /login`.
   private func waitForHandoffAndLoad(webView: WKWebView) {
     handoffTask = Task { @MainActor in
-      let deadline = Date().addingTimeInterval(15)
+      let deadline = Date().addingTimeInterval(Self.handoffTimeout)
       var credentials: [String: Any]?
       while Date() < deadline && !Task.isCancelled {
         if let data = try? Data(contentsOf: handoffURL) {
@@ -151,6 +163,12 @@ final class BareRuntime {
         let url = URL(string: "\(origin)/index.html")
       else {
         BareHostLogger.log("Timed out waiting for worklet handoff")
+        if !Task.isCancelled {
+          webView.loadHTMLString(
+            "<p>Worklet handoff timed out after \(Int(Self.handoffTimeout))s</p>",
+            baseURL: nil
+          )
+        }
         return
       }
       // Confine the WebView to exactly this loopback origin (host + port); any
@@ -246,6 +264,11 @@ final class BareNavigationDelegate: NSObject, WKNavigationDelegate {
     }
     guard let url = navigationAction.request.url else {
       decisionHandler(.cancel)
+      return
+    }
+    // The handoff-timeout message is loaded via loadHTMLString (about:blank).
+    if url.absoluteString == "about:blank" {
+      decisionHandler(.allow)
       return
     }
     let components = URLComponents(url: url, resolvingAgainstBaseURL: false)

@@ -8,6 +8,23 @@ final class IOSAppUITests: XCTestCase {
     continueAfterFailure = false
   }
 
+  #if DEBUG
+  /// Forces the handoff timeout to 0s and asserts the visible timeout message
+  /// renders, proving the stage diagnostic used by the main test works.
+  func testHandoffTimeoutMessageRenders() throws {
+    let app = XCUIApplication()
+    app.launchArguments = ["-ekroohHandoffTimeoutSeconds", "0"]
+    app.launch()
+    let message = app.staticTexts.matching(
+      NSPredicate(format: "label CONTAINS %@", "Worklet handoff timed out")
+    ).firstMatch
+    XCTAssertTrue(
+      message.waitForExistence(timeout: 30),
+      "Handoff timeout message did not render:\n\(app.debugDescription)"
+    )
+  }
+  #endif
+
   func testHealthChecksPageEndToEnd() throws {
     let app = XCUIApplication()
     app.launch()
@@ -18,10 +35,10 @@ final class IOSAppUITests: XCTestCase {
         "Discovery v1: 5 plugin(s) — core.health, core.discovery, core.permissions, vendor.media, core.logs"
       )
     ).firstMatch
-    XCTAssertTrue(
-      discovery.waitForExistence(timeout: 30),
-      "Discovery summary did not appear:\n\(app.debugDescription)"
-    )
+    // Budget: worklet handoff (45s in BareRuntime) + page load + discovery.
+    if !discovery.waitForExistence(timeout: 75) {
+      XCTFail("\(stalledStage(app)):\n\(app.debugDescription)")
+    }
 
     XCTAssertTrue(app.buttons["Ping"].waitForExistence(timeout: 10))
     XCTAssertTrue(app.buttons["Payload Echo"].exists)
@@ -51,6 +68,19 @@ final class IOSAppUITests: XCTestCase {
     assertResult(
       app, containing: "Media capture failed: camera unavailable",
       "Camera-unavailable error did not appear")
+  }
+
+  /// Names the stage that stalled: worklet handoff, page render, or discovery.
+  private func stalledStage(_ app: XCUIApplication) -> String {
+    if app.staticTexts.matching(
+      NSPredicate(format: "label CONTAINS %@", "Worklet handoff timed out")
+    ).firstMatch.exists {
+      return "Stalled at worklet handoff (loopback server never wrote handoff.json)"
+    }
+    if app.buttons["Ping"].exists {
+      return "Stalled at discovery (page rendered but summary missing)"
+    }
+    return "Stalled at page load (WebView rendered no content)"
   }
 
   private func waitForResult(_ app: XCUIApplication, containing text: String)
