@@ -7,6 +7,20 @@ boring bootstrap (wire protocol, plugin contracts, transports, Android and iOS
 hosts) that lets an app run across platforms and enables **p2p** technology. It
 is plumbing, not a product.
 
+## Visions
+
+1. **Ekrooh is secure, and we keep proving it.** Security is a standing
+   direction, never finished. We run regular security audits (dependencies,
+   the wire protocol, plugin contracts, transports, the Android, iOS and desktop
+   hosts, the p2p layer and the release pipeline) and take preemptive measures before
+   anyone has to report a problem: threat models, hardening, supply-chain
+   protections and fixes for what the audits find.
+2. **A plugin system that makes everything else possible.** Ekrooh handles
+   demanding applications and gives end users a solid foundation to customize
+   and extend. Ekrooh does not support everything directly: its plugin system
+   is so good that everything else is fully supported through plugins. Common
+   plugin setups ship as examples, which keeps Ekrooh itself lean.
+
 ## Goal
 
 Give justus (and future apps) a stable, distributable foundation: cross-platform
