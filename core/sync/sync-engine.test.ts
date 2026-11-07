@@ -234,6 +234,24 @@ describe('sync engine', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps at most 16 devices when many connect and disconnect', () => {
+    for (let id = 2; id <= 100; id++) {
+      const conn = swarm.connect(id);
+      conn.receive(line({ n: id }));
+      conn.emit('close');
+    }
+    expect(sync.values().length).toBeLessThanOrEqual(16);
+    expect(sync.values().at(-1)?.value).toEqual({ n: 100 });
+  });
+
+  it('does not show old-room values after join and reconnect', () => {
+    swarm.connect(2).receive(line({ n: 2 }));
+    sync.join('ab'.repeat(16));
+    expect(sync.values()).toEqual([]);
+    swarm.connect(3);
+    expect(sync.values()).toEqual([]);
+  });
+
   it('join of the current code is a no-op', () => {
     const listener = vi.fn();
     sync.onChange(listener);

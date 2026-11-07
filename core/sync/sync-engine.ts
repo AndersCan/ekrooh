@@ -60,6 +60,9 @@ type Peer<T> = {
   warned: Set<string>;
 };
 
+/** Most devices a room remembers; matches the swarm's maxPeers. */
+const MAX_PEERS = 16;
+
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
 
 export function createSyncWith<T>(
@@ -107,6 +110,13 @@ export function createSyncWith<T>(
     };
     peers.set(id, created);
     return created;
+  };
+
+  const prune = () => {
+    for (const [id, peer] of peers) {
+      if (peers.size <= MAX_PEERS) return;
+      if (peer.conns.size === 0) peers.delete(id);
+    }
   };
 
   const warnOnce = (peer: Peer<T>, key: string, message: string) => {
@@ -190,6 +200,7 @@ export function createSyncWith<T>(
       console.log(
         `[sync] peer ${short} disconnected (${connected()} connected)`,
       );
+      prune();
       fire();
     });
     fire();
