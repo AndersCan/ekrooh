@@ -112,6 +112,12 @@ review checks that both still exist and still say this.
   publishing (OIDC), not a long-lived npm token. That job installs with
   `--ignore-scripts` and rebuilds only allowlisted packages (esbuild); the
   `linux-android` test job uses the same install so CI proves it.
+- `release-bare-kit-runtime.yml` (`bare-kit-v*` tags) uses the same protected
+  `release` environment and the same signing and Sonatype secrets, with only
+  `contents: read`. It runs no npm install: it fetches the hash-checked
+  prebuild with Node built-ins, refuses a tag that differs from the lockfile's
+  `maven` pin, and publishes only `:bare-kit-runtime`, an unmodified repackage
+  of that prebuild ([ADR 0007](adr/0007-separate-bare-kit-runtime-artifact.md)).
 - Dev tooling is not exempt: the harness supervisor (`core/harness/`) hands out
   instance credentials, so it refuses any request with an `Origin` or a
   foreign `Host` and sends no CORS header.

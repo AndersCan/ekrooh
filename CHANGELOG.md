@@ -7,6 +7,16 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The Bare Kit runtime is a separate Android artifact** ([ADR 0007](docs/adr/0007-separate-bare-kit-runtime-artifact.md)):
+  `bare-host` no longer bundles `libbare-kit.so` and the Bare Kit `classes.jar`.
+  It depends on `io.github.anderscan.ekrooh:bare-kit-runtime:2.5.5` instead,
+  which Gradle resolves from Maven Central automatically. The `bare-host` AAR
+  goes from about 69 MB to about 40 KB. The runtime is published only when
+  bare-kit is bumped, because Maven Central limits monthly release size. No
+  consumer changes are needed.
+
 ## [0.6.2] - 2026-11-07
 
 ### Fixed

@@ -134,6 +134,9 @@ jobs:
           POM=android/build/publications/mavenAar/pom-default.xml
           grep -q "androidx.webkit" "$POM" || { echo "POM is missing androidx.webkit — see issue #36"; exit 1; }
           grep -q "androidx.appcompat" "$POM" || { echo "POM is missing androidx.appcompat — see issue #36"; exit 1; }
+          RUNTIME=$(node -e "console.log(require('./scripts/prebuilds.lock.json').maven['bare-kit-runtime'])")
+          tr -d ' \n' < "$POM" | grep -q "<artifactId>bare-kit-runtime</artifactId><version>$RUNTIME</version>" \
+            || { echo "POM is missing io.github.anderscan.ekrooh:bare-kit-runtime:$RUNTIME (ADR 0007)"; exit 1; }
           echo "POM dependency metadata OK"
 
       - name: Assert 64-bit native libs in the AAR are 16 KB aligned
@@ -142,9 +145,26 @@ jobs:
         if: matrix.host == 'linux'
         run: |
           scripts/check-aar-page-size.test.sh
-          ./gradlew :bare-host:assembleRelease
-          READELF="$(ls "$ANDROID_HOME"/ndk/27.2.12479018/toolchains/llvm/prebuilt/*/bin/llvm-readelf)" \
-            scripts/check-aar-page-size.sh android/build/outputs/aar/bare-host-release.aar
+          ./gradlew :bare-host:assembleRelease :bare-kit-runtime:assembleRelease
+          READELF="$(ls "$ANDROID_HOME"/ndk/27.2.12479018/toolchains/llvm/prebuilt/*/bin/llvm-readelf)"
+          export READELF
+          scripts/check-aar-page-size.sh android/build/outputs/aar/bare-host-release.aar
+          scripts/check-aar-page-size.sh android/bare-kit-runtime/build/outputs/aar/bare-kit-runtime-release.aar
+
+      - name: Assert bare-host does not bundle the Bare Kit runtime
+        # The ~70 MB runtime ships as its own artifact so each ekrooh release
+        # stays small on Maven Central, which limits monthly release size
+        # (ADR 0007). Fail if it creeps back into bare-host.
+        if: matrix.host == 'linux'
+        run: |
+          AAR=android/build/outputs/aar/bare-host-release.aar
+          if unzip -l "$AAR" | grep -qE "libbare-kit\.so|libs/classes\.jar"; then
+            echo "$AAR bundles the Bare Kit runtime; it belongs in :bare-kit-runtime (ADR 0007)"
+            exit 1
+          fi
+          SIZE=$(stat -c %s "$AAR")
+          echo "bare-host AAR: $SIZE bytes"
+          [ "$SIZE" -lt 5000000 ] || { echo "bare-host AAR is over 5 MB"; exit 1; }
 
   # Re-enabled with hard bounds (issue #44). The job used to spin forever on
   # `adb: device offline` and ride the 6h default timeout. It is now bounded at

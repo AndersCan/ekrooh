@@ -1,4 +1,5 @@
-plugins {  id "com.android.library"
+plugins {
+  id "com.android.library"
   id "maven-publish"
   id "signing"
 }
@@ -17,7 +18,8 @@ android {
         // symbol `libbare-kit.so` imports from the Android platform library
         // `libnativehelper.so` (JNI_GetCreatedJavaVMs), which app processes
         // can't otherwise resolve from the classloader namespace (ekrooh#45,
-        // #46). Shipped alongside `libbare-kit.so` in the AAR.
+        // #46). Ships in this AAR; `libbare-kit.so` itself comes from the
+        // `:bare-kit-runtime` dependency.
         cppFlags ""
         // Link with 16 KB LOAD alignment (Google Play requires it for 64-bit
         // libs). NDK r27 defaults to 4 KB, so this must be explicit.
@@ -51,12 +53,6 @@ android {
     }
   }
 
-  sourceSets {
-    main {
-      jniLibs.srcDirs "../prebuilds/android/bare-kit/jni"
-    }
-  }
-
   packaging {
     jniLibs {
       useLegacyPackaging = true
@@ -77,9 +73,10 @@ kotlin {
   }
 }
 
-// The Bare Kit runtime is shipped in the published AAR: AGP packages the local
-// `api fileTree` jar into the AAR's libs/ and the native libs (jniLibs) into
-// jni/, so published consumers need no separate prebuilds download.
+// The Bare Kit runtime (libbare-kit.so per ABI + its classes.jar, ~70 MB) is
+// NOT in this AAR: it ships as io.github.anderscan.ekrooh:bare-kit-runtime,
+// published only when bare-kit is bumped, and reaches consumers as a normal
+// POM dependency (docs/adr/0007-separate-bare-kit-runtime-artifact.md).
 
 // Single source of truth for the version is the root package.json (RELEASING.md).
 rootProject.ext.jsonVersion = {
@@ -89,10 +86,10 @@ rootProject.ext.jsonVersion = {
 }
 
 dependencies {
-  // Bare Kit runtime prebuilt (IPC + Worklet). Compile/runtime for local
-  // project dependents; published consumers get the classes from the AAR's
-  // libs/ (AGP packages this local jar into the AAR).
-  api fileTree(dir: "../prebuilds/android", include: ["bare-kit/classes.jar"])
+  // Bare Kit runtime (IPC + Worklet classes and native libs). Published as
+  // io.github.anderscan.ekrooh:bare-kit-runtime:<lock `maven` pin>, so the
+  // generated POM names it like any other dependency.
+  api project(":bare-kit-runtime")
   // Public API of the host surfaces these types (BareWebViewClient,
   // BarePortMessenger), so they are `api` for consumers.
   api "androidx.webkit:webkit:1.18.0"
@@ -123,35 +120,13 @@ afterEvaluate {
         // `releaseJavadocJar` (classifiers `sources`/`javadoc`). Adding custom
         // sources/javadoc artifacts here would duplicate those and make the
         // signed publication fail with "multiple artifacts with the identical
-        // extension and classifier ('jar.asc', 'sources')" (hit on v0.4.0). The
-        // local `api fileTree` bare-kit jar is deliberately absent from the POM
-        // (file deps can't be resolved from a repo) — its classes ship inside
-        // the AAR's libs/.
+        // extension and classifier ('jar.asc', 'sources')" (hit on v0.4.0).
         from components.release
 
         pom {
           name = "io.github.anderscan.ekrooh:bare-host"
           description = "Android host library for the @ekrooh/bare runtime: IPC coordinator, host plugin registry, WebView client."
-          url = "https://github.com/AndersCan/ekrooh"
-          licenses {
-            license {
-              name = "Apache-2.0"
-              url = "https://www.apache.org/licenses/LICENSE-2.0"
-              distribution = "repo"
-            }
-          }
-          developers {
-            developer {
-              id = "AndersCan"
-              name = "Anders Can"
-              email = "anders.can1@gmail.com"
-            }
-          }
-          scm {
-            connection = "scm:git:https://github.com/AndersCan/ekrooh.git"
-            developerConnection = "scm:git:git@github.com:AndersCan/ekrooh.git"
-            url = "https://github.com/AndersCan/ekrooh"
-          }
+          rootProject.ekroohPom(delegate)
         }
       }
     }

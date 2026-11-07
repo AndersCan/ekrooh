@@ -147,6 +147,30 @@ describe('security invariants (docs/security.md)', () => {
     expect(manifest).not.toMatch(/binaryTarget\([^)]*\bpath:/s);
   });
 
+  it('the bare-kit-runtime Maven pin names the pinned bare-kit version', () => {
+    // ADR 0007: the runtime artifact is the hash-checked prebuild at `version`,
+    // republished only with a `-N` suffix.
+    const lock = JSON.parse(
+      fs.readFileSync(path.join(ROOT, 'scripts/prebuilds.lock.json'), 'utf8'),
+    ) as { version: string; maven: Record<string, string> };
+    const base = lock.version.replace(/^v/, '');
+    expect(lock.maven['bare-kit-runtime']).toMatch(
+      new RegExp(`^${base.replace(/\./g, '\\.')}(-\\d+)?$`),
+    );
+  });
+
+  it('bare-host takes the Bare Kit runtime only from :bare-kit-runtime', () => {
+    // ADR 0007: bundling the ~70 MB prebuild into bare-host again would put it
+    // in every ekrooh release on Maven Central.
+    const gradle = fs
+      .readFileSync(path.join(ROOT, 'android/build.gradle'), 'utf8')
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+    expect(gradle).not.toContain('prebuilds/android');
+    expect(gradle).toContain('api project(":bare-kit-runtime")');
+  });
+
   it('the reference FileProvider exposes only the captures directory', () => {
     const xml = fs.readFileSync(
       path.join(ROOT, 'examples/android-app/src/main/res/xml/file_paths.xml'),

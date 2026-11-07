@@ -58,6 +58,21 @@ jobs:
       - name: Run all gates (JS + Gradle, includes host JUnit)
         run: ./gradlew build
 
+      - name: Check bare-kit-runtime is on Maven Central
+        # bare-host's POM depends on io.github.anderscan.ekrooh:bare-kit-runtime
+        # at the lockfile's `maven` pin. That artifact is published separately
+        # (release-bare-kit-runtime.yml, `bare-kit-v*` tag), so fail before any
+        # publish step if it is missing: a bare-host release must never name a
+        # dependency consumers cannot resolve.
+        run: |
+          VERSION=$(node -e "console.log(require('./scripts/prebuilds.lock.json').maven['bare-kit-runtime'])")
+          POM="https://repo1.maven.org/maven2/io/github/anderscan/ekrooh/bare-kit-runtime/$VERSION/bare-kit-runtime-$VERSION.pom"
+          if ! curl -fsSI "$POM" >/dev/null 2>&1; then
+            echo "bare-kit-runtime $VERSION is not on Maven Central yet. Push tag bare-kit-v$VERSION first (RELEASING.md, \"Bumping Bare Kit\")."
+            exit 1
+          fi
+          echo "bare-kit-runtime $VERSION found on Maven Central"
+
       - name: Publish @ekrooh/bare to npm
         # Trusted publishing (OIDC): `id-token: write` above + the trusted
         # publisher configured on npmjs.com for this workflow. No NPM_TOKEN.
