@@ -89,7 +89,7 @@ Only when the pinned bare-kit version changes (not part of a normal release):
    key with `gpg --keyserver keyserver.ubuntu.com --send-keys <id>`.
 
 The `@ekrooh/bare` exports map is frozen at first publish (beta): `core`, `runtime`,
-`plugins`, `plugins/*/events`, and `transports` (WebSocket and mock only). Every
+`plugins`, `plugins/*/events`, `sync`, and `transports` (WebSocket and mock only). Every
 entry points at compiled `dist/` output.
 
 ## 4. Announce

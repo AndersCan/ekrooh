@@ -1,0 +1,83 @@
+---
+title: P2P Sync
+description: Share one value per device between devices with @ekrooh/bare/sync.
+---
+
+`@ekrooh/bare/sync` lets devices that share an invite code see each other's
+latest value. It is worklet-only and opt-in: apps that do not import it never
+load the peer-to-peer code.
+
+Each device publishes **one JSON value**. `values()` returns the latest value
+of every device in the room, keyed by the device's authenticated key. A device
+can only set its own entry, so there are no conflicts: the app combines the
+values (a vote count is the sum of every device's counts).
+
+```ts
+import { createSync } from '@ekrooh/bare/sync';
+
+type Counts = Record<string, number>;
+
+const [error, sync] = createSync<Counts>({
+  storage: runtime.config.storage,
+  parse: (raw) =>
+    typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+      ? (raw as Counts)
+      : undefined,
+});
+if (error !== null) throw error;
+
+console.log(sync.invite()); // show this on screen
+sync.onChange(() => refreshUi());
+sync.publish({ tea: 1 });
+
+const total = sync.values().reduce((n, v) => n + (v.value.tea ?? 0), 0);
+// on the other device: sync.join(pastedCode)
+```
+
+## API
+
+| Call                              | What it does                                                                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `createSync({ storage?, parse })` | Starts sync. Returns `[error, sync]`.                                                                               |
+| `sync.invite()`                   | This device's room code (32 lowercase hex characters).                                                              |
+| `sync.join(code)`                 | Leaves the current room and joins another. Trims and lowercases `code`.                                             |
+| `sync.publish(value)`             | Replaces this device's value and sends it to connected devices.                                                     |
+| `sync.values()`                   | `{ peer, self, value }[]`: this device first, then others by peer id.                                               |
+| `sync.connected()`                | Other devices connected right now.                                                                                  |
+| `sync.onChange(fn)`               | Called when a value changes, a device connects or disconnects, or `join` succeeds. Returns an unsubscribe function. |
+| `sync.close()`                    | Stops syncing.                                                                                                      |
+
+Errors are values (`[CoreError, null]`): `sync/bad-invite`, `sync/not-json`,
+`sync/value-too-large` (over 16 KiB of JSON), `sync/closed`, and
+`sync/state-version`.
+
+## `parse` is required
+
+Peers are untrusted. Every incoming value goes through your `parse`, which
+returns the typed value or `undefined` to drop it. Check shape and ranges
+there.
+
+## Storage and restarts
+
+With `storage` (pass `runtime.config.storage`), the device keeps its identity
+and room in `ekrooh-sync.json`, so a restart rejoins the same room. Without
+it, identity and room live in memory. Values are not persisted: a restarted
+device republishes its own value.
+
+Values of devices that disconnect are kept until `join()` or `close()`, so a
+phone whose screen goes off keeps its votes.
+
+## Security
+
+Anyone with the invite code can join the room and add their own value; they
+cannot change another device's value. The code never reaches the network (the
+DHT topic is a hash of it). A room holds at most 16 devices, and a device sees
+only the devices it is connected to.
+
+## Logs
+
+`[sync] in room 3f9a…`, `[sync] peer 1a2b3c4d connected (1 connected)`, and
+one-time lines when a peer sends something that is dropped. They appear in the
+dev terminal and in the `core.logs` ring.
+
+A first connection can take up to about a minute on the public network.
