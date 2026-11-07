@@ -96,3 +96,22 @@ entry points at compiled `dist/` output.
 
 1. Confirm the tag's CI run is green.
 2. Link the release from the repository home.
+
+## 5. Bump the starter
+
+`examples/vote` pins the published packages, so it moves only after a release.
+
+1. After the release run is green, check that `npm view @ekrooh/bare@X.Y.Z version`
+   prints `X.Y.Z` and that
+   `https://repo1.maven.org/maven2/io/github/anderscan/ekrooh/bare-host/X.Y.Z/` exists.
+2. In `examples/vote`, set the same version in four places (keep them equal):
+   - `@ekrooh/bare` in `package.json`, then run `npm install` to update the lockfile.
+   - `bare-host:X.Y.Z` in `android/app/build.gradle`.
+   - `exactVersion: X.Y.Z` in `ios/project.yml`.
+   - `version = X.Y.Z;` in `ios/Vote.xcodeproj/project.pbxproj`.
+3. On macOS, run `npm run sync` in `examples/vote`. If it reports changed native
+   packages (the bare-link xcframework set differs from `project.pbxproj`), edit the
+   `framework:` entries in `ios/project.yml`, run `xcodegen generate`, and commit the
+   regenerated `ios/Vote.xcodeproj`.
+4. Open a PR titled `chore: bump examples/vote to vX.Y.Z`. The Starter workflow builds
+   web, Android and iOS from the published packages.
