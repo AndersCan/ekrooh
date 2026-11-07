@@ -155,7 +155,7 @@ describe('security invariants (docs/security.md)', () => {
     ) as { version: string; maven: Record<string, string> };
     const base = lock.version.replace(/^v/, '');
     expect(lock.maven['bare-kit-runtime']).toMatch(
-      new RegExp(`^${base.replace(/\./g, '\\.')}(-\\d+)?$`),
+      new RegExp(`^${base.replace(/[\\.]/g, '\\$&')}(-\\d+)?$`),
     );
   });
 
