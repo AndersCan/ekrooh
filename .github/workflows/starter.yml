@@ -116,3 +116,34 @@ jobs:
           grep -q 'assets/web/index.html' apk.txt || { echo "APK has no assets/web/index.html" >&2; exit 1; }
           grep -q 'lib/arm64-v8a/libbare-kit.so' apk.txt || { echo "APK has no lib/arm64-v8a/libbare-kit.so" >&2; exit 1; }
           grep 'lib/arm64-v8a/lib.*\.so' apk.txt | grep -qv 'libbare-kit.so' || { echo "APK has no native addon besides libbare-kit.so" >&2; exit 1; }
+
+  ios:
+    name: Starter / ios
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+
+      - name: Get the starter
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            cp -R examples/vote "$RUNNER_TEMP/my-app"
+          else
+            npx --yes degit@3.10.1 AndersCan/ekrooh/examples/vote#main "$RUNNER_TEMP/my-app"
+          fi
+          echo "STARTER_DIR=$RUNNER_TEMP/my-app" >> "$GITHUB_ENV"
+
+      - name: Sync
+        run: |
+          cd "$STARTER_DIR"
+          npm ci
+          npm run sync
+
+      - name: Build for the iOS Simulator
+        run: |
+          cd "$STARTER_DIR"
+          xcodebuild -project ios/Vote.xcodeproj -scheme Vote -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build

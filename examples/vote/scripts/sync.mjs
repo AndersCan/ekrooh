@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * `npm run sync`: builds the page and the app backend and copies everything
- * the Android project needs (web build, bundle, native addons) into android/.
+ * the Android and iOS projects need (web build, bundle, native addons).
  */
 import { build as esbuild } from 'esbuild';
 import { spawnSync } from 'node:child_process';
@@ -14,6 +14,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const workletSource = path.join(root, 'worklet', 'entry.ts');
 const workletOut = path.join(root, 'worklet', 'app.core.gen.js');
 const webDist = path.join(root, 'dist', 'web');
+const iosRoot = path.join(root, 'ios');
 const androidMain = path.join(root, 'android', 'app', 'src', 'main');
 
 function fail(reason) {
@@ -94,4 +95,48 @@ if (countFiles(addons, '.so') === 0) {
   );
 }
 
-console.log('Synced web build to android/. Press Run in Android Studio.');
+if (process.platform !== 'darwin') {
+  console.log('[vote] Skipped iOS: it needs macOS.');
+  console.log('Synced web build to android/. Press Run in Android Studio.');
+  process.exit(0);
+}
+
+console.log('[vote] iOS: copying the page and packing the backend');
+const iosApp = path.join(iosRoot, 'Vote');
+fs.rmSync(path.join(iosApp, 'WebAssets'), { recursive: true, force: true });
+fs.cpSync(webDist, path.join(iosApp, 'WebAssets'), { recursive: true });
+fs.rmSync(path.join(iosApp, 'main.core.bundle'), { force: true });
+runCli('bare-pack', [
+  '--preset',
+  'ios',
+  '--out',
+  path.join(iosApp, 'main.core.bundle'),
+  workletOut,
+]);
+
+console.log('[vote] iOS: linking native addons');
+const iosAddons = path.join(iosRoot, 'addons');
+fs.rmSync(iosAddons, { recursive: true, force: true });
+runCli('bare-link', ['--preset', 'ios', '--out', iosAddons]);
+
+const linked = new Set(
+  fs.readdirSync(iosAddons).filter((name) => name.endsWith('.xcframework')),
+);
+const pbxproj = fs.readFileSync(
+  path.join(iosRoot, 'Vote.xcodeproj', 'project.pbxproj'),
+  'utf8',
+);
+const listed = new Set(
+  [...pbxproj.matchAll(/addons\/([^"\/]+\.xcframework)/g)].map((m) => m[1]),
+);
+const same =
+  linked.size === listed.size && [...linked].every((name) => listed.has(name));
+if (!same) {
+  fail(
+    `iOS native packages changed. bare-link produced: ${[...linked].sort().join(', ')}. The Xcode project lists: ${[...listed].sort().join(', ')}. Update the framework list in ios/project.yml and regenerate the project (see RELEASING.md, "Bump the starter").`,
+  );
+}
+
+console.log(
+  'Synced web build to android/ and ios/. Press Run in Android Studio or Xcode.',
+);

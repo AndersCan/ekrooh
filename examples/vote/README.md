@@ -33,7 +33,16 @@ Edit `src/render.ts`. The browser reloads on save.
 
 The app shows the same vote page. If Gradle says "Web build not found", run `npm run sync` first.
 
-iOS: coming in this folder soon.
+## Run on iOS
+
+iOS needs a Mac. On Linux or Windows, skip this section; web and Android work fully.
+
+1. Install Xcode from the App Store.
+2. In the project folder, run `npm run sync`. Run it again after every edit.
+3. Open `ios/Vote.xcodeproj` in Xcode. The first open downloads packages; this takes a few minutes.
+4. Pick a Simulator and press Run. No Apple account is needed.
+
+For a real iPhone: select the Vote target > Signing & Capabilities > Team > your Personal Team.
 
 ## Package manager
 
