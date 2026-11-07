@@ -41,7 +41,13 @@ function code(rel: string): string {
 
 /** XML with comments removed. */
 function xml(rel: string): string {
-  return read(rel).replace(/<!--[\s\S]*?-->/g, '');
+  let src = read(rel);
+  let prev = '';
+  while (src !== prev) {
+    prev = src;
+    src = src.replace(/<!--[\s\S]*?-->/g, '');
+  }
+  return src.replace(/<!--/g, '');
 }
 
 const shipped = [...kotlinFiles(`${APP}/java`), ...kotlinFiles(HOST)];
