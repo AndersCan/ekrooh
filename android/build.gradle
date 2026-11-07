@@ -19,6 +19,9 @@ android {
         // can't otherwise resolve from the classloader namespace (ekrooh#45,
         // #46). Shipped alongside `libbare-kit.so` in the AAR.
         cppFlags ""
+        // Link with 16 KB LOAD alignment (Google Play requires it for 64-bit
+        // libs). NDK r27 defaults to 4 KB, so this must be explicit.
+        arguments "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
       }
     }
   }
