@@ -113,20 +113,21 @@ To republish the same bare-kit version (a packaging fix), set the pin to
    - **build** (no secrets, no OIDC, read-only token): checks the tag (equals the
      version, is on `main`), runs `build:pkg`, `docs:check`, `vp check`, `vp test`,
      fetches the prebuilds, runs `npm run build` and `./gradlew build`, then packs
-     the npm tarball (`npm pack`, which runs `prepack`) and uploads it and the
-     release AAR as run artifacts.
+     the npm tarball (`npm pack`, which runs `prepack`), stages the unsigned
+     `bare-host` Maven publication (`publishMavenAarPublicationToLocalStagingRepository`,
+     into `build/maven-staging`), and uploads both as run artifacts.
    - **publish-npm** (`release` environment, `id-token: write`): publishes the
      packed tarball with `npm publish <tgz> --ignore-scripts` via npm Trusted
      Publishing (OIDC). No checkout, install or build runs in this job, and there
      is no `NPM_TOKEN`. Prereleases (for example `0.1.0-beta.1`) get a dist-tag
      from the identifier (`beta`). Stable versions get `latest`.
    - **publish-maven** (`release` environment, signing and Sonatype secrets): runs
-     only the Gradle publish tasks below, with no npm install or JS build. Those
-     tasks rebuild the AAR (with Gradle dependency verification on,
-     `gradle/verification-metadata.xml`), so Gradle and its plugins still run next to the
-     secrets; the wrapper is validated in the job.
-   - **Android AAR**: `io.github.anderscan.ekrooh:bare-host` to Maven Central
-     (`:bare-host:publishToSonatype closeAndReleaseSonatypeStagingRepository`), plus
+     no Gradle, JDK or npm. `.github/scripts/publish-maven.sh` checks the staged
+     files, signs them with `gpg`, uploads them to GitHub Packages, then uploads the
+     bundle to the Central Portal publisher API (`publishingType=AUTOMATIC`) and waits
+     until it is publishing. Every step skips a version that is already there, so a
+     failed run can be re-run.
+   - **Android AAR**: `io.github.anderscan.ekrooh:bare-host` to Maven Central, plus
      GitHub Packages as a fallback (automatic `GITHUB_TOKEN`). Consumers need no
      credentials. The AAR holds only ekrooh code (about 40 KB). The Bare Kit runtime
      comes from its `bare-kit-runtime` dependency (see above).
@@ -142,7 +143,7 @@ To republish the same bare-kit version (a packaging fix), set the pin to
    `gpg --armor --export-secret-keys <id>`), and `SIGNING_PASSWORD`. Upload the public
    key with `gpg --keyserver keyserver.ubuntu.com --send-keys <id>`. The `release`
    environment needs the owner as required reviewer and a deployment policy that
-   allows only tags `v*`.
+   allows only tags `v*` and `bare-kit-v*` (the runtime release, ADR 0007).
 
 The `@ekrooh/bare` exports map is frozen at first publish (beta): `core`, `runtime`,
 `plugins`, `plugins/*/events`, and `transports` (WebSocket and mock only). Every

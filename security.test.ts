@@ -678,6 +678,76 @@ describe('CI and release invariants (docs/security.md §6)', () => {
     expect(bad).toEqual([]);
   });
 
+  it('Maven release jobs that hold secrets run no build tool: Gradle stages, publish-maven.sh signs', () => {
+    // docs/security.md, "Release pipeline": Gradle, AGP and their plugins run
+    // only in the credential-free build jobs; the jobs holding the signing key
+    // and Sonatype token run only publish-maven.sh (gpg + curl).
+    const bad: string[] = [];
+    let secretJobs = 0;
+    for (const file of [
+      '.github/workflows/release.yml',
+      '.github/workflows/release-bare-kit-runtime.yml',
+    ]) {
+      const { wf } = workflowFiles().find((w) => w.file === file)!;
+      let staged = false;
+      for (const [id, job] of Object.entries(wf.jobs ?? {})) {
+        const runs = (job.steps ?? []).flatMap((st) => lines(st.run));
+        if (!isPrivileged(job)) {
+          if (
+            runs.some((l) =>
+              /publishMavenAarPublicationToLocalStagingRepository/.test(l),
+            )
+          )
+            staged = true;
+          continue;
+        }
+        if (!/\bsecrets\./.test(JSON.stringify(job))) continue;
+        secretJobs++;
+        for (const step of job.steps ?? []) {
+          const name = actionName(step.uses ?? '');
+          if (
+            name &&
+            !['actions/checkout', 'actions/download-artifact'].includes(name)
+          )
+            bad.push(`${file}#${id}: uses ${step.uses}`);
+        }
+        for (const line of runs) {
+          if (
+            !/^\.github\/scripts\/publish-maven\.sh (prepare|github|central) /.test(
+              line,
+            )
+          )
+            bad.push(`${file}#${id}: ${line}`);
+        }
+      }
+      if (!staged)
+        bad.push(`${file}: no credential-free job stages the publication`);
+    }
+    expect(secretJobs).toBe(2);
+    expect(bad).toEqual([]);
+    // Neither module can sign or upload by itself any more.
+    for (const f of [
+      'build.gradle',
+      'android/build.gradle',
+      'android/bare-kit-runtime/build.gradle',
+    ]) {
+      const gradle = fs
+        .readFileSync(path.join(ROOT, f), 'utf8')
+        .split('\n')
+        .filter((l) => !l.trim().startsWith('//'))
+        .join('\n');
+      expect(gradle, f).not.toMatch(
+        /id "signing"|nexus|SIGNING_KEY|sonatype|maven\.pkg\.github\.com/i,
+      );
+    }
+    // CI dry-runs the signing path on every PR (it otherwise runs only on a tag).
+    const test = fs.readFileSync(
+      path.join(ROOT, '.github/workflows/test.yml'),
+      'utf8',
+    );
+    expect(test).toContain('.github/scripts/publish-maven.test.sh');
+  });
+
   it('the vuln scan covers every npm lockfile and ignores only the Gradle build-tool hash list', () => {
     const { wf } = workflowFiles().find(
       (w) => w.file === '.github/workflows/test.yml',

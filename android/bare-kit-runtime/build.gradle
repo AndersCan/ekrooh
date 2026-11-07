@@ -1,7 +1,6 @@
 plugins {
   id "com.android.library"
   id "maven-publish"
-  id "signing"
 }
 
 // `:bare-kit-runtime` repackages the upstream Bare Kit Android prebuild
@@ -74,13 +73,8 @@ afterEvaluate {
         }
       }
     }
-  }
-  signing {
-    def signingKey = providers.environmentVariable("SIGNING_KEY").orNull
-    def signingPassword = providers.environmentVariable("SIGNING_PASSWORD").orNull
-    if (signingKey != null) {
-      useInMemoryPgpKeys(signingKey, signingPassword)
+    repositories {
+      rootProject.ekroohStagingRepo(delegate)
     }
-    sign publishing.publications.mavenAar
   }
 }

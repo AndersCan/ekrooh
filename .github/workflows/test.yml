@@ -202,6 +202,15 @@ jobs:
           scripts/check-aar-page-size.sh android/build/outputs/aar/bare-host-release.aar
           scripts/check-aar-page-size.sh android/bare-kit-runtime/build/outputs/aar/bare-kit-runtime-release.aar
 
+      - name: Sign the staged Maven publications with a throwaway key (publish-maven.sh dry run)
+        # The release jobs sign and upload without Gradle; their signing path
+        # runs only on a real tag, so prove the bundle layout, signatures and
+        # refusals here on every PR.
+        if: env.RUN == 'true' && matrix.host == 'linux'
+        run: |
+          ./gradlew :bare-host:publishMavenAarPublicationToLocalStagingRepository :bare-kit-runtime:publishMavenAarPublicationToLocalStagingRepository
+          .github/scripts/publish-maven.test.sh
+
       - name: Assert bare-host does not bundle the Bare Kit runtime
         # The ~70 MB runtime ships as its own artifact so each ekrooh release
         # stays small on Maven Central, which limits monthly release size

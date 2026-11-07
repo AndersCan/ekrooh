@@ -124,6 +124,15 @@ the old behaviour**; read them before upgrading.
   detection in `security.test.ts` is segment-aware (gems included). Workflow-level
   permissions are read-only, every checkout drops its token, and
   `CODEOWNERS` covers the trust boundaries.
+- **Maven publishing runs no Gradle next to the secrets**: the Gradle builds
+  no longer sign or upload (the `signing` and Nexus publish plugins are gone).
+  The credential-free build job stages the unsigned publication with
+  `publishMavenAarPublicationToLocalStagingRepository`; the publish jobs in
+  `release.yml` and `release-bare-kit-runtime.yml` sign it with `gpg` and
+  upload it with `curl` (`.github/scripts/publish-maven.sh`, Central Portal
+  publisher API). CI dry-runs the signing path with a throwaway key.
+- **Merge queue ready**: the workflows holding required checks also run on
+  `merge_group`.
 - **Can break — `npm run prebuilds`** no longer needs `gh` or a token (it
   fetches the public release URL), replaces `prebuilds/android` and
   `prebuilds/ios` wholesale, refuses absolute, `..` and symlink archive

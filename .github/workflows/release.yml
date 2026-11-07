@@ -21,12 +21,9 @@ concurrency:
 #                  install, no build: it publishes the tarball `build` packed,
 #                  with --ignore-scripts.
 #   publish-maven  environment `release`, signing + Sonatype secrets,
-#                  `packages: write`. No npm install and no JS build: only the
-#                  Gradle publish tasks. Residual risk: those tasks rebuild the
-#                  AAR, so Gradle, AGP, Kotlin, CMake and the nexus plugin run
-#                  next to the secrets. The wrapper is validated; dependency
-#                  verification (gradle/verification-metadata.xml) is what
-#                  closes the rest.
+#                  `packages: write`. No Gradle, no JDK, no npm: it signs the
+#                  staged Maven files `build` produced with gpg and uploads
+#                  them with curl (.github/scripts/publish-maven.sh).
 #
 # Both publish jobs wait together on the `release` environment (required
 # reviewer = owner, deployment policy = tags `v*`), so one approval releases.
@@ -108,6 +105,12 @@ jobs:
       - name: Gradle gates (includes host JUnit tests and the release AAR)
         run: ./gradlew build
 
+      - name: Stage the bare-host Maven publication (unsigned, local)
+        # The exact files publish-maven signs and uploads: the release AAR the
+        # gates above ran against, its POM, Gradle module, sources and javadoc
+        # jars. Gradle never sees a credential.
+        run: ./gradlew :bare-host:publishMavenAarPublicationToLocalStagingRepository
+
       - name: Check bare-kit-runtime is on Maven Central
         # bare-host's POM depends on io.github.anderscan.ekrooh:bare-kit-runtime
         # at the lockfile's `maven` pin. That artifact is published separately
@@ -144,14 +147,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Keep the gated AAR as a provenance record
-        # Not consumed by any job: publish-maven rebuilds the AAR (its Gradle
-        # publication needs the build). This is the AAR the gates above ran
-        # against, kept so a maintainer can diff it with what was published.
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bare-host-aar
-          path: android/build/outputs/aar/bare-host-release.aar
+          name: maven-staging
+          path: build/maven-staging
           if-no-files-found: error
           retention-days: 7
 
@@ -208,49 +207,38 @@ jobs:
       contents: read
       packages: write # GitHub Packages
     steps:
+      # Only for publish-maven.sh, from the tagged commit. No build runs here.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          sparse-checkout: .github/scripts
 
-      - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-
-      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          distribution: temurin
-          java-version: 21
+          name: maven-staging
+          path: ${{ runner.temp }}/maven-staging
 
-      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
-        with:
-          packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
-
-      - name: Fetch Bare Kit prebuilds (SHA-256 checked, Node built-ins only)
-        # Plain `node`, no `npm ci`: no dependency code runs in this job.
-        run: node scripts/fetch-prebuilds.mjs
+      - name: Sign the staged publication (gpg, no Gradle)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: .github/scripts/publish-maven.sh prepare "$RUNNER_TEMP/maven-staging" bare-host "$VERSION" "$RUNNER_TEMP/maven-signed"
 
       - name: Publish to GitHub Packages
-        # The publication is signed (see android/build.gradle). Idempotent:
-        # skips when this exact version already exists on GitHub Packages.
+        # Idempotent: skips when this exact version already exists.
         env:
           VERSION: ${{ needs.build.outputs.version }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ github.token }}
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
-        run: |
-          METADATA="https://maven.pkg.github.com/AndersCan/ekrooh/io/github/anderscan/ekrooh/bare-host/maven-metadata.xml"
-          if curl -fsS -H "Authorization: Bearer $GITHUB_TOKEN" "$METADATA" 2>/dev/null | grep -q "<version>$VERSION</version>"; then
-            echo "GitHub Packages: bare-host@$VERSION already published — skipping"
-          else
-            ./gradlew --no-daemon :bare-host:publishMavenAarPublicationToGitHubPackagesRepository
-          fi
+        run: .github/scripts/publish-maven.sh github "$RUNNER_TEMP/maven-signed" bare-host "$VERSION"
 
       - name: Publish to Maven Central
-        # Sonatype Central Portal (OSSRH staging API). Secrets live in the
-        # `release` environment: SONATYPE_USERNAME / SONATYPE_PASSWORD (user
-        # token) and SIGNING_KEY (ASCII-armored PGP key) / SIGNING_PASSWORD.
+        # Sonatype Central Portal publisher API with a portal user token
+        # (SONATYPE_USERNAME / SONATYPE_PASSWORD in the `release` environment).
+        # Idempotent: skips when the version is already on Maven Central.
         env:
-          ORG_GRADLE_PROJECT_sonatypeUsername: ${{ secrets.SONATYPE_USERNAME }}
-          ORG_GRADLE_PROJECT_sonatypePassword: ${{ secrets.SONATYPE_PASSWORD }}
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
-        run: ./gradlew --no-daemon :bare-host:publishToSonatype closeAndReleaseSonatypeStagingRepository
+          VERSION: ${{ needs.build.outputs.version }}
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+        run: .github/scripts/publish-maven.sh central "$RUNNER_TEMP/maven-signed" bare-host "$VERSION"

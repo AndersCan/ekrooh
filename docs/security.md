@@ -19,14 +19,14 @@ enforced and how to check it still holds.
 
 ## Attackers
 
-| Attacker                                   | Reaches                                                                                    | Must not get                                    |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------ | ----------------------------------------------- |
-| A website open in a browser on the machine | `127.0.0.1:<port>` through the browser (CORS, WS, DNS rebinding)                           | Any plugin call, any gated byte                 |
-| Another app or process on the device       | `127.0.0.1:<port>` directly, any headers it likes                                          | The token, the nonce, any gated byte            |
-| Another listener on `127.0.0.1`            | The session cookie (cookies are not port-isolated), a same-site page that loads our URLs   | Any gated byte, any plugin call                 |
-| Content the app displays                   | The app origin, if it is ever served as a document from a mount                            | Script in the app origin                        |
-| A p2p peer                                 | Whatever the consumer stores and mounts from it                                            | Script in the app origin, paths outside a mount |
-| A compromised dependency or CI step        | The credential-free build job; Gradle and its plugins also run in `publish-maven` (see §6) | A published artifact                            |
+| Attacker                                   | Reaches                                                                                  | Must not get                                    |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| A website open in a browser on the machine | `127.0.0.1:<port>` through the browser (CORS, WS, DNS rebinding)                         | Any plugin call, any gated byte                 |
+| Another app or process on the device       | `127.0.0.1:<port>` directly, any headers it likes                                        | The token, the nonce, any gated byte            |
+| Another listener on `127.0.0.1`            | The session cookie (cookies are not port-isolated), a same-site page that loads our URLs | Any gated byte, any plugin call                 |
+| Content the app displays                   | The app origin, if it is ever served as a document from a mount                          | Script in the app origin                        |
+| A p2p peer                                 | Whatever the consumer stores and mounts from it                                          | Script in the app origin, paths outside a mount |
+| A compromised dependency or CI step        | The credential-free build jobs (no build tool runs where a release secret is, see §6)    | A published artifact                            |
 
 Out of scope: an attacker with root on the device, or one who controls the host
 app's own native code.
@@ -311,11 +311,17 @@ All hosts: `ErrorCodes` in Kotlin and Swift match `core/messages`
 - `release.yml` has three jobs. **build** holds no secret, no OIDC and a
   read-only token: it checks that the tag equals the `package.json` version
   and is on `main`, runs `build:pkg`, `docs:check`, `vp check`, `vp test` and
-  the Gradle build, and packs the npm tarball and AAR. **publish-npm**
-  (`release` environment, `id-token: write`) only publishes that tarball with
+  the Gradle build, packs the npm tarball and stages the unsigned Maven
+  publication (`build/maven-staging`). **publish-npm** (`release`
+  environment, `id-token: write`) only publishes that tarball with
   `--ignore-scripts`: no checkout, install or build. **publish-maven**
-  (`release` environment, signing and Sonatype secrets) runs only the Gradle
-  publish tasks. Both publish jobs wait on the `release` environment.
+  (`release` environment, signing and Sonatype secrets) runs no build tool:
+  `.github/scripts/publish-maven.sh` checks the staged files are exactly the
+  expected publication (no extra files, no symlinks), recomputes checksums,
+  signs with `gpg` and uploads with `curl` (Central Portal API, GitHub
+  Packages); tokens go to `curl` through a header file, never argv. Both
+  publish jobs wait on the `release` environment. CI dry-runs the signing path
+  with a throwaway key on every PR (`publish-maven.test.sh`).
 - Gradle dependency verification is on for the root build
   (`gradle/verification-metadata.xml`), and the wrapper is validated.
 - No job holding a credential runs dependency install scripts. `publish-npm`
@@ -341,14 +347,13 @@ All hosts: `ErrorCodes` in Kotlin and Swift match `core/messages`
   the PR.
 - The deploy templates (`templates/deploy/`) keep every secret in a GitHub
   environment limited to the default branch; production needs reviewers.
-- `release-bare-kit-runtime.yml` (`bare-kit-v*` tags) uses the same protected
-  `release` environment and the same signing and Sonatype secrets, with only
-  `contents: read` and a checkout that drops its token. It runs no npm install: it fetches the hash-checked
-  prebuild with Node built-ins, refuses a tag that differs from the lockfile's
-  `maven` pin, and publishes only `:bare-kit-runtime`, an unmodified repackage
-  of that prebuild ([ADR 0007](adr/0007-separate-bare-kit-runtime-artifact.md)).
-  Like `publish-maven`, its Gradle build runs next to the secrets; dependency
-  verification covers `:bare-kit-runtime` too.
+- `release-bare-kit-runtime.yml` (`bare-kit-v*` tags) is split the same way:
+  a credential-free `build` job fetches the hash-checked prebuild with Node
+  built-ins (no npm install), refuses a tag that differs from the lockfile's
+  `maven` pin, and stages `:bare-kit-runtime`, an unmodified repackage of that
+  prebuild ([ADR 0007](adr/0007-separate-bare-kit-runtime-artifact.md)); a
+  `publish` job in the `release` environment signs and uploads it with
+  `publish-maven.sh` only.
 - Dev tooling is not exempt: the harness supervisor (`core/harness/`) hands out
   instance credentials, so it binds only a loopback host (throws otherwise),
   refuses any request with an `Origin` or a foreign `Host`, sends no CORS
@@ -401,11 +406,11 @@ behavior test next to the code when it cannot.
   a hard link to a file outside the mount (it is a real file in the mount), nor
   a multi-flip race that swaps the path back between open and re-check. The
   attacker must already write inside a mount root.
-- **Gradle next to the release secrets.** `publish-maven` runs the Gradle
-  publish tasks, which rebuild the AAR, so Gradle, AGP and their plugins run
-  in the job that holds the signing and Sonatype secrets. Dependency
-  verification and the wrapper check narrow this; the AAR is not proved
-  byte-identical to the one the credential-free build job produced.
+- **Staged Maven files are trusted as built.** Gradle no longer runs next to
+  the release secrets, but a compromised build dependency in the credential-free
+  `build` job could still alter the staged AAR, which `publish-maven` then
+  signs. Dependency verification and the wrapper check narrow this, the same
+  way they do for the npm tarball.
 - The repository's `release` environment protection and secret scoping are
   settings, not code: `RELEASING.md` says what they must be, and no test can
   see them.
