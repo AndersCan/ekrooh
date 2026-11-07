@@ -136,6 +136,16 @@ jobs:
           grep -q "androidx.appcompat" "$POM" || { echo "POM is missing androidx.appcompat — see issue #36"; exit 1; }
           echo "POM dependency metadata OK"
 
+      - name: Assert 64-bit native libs in the AAR are 16 KB aligned
+        # Google Play requires LOAD segments aligned to 0x4000 on arm64-v8a
+        # and x86_64. libnativehelper.so shipped 0x1000 in 0.5.0-0.6.1.
+        if: matrix.host == 'linux'
+        run: |
+          scripts/check-aar-page-size.test.sh
+          ./gradlew :bare-host:assembleRelease
+          READELF="$(ls "$ANDROID_HOME"/ndk/27.2.12479018/toolchains/llvm/prebuilt/*/bin/llvm-readelf)" \
+            scripts/check-aar-page-size.sh android/build/outputs/aar/bare-host-release.aar
+
   # Re-enabled with hard bounds (issue #44). The job used to spin forever on
   # `adb: device offline` and ride the 6h default timeout. It is now bounded at
   # the job level and at the emulator boot, and uses hardware acceleration (KVM)

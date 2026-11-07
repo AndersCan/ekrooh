@@ -7,6 +7,15 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-07
+
+### Fixed
+
+- **16 KB page size support**: the bundled `libnativehelper.so` is now linked
+  with 16 KB LOAD alignment (`ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES`), as Google
+  Play requires for 64-bit libs. CI now fails if any `arm64-v8a` or `x86_64`
+  `.so` in the AAR is aligned below 0x4000.
+
 ## [0.6.1] - 2026-11-01
 
 ### Fixed
