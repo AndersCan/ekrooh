@@ -109,5 +109,9 @@ entry points at compiled `dist/` output.
    - `bare-host:X.Y.Z` in `android/app/build.gradle`.
    - `exactVersion: X.Y.Z` in `ios/project.yml`.
    - `version = X.Y.Z;` in `ios/Vote.xcodeproj/project.pbxproj`.
-3. Open a PR titled `chore: bump examples/vote to vX.Y.Z`. The Starter workflow builds
+3. On macOS, run `npm run sync` in `examples/vote`. If it reports changed native
+   packages (the bare-link xcframework set differs from `project.pbxproj`), edit the
+   `framework:` entries in `ios/project.yml`, run `xcodegen generate`, and commit the
+   regenerated `ios/Vote.xcodeproj`.
+4. Open a PR titled `chore: bump examples/vote to vX.Y.Z`. The Starter workflow builds
    web, Android and iOS from the published packages.
