@@ -48,9 +48,12 @@ review checks that both still exist and still say this.
   `SameSite=Strict` still attaches our cookie to its no-`Origin` GETs. With
   auth on, a gated request or upgrade whose `Sec-Fetch-Site` is not
   `same-origin` or `none` is refused with 403 (`checkFetchSite`). A request
-  without the header is judged by the Host/Origin rule alone. The public mount
-  and dev mode are not affected. Pinned by `loopback-gate.test.ts` ("refuses a
-  credentialed gated request with Sec-Fetch-Site: %s").
+  without the header is judged by the Host/Origin rule alone. A request whose
+  `Origin` is exactly an `allowedOrigins` entry is exempt (it is listed because
+  it is cross-site); a no-`Origin` request never is. The public mount and dev
+  mode are not affected. Pinned by `loopback-gate.test.ts` ("refuses a
+  credentialed gated request with Sec-Fetch-Site: %s", "exempts an explicitly
+  allowed origin, never a no-Origin request").
 - The port in the cookie name (`bare_session_<port>`) only stops two ekrooh
   servers from overwriting each other's session. It does not keep the cookie
   from being sent to another loopback listener; the Fetch-metadata rule and
@@ -59,10 +62,27 @@ review checks that both still exist and still say this.
   `timingSafeEqual`). Pinned by `loopback-gate.test.ts` ("compares every
   credential through timingSafeEqual").
 - The token never appears in a URL or in page JS. The page gets only the
-  bootstrap nonce, which `/login` accepts once, and only within
-  `BOOTSTRAP_TTL_MS` (120 s) of the bind (`bootstrapTtlMs` on
-  `LoopbackServerOptions`). Pinned by `loopback-gate.test.ts` ("expires an
-  unredeemed nonce BOOTSTRAP_TTL_MS after bind").
+  bootstrap nonce, which `/login` accepts once, and only while it is live:
+  - its lifetime is `BOOTSTRAP_TTL_MS` (120 s) of **running** time counted
+    from the first public page request (normally the host loading the page; a `POST /login` that
+    arrives before any page load is accepted only inside the 600 s unloaded
+    window below);
+  - the clock pauses while the Bare worklet is suspended (`suspend`/`resume`
+    → `pauseBootstrapClock`/`resumeBootstrapClock`, wired in
+    `core/runtime.ts`), so an app backgrounded between page load and login
+    still logs in;
+  - a nonce whose page never loads expires after
+    `BOOTSTRAP_UNLOADED_TTL_MS` (600 s) of running time from bind;
+  - `bootstrapTtlMs` on `LoopbackServerOptions` overrides the 120 s; a
+    non-positive or non-finite value falls back to it, and it is capped at
+    `BOOTSTRAP_TTL_MAX_MS` (600 s);
+  - an expired nonce never comes back; a reload logs in with the surviving
+    session cookie.
+
+  Pinned by `loopback-gate.test.ts` ("bootstrap nonce lifetime") and
+  `runtime.test.ts` ("pauses the bootstrap clock across a Bare suspend and
+  resumes it only on resume").
+
 - The cookie is `HttpOnly; SameSite=Strict`.
 - Device mode (auth on, ephemeral port) is the default. Only `mode=dev` or
   `deviceMode: false` turns auth off; `createWorkletRuntime({ auth: false })`
@@ -81,14 +101,18 @@ review checks that both still exist and still say this.
 
 - Only a `{ public: true }` directory mount (the web app at `/`) is served
   before login. Routes, file mounts and other directory mounts are gated.
-- **No public/gated overlap.** `mountDir` throws when a public and a gated
-  directory root contain each other, compared by real path, lowercased and
-  NFC-normalized (APFS ignores case and normalization). The public mount also
-  404s any file whose real path is inside a gated directory mount, even one
-  that became reachable after mounting. Pinned by
-  `static-file-server.test.ts` ("refuses a gated directory mount inside,
-  around or case-aliasing the public root", "never serves a gated root
-  through the public mount…"). Gated **file** mounts are not covered: see
+- **No gated root inside the public one.** `mountDir` throws when a gated
+  directory root is inside or equal to the public root, in either mount
+  order, compared by real path. Paths are case-folded and NFC-normalized only
+  where the filesystem ignores case (darwin, ios, win32; `foldPathCase`
+  overrides). A gated root strictly **around** the public root is allowed: it
+  only re-serves public files, sandboxed. The public mount also 404s any file
+  whose real path is inside a gated directory mount, even one that became
+  reachable after mounting (gated roots are resolved once and cached). Pinned
+  by `static-file-server.test.ts` ("refuses a gated directory mount inside or
+  equal to the public root, in either order", "folds case only where the
+  filesystem does", "allows a gated root strictly around the public root…",
+  "never serves a gated root through the public mount…"). Gated **file** mounts are not covered: see
   Accepted risks.
 - A request path never resolves outside its mount: segments are decoded once,
   `.`/`..`/separators/NUL are refused, and the real path (symlinks resolved)
@@ -100,12 +124,17 @@ review checks that both still exist and still say this.
   symlink after realpath").
 - Framework responses and custom routes carry `Referrer-Policy: no-referrer`
   and `X-Content-Type-Options: nosniff`; route responses start with them
-  already set. Gated responses and routes also carry
-  `Cross-Origin-Resource-Policy: same-origin`, unless extra `allowedOrigins`
-  are configured (the cross-origin Vite dev page). Pinned by
-  `static-file-server.test.ts` ("sends Referrer-Policy and nosniff on every
-  framework response and route", "leaves Cross-Origin-Resource-Policy off
-  public app files and dev servers with extra origins").
+  already set. With auth on, gated responses and routes also carry
+  `Cross-Origin-Resource-Policy: same-origin`, `allowedOrigins` or not; with
+  auth off (dev) it is left off so the Vite dev page can embed backend media.
+  Pinned by `static-file-server.test.ts` ("sends Referrer-Policy and nosniff
+  on every framework response and route", "keeps
+  Cross-Origin-Resource-Policy: same-origin when allowedOrigins is set").
+- A route that fails after its response has ended is only logged (no second
+  500, no destroyed socket), and a 500 for a failed route drops every header
+  the handler had set (a half-written `Set-Cookie` never leaks). Pinned by
+  `static-file-server.test.ts` ("drops headers the handler set before
+  answering its failure with a 500").
 - Only the public mount is app code. HTML from it gets the strict CSP
   (`cspFor`). Every other served file (file mounts and gated directory mounts)
   gets the sandbox CSP (`MOUNTED_FILE_CSP`), so a hostile HTML or SVG opened as
@@ -144,7 +173,7 @@ review checks that both still exist and still say this.
   limits and the field cap match").
 - Decoded headers are rebuilt from an allowlist of fields, so unknown keys
   (`__proto__`) never reach plugin code; `args`/`result` are rebuilt without a
-  prototype. `pluginId`, `event` and `requestId` are at most 256 characters
+  prototype. `pluginId`, `event` and `requestId` are at most 256 UTF-8 bytes
   (`MAX_ID_LENGTH`, `core/messages/frame-content.ts`), and invalid UTF-8 is
   `FRAME_INVALID`.
 - A frame with invalid **content** is skipped on its own (an
@@ -159,10 +188,11 @@ review checks that both still exist and still say this.
   Pinned by `websocket-server.test.ts` ("ignores a forged HOST_INVOKE_RESPONSE
   sent over the protocol socket").
 - Inflight calls, pending host calls and the outbound queue are all bounded.
-  The router caps calls at `maxInflight` (64), per channel (three quarters)
-  and per plugin (half); over a cap is `TRANSPORT_ERROR` (pinned by
-  `plugin-kernel.test.ts` "caps calls per channel…", "caps calls per
-  plugin…"). Pending host calls are capped at 1024, oldest evicted (pinned by
+  The router caps calls at `maxInflight` (64) and per channel (three
+  quarters); a per-plugin cap applies only when `maxInflightPerPlugin` is set
+  (default: `maxInflight`, i.e. none). Over a cap is `TRANSPORT_ERROR` (pinned
+  by `plugin-kernel.test.ts` "caps calls per channel…", "caps calls per plugin
+  when maxInflightPerPlugin is set"). Timers are capped at 2^31−1 ms. Pending host calls are capped at 1024, oldest evicted (pinned by
   `host-ipc.test.ts` "evicts the oldest pending host call past the 1024 cap").
 - **No exception text reaches the page.** A thrown plugin or routing error is
   answered with a fixed message (`<pluginId>.<event> failed`) and the detail is
@@ -185,7 +215,7 @@ review checks that both still exist and still say this.
   handler: `vendor.media` allowlists `kind`, `core.logs` rejects a non-number
   `tail` and unknown `level`/`source`, and host handlers allowlist permission
   ids (unknown or missing ids are `unsupported` on Android, iOS and the mock).
-- Plugin ids are validated at registration: namespaced, at most 256
+- Plugin ids are validated at registration: namespaced, at most 256 UTF-8 bytes
   characters, and `core.*`/`vendor.*` are reserved for the framework's own
   plugins (`createPluginRegistry`, pinned by `plugin-kernel.test.ts` "rejects
   malformed ids and reserves core.* / vendor.* for framework plugins").
@@ -214,8 +244,11 @@ and the emulator journey `ReferenceJourneyTest`):
 - Durable storage is `noBackupFilesDir/bare` (never the cache dir); backup is
   off and every domain, `root` and the `device_*` domains included, is
   excluded from full backup, cloud backup and device transfer.
-- `MainActivity` is the only exported component (`singleTask`); the worklet
-  runs in the `Application`. The FileProvider is private and exposes only
+- `MainActivity` is the only exported component (`launchMode="singleTop"`);
+  the worklet runs once per process in the `Application`, so another
+  activity instance never starts a second backend. Only the first WebView gets
+  the bootstrap nonce; later ones log in with the cookie. A failed storage
+  migration falls back to the legacy directory and is retried each launch. The FileProvider is private and exposes only
   `cache/captures/`.
 - Cleartext is allowed only to `127.0.0.1`/`localhost` (network security
   config `base-config` cleartext off).
@@ -236,7 +269,14 @@ iOS (`ios/Sources/BareHost/BareWebHost.swift`; checks in
 - `BareHandoff.consume` accepts only an `http://127.0.0.1:<port>` origin and a
   base64url nonce, and deletes the file as soon as it reads it.
 - `BareStorage.prepare` keeps storage in `Application Support/bare`, out of
-  Documents, and excludes it from backup; failure is fatal.
+  Documents, and excludes it from backup; failure is fatal. A failed move of a
+  legacy `Documents/bare` is retried next launch, and the leftover is excluded
+  from backup meanwhile.
+- A same-origin `target=_blank`/`window.open` loads in place
+  (`BareNavigationDecision.loadInPlace`), never in a second view.
+- Host invoke timeouts are clamped to one day
+  (`HostPluginRegistry.maxInvokeTimeout`); a non-positive or NaN timeout at
+  registration is a precondition failure.
 - ATS allows only `NSAllowsLocalNetworking`, which also permits `.local`,
   unqualified names and IP literals; navigation confinement and the CSP are
   what keep the WebView on the loopback origin.
@@ -278,7 +318,13 @@ All hosts: `ErrorCodes` in Kotlin and Swift match `core/messages`
   publish tasks. Both publish jobs wait on the `release` environment.
 - Gradle dependency verification is on for the root build
   (`gradle/verification-metadata.xml`), and the wrapper is validated.
-- No job holding a credential runs dependency install scripts.
+- No job holding a credential runs dependency install scripts. `publish-npm`
+  first checks npm is at least 11.5.1 (trusted publishing needs it).
+- The dependency vuln scan (OSV-Scanner, `test.yml`) scans every npm lockfile
+  recursively. Maven is ignored (`.github/osv-scanner.toml`): the only Maven
+  input is `gradle/verification-metadata.xml`, a hash list of Gradle
+  build-tool jars that are not shipped; the AAR's runtime dependencies are
+  tracked by Dependabot instead.
 - Prebuilds are fetched from the public release URL with no token, checked
   against `scripts/prebuilds.lock.json` before unpacking (the script refuses a
   placeholder hash), refused if the archive has absolute, `..` or symlink
@@ -308,8 +354,11 @@ greppable invariant regresses: HTML-injection and eval sinks in shipped code
 outside the `Platform` seam; and, with workflows parsed as YAML: unpinned
 actions or wrong version comments (templates and local actions included),
 `pull_request_target`/`workflow_run`, workflow-level write permissions,
-missing `persist-credentials: false`, install scripts in a credentialed job,
-code run in an OIDC job, non-publish steps in a secrets job, renamed or
+missing `persist-credentials: false`, install scripts in a credentialed job
+(segment-aware, so chained or `npx`/`gem`/`bundle` installs count), any step
+in an OIDC job outside an action-and-line allowlist, any action in a secrets
+job outside an allowlist, non-publish steps in a secrets job, a rename-blind
+docs-only classifier, renamed or
 skipped required checks, `CODEOWNERS` coverage, a placeholder prebuild hash,
 `Package.swift` drifting from the lockfile, and a FileProvider wider than
 `captures/`.
@@ -349,9 +398,23 @@ behavior test next to the code when it cannot.
 - The repository's `release` environment protection and secret scoping are
   settings, not code: `RELEASING.md` says what they must be, and no test can
   see them.
-- `createMockTransport` stays in the public `transports` export; it fakes the
-  host (known permissions granted) and only warns inside an app shell.
-- Deferred: vendored agent-skill hashes are unverified (no reproducible
+- `createMockTransport` stays in the public `transports` export and ships
+  inside the `@ekrooh/bare/transports` bundle (present in a production bundle
+  even when unused). It fakes the host (known permissions granted) and only
+  warns inside an app shell; the reference app's mode guard keeps it unused in
+  production builds.
+- **Gated-root cache.** Each gated directory root is resolved once and
+  cached; it is re-resolved only on a request to that gated mount. A gated
+  root later replaced by a symlink into the web app is therefore not
+  re-checked by public-mount requests until its own mount is requested.
+- **Required checks are not pinned to the GitHub Actions app** in the `main`
+  ruleset, so another app with check-write access could report a required
+  check as passing. This is a repository setting the owner handles.
+- **Deploy templates**: the signing jobs build the app with the keystore
+  present, so build-time dependency code runs next to it.
+- Deferred: `examples/vote` has no Android Gradle verification metadata; the
+  workflows have no `merge_group` trigger (needed before a merge queue);
+  `npm run prebuilds` needs `unzip` (no Windows path). Vendored agent-skill hashes are unverified (no reproducible
   algorithm); the dead Android `libnativehelper.so` stub stays until removal is
   verified on a device; the Android decoder does not resync after a framing
   fault; Android `targetSdk 36` and narrower consumer keep rules.

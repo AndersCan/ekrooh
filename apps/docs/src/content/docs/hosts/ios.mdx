@@ -19,12 +19,14 @@ checkout, no cross-repo npm step.
   `INVALID_RESPONSE`; an oversized one `FRAME_TOO_LARGE`.
 - `HostPluginRegistry` — plugin ID → handler map, with a per-handler
   `timeout` (`defaultInvokeTimeout` 30 s, `userMediatedInvokeTimeout` 5 min,
-  `invokeTimeout(pluginId:event:)`).
+  clamped to `maxInvokeTimeout` 1 day; `invokeTimeout(pluginId:event:)`). A
+  non-positive or NaN timeout traps (precondition).
 - `BareStorage` / `BareStorageDirectories` / `BareStorageError` — worklet
   directories in Application Support (excluded from backup) and Caches.
 - `BareHandoff` — parses and deletes `handoff.json`; builds the bootstrap
   user script.
-- `BareNavigationPolicy` / `BareNavigationDecision` /
+- `BareNavigationPolicy` / `BareNavigationDecision` (`allow`, `cancel`,
+  `openExternally`, `loadInPlace` for a same-origin new window) /
   `BareNavigationDelegate` — loopback-origin confinement.
 - `BareWebHost` — `configure(_:)` (WebView hardening) and
   `load(_:in:delegate:)` (bootstrap injection + first load).

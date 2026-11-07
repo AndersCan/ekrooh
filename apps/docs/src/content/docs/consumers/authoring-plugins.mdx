@@ -182,7 +182,7 @@ user is still deciding. A host that does not answer in time is reported as
 ## Conventions
 
 - Plugin IDs are namespaced: two or more dot-separated segments of letters,
-  digits, `-` and `_`, at most 256 characters (`app.photos`); events are
+  digits, `-` and `_`, at most 256 UTF-8 bytes (`app.photos`); events are
   plugin-local (`photos.capture`). `registry.register` throws on any other id.
 - The `core.*` and `vendor.*` namespaces are reserved for the framework's own
   plugins (`core.health`, `core.discovery`, `core.permissions`, `core.logs`,

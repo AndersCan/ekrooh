@@ -6,7 +6,7 @@ Wire protocol, codec, and plugin helpers. Exported as `@ekrooh/bare/core`.
 
 `version` (1 B), `type` (1 B), `headerLen` (2 B, big-endian), `payloadLen` (3 B, big-endian), `header` (`headerLen` B of UTF-8 JSON), `payload` (`payloadLen` B).
 
-Decode is an allowlist: each header type is rebuilt from its known fields, unknown fields are dropped, `args`/`result` are rebuilt without a prototype (`__proto__`, `constructor`, `prototype` removed), and `pluginId`/`event`/`requestId` are at most 256 characters. Invalid UTF-8 or JSON is `FRAME_INVALID`. A content-invalid frame is skipped on its own (an `INVOKE_REQUEST` among them is answered `FRAME_INVALID`); a framing violation closes the WebSocket.
+Decode is an allowlist: each header type is rebuilt from its known fields, unknown fields are dropped, `args`/`result` are rebuilt without a prototype (`__proto__`, `constructor`, `prototype` removed), and `pluginId`/`event`/`requestId` are at most 256 UTF-8 bytes. An undecodable host capabilities answer fails the capability query with `FRAME_INVALID`. Invalid UTF-8 or JSON is `FRAME_INVALID`. A content-invalid frame is skipped on its own (an `INVOKE_REQUEST` among them is answered `FRAME_INVALID`); a framing violation closes the WebSocket.
 
 - Header is capped at 64 KiB; oversize fails with `FRAME_TOO_LARGE`, never truncated.
 - Frame is capped at 16 MiB. Move large binaries out of band: pass a path or handle in the header, send bytes over HTTP or a file URL.
@@ -31,3 +31,7 @@ Decode is an allowlist: each header type is rebuilt from its known fields, unkno
 5. Return `UNSUPPORTED_CAPABILITY` or `UNSUPPORTED_EVENT` when a runtime cannot handle an event.
 6. `args` is untrusted: it is a compile-time type only. Give the spec a `validate(args)` hook (failing args are answered `PLUGIN_ERROR` before the handler runs) or check every argument the handler uses.
 7. A host-delegated, user-mediated event sets `hostTimeoutMs` on its spec (default host deadline 30 s), plus a matching page-side `timeoutMs`.
+
+## Limits
+
+The router caps calls at `maxInflight` (64) and at three quarters of that per channel (`maxInflightPerChannel`). A per-plugin cap is off by default (`maxInflightPerPlugin` defaults to `maxInflight`). Over a cap is `TRANSPORT_ERROR`. Timer delays are capped at 2^31−1 ms.

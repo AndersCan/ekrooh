@@ -11,8 +11,10 @@ decision, and 0.6.0 shipped them:
   nonce or a live session, never the raw token.
 
 Later hardening (0.7.0, unreleased at the time of writing) keeps this ADR's
-shape: the nonce expires 120 s after bind, and gated requests with
-`Sec-Fetch-Site: same-site|cross-site` are refused. Everything else below
+shape: an unredeemed nonce expires after 120 s of running time from the page
+load (600 s if the page never loads), and gated requests with
+`Sec-Fetch-Site: same-site|cross-site` are refused unless their `Origin` is
+an explicit `allowedOrigins` entry. Everything else below
 still holds.
 
 ## Context

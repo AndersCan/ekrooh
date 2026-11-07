@@ -50,14 +50,17 @@ uses exactly these):
 1. **`BareStorage.prepare()`** creates `Application Support/bare` (durable,
    excluded from backup; it throws if the exclusion fails, and the host must
    not start) and `Caches/bare-cache`, deletes a stale `handoff.json`, and
-   moves a `Documents/bare` left by an older version once. Start the worklet
+   moves a `Documents/bare` left by an older version (a failed move is retried
+   next launch, and the leftover is excluded from backup meanwhile). Start the worklet
    with `[webAssets, dirs.storage, dirs.cache]`.
 2. **`BareWebHost.configure(webView)`** turns link previews off and the view
    not inspectable.
 3. **`BareNavigationDelegate`** confines the WebView to the loopback origin.
    Install it (`webView.navigationDelegate = delegate`) before any page loads.
-   Off-origin links open in Safari only when the user activated them;
-   `target=_blank` opens Safari; subframes are app-origin only.
+   Off-origin links open in Safari only when the user activated them; an
+   off-origin `target=_blank` opens Safari, a same-origin one (or
+   `window.open`) loads in place (`BareNavigationDecision.loadInPlace`);
+   subframes are app-origin only.
 4. **`BareHandoff.consume(at: dirs.handoff)`** polls for the worklet's
    `handoff.json`; it accepts only a `http://127.0.0.1:<port>` origin and a
    base64url nonce, and deletes the file as it reads it.
@@ -70,7 +73,9 @@ uses exactly these):
 Host plugins register on a `HostPluginRegistry` and are served by a
 `HostIpcCoordinator`. A user-mediated handler (a picker, a permission prompt)
 registers with `timeout: HostPluginRegistry.userMediatedInvokeTimeout`
-(5 minutes); the default is 30 s.
+(5 minutes); the default is 30 s. Timeouts are clamped to
+`HostPluginRegistry.maxInvokeTimeout` (one day), and a non-positive or NaN
+timeout is a precondition failure.
 
 ## Build inputs (framework repo)
 

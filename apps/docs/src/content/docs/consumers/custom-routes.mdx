@@ -35,9 +35,11 @@ runtime.server.registerRoute('POST', '/upload', async (req, res) => {
 - Async handlers are supported. A handler that throws or rejects is answered
   with a bare `500 Internal Server Error`; the cause goes to the log.
 - The response starts with `Referrer-Policy: no-referrer` and
-  `X-Content-Type-Options: nosniff` already set, plus
-  `Cross-Origin-Resource-Policy: same-origin` when no extra `allowedOrigins`
-  are configured. Set your own `Content-Type`.
+  `X-Content-Type-Options: nosniff` already set, plus `Cross-Origin-Resource-Policy: same-origin` whenever auth is on (off in
+  dev). Set your own `Content-Type`.
+- A handler that fails after its response has ended is only logged. The 500
+  for a failed route never carries headers the handler had set (such as
+  `Set-Cookie`).
 
 ## File mounts
 
@@ -63,9 +65,10 @@ same `sandbox` Content-Security-Policy as file mounts, so an HTML or SVG file in
 a mounted folder (user files, a peer-synced folder) never runs script in the
 app origin. Ship app code only in the public mount.
 
-A public and a gated directory mount must not contain each other: `mountDir`
-throws when one root lies inside the other (real paths, compared case- and
-normalization-insensitively). Keep gated **file** mounts out of the public web
+A gated directory mount must not be inside (or the same folder as) the public
+one: `mountDir` throws on that layout, in either mount order (real paths;
+case- and normalization-insensitive on macOS, iOS and Windows). A gated folder
+strictly around the web app folder is allowed. Keep gated **file** mounts out of the public web
 app directory too; that layout is not detected, and such a file would be
 reachable before login through its public URL.
 

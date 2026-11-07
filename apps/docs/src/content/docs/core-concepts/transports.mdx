@@ -56,7 +56,10 @@ const [err, pong] = await bus.invoke(healthEvents.health.ping('hello'));
   pending and later request with `TRANSPORT_ERROR`.
 - **`diagnostics: true`** folds the server's recent `[loopback]` rejection log
   lines into the give-up error text. It is off by default: log lines are for a
-  diagnostic harness, not for a shipped UI.
+  diagnostic harness, not for a shipped UI. Pass the same flag to
+  `createProtocolMessenger` to get them on invoke timeouts too. The reference
+  apps turn it on only in dev or when built with `VITE_BARE_DIAGNOSTICS=true`
+  (the device CI jobs do).
 - No `?token=` URL fallback — a credential is never placed in a URL.
 - Browser dev is cross-origin — pass an explicit URL (`VITE_BARE_WS_URL`).
 
@@ -74,4 +77,7 @@ so argument checks, unsupported-event errors and discovery match the worklet.
 Only the host is stubbed: known permission ids are granted (unknown or missing
 ids are `unsupported`), and `vendor.media` returns a fixed `data:` image after
 the same `kind` check as the real plugin. It never reconnects. It warns once if
-it runs inside an app shell, and must never ship in a production bundle.
+it runs inside an app shell. It ships inside the `@ekrooh/bare/transports`
+bundle, so it is present in a production build even when unused; select it
+only behind a dev/test guard (the reference app refuses
+`VITE_TRANSPORT_MODE=mock` in a production build).

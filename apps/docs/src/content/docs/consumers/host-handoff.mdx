@@ -31,7 +31,8 @@ here is the exact flow.
 
 4. The host loads `http://127.0.0.1:<port>/index.html`. The worklet writes
    the file atomically with owner-only permissions; an unredeemed nonce
-   expires 120 s after the server binds.
+   expires after 120 s of running time from the page load (paused while the
+   worklet is suspended; 600 s if the page never loads).
 5. The page's WebSocket transport reads `window.__ekrooh.bootstrap`, calls
    `POST /login` once (the nonce is single-use), gets the `bare_session_<port>`
    cookie, and connects to `ws://127.0.0.1:<port>` — same origin, so
@@ -44,7 +45,9 @@ here is the exact flow.
 `examples/android-app/src/main/java/to/holepunch/bare/android/` shows the
 full wiring. The worklet is owned by the `Application` (`BareApplication`,
 `ReferenceHost`), so it survives rotation and a second launch of the
-`singleTask` `MainActivity`. Key bits: start the worklet with
+`singleTop` `MainActivity`; only the first WebView gets the nonce, later ones
+log in with the cookie, and a handoff that arrives after the error page is
+shown is still consumed and loaded. Key bits: start the worklet with
 `[webAssets, noBackupFilesDir/bare, cacheDir/bare-cache]`, read the handoff
 with `BareHandoff.consume(file)`, set `BareWebViewClient.allowedOrigin`, check
 `WebViewFeature.DOCUMENT_START_SCRIPT` and inject

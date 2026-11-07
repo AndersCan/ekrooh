@@ -9,7 +9,7 @@ add **plugins** with namespaced events and per-runtime handlers.
 ## Conventions
 
 - Plugin IDs are namespaced (`app.photos`: two or more dot-separated
-  segments, at most 256 characters); events are plugin-local (`health.ping`).
+  segments, at most 256 UTF-8 bytes); events are plugin-local (`health.ping`).
   The `core.*` and `vendor.*` namespaces are reserved for the framework's own
   plugins, and `registry.register` throws on a reserved or malformed id.
 - `DISPATCH` is fire-and-forget; `INVOKE_REQUEST`/`INVOKE_RESPONSE` are
@@ -63,8 +63,9 @@ exception text never crosses the wire; return `err(code, message)` to send a
 specific message.
 
 The router bounds concurrent work: at most `maxInflight` calls (64) at once,
-at most three quarters of that from one channel (the page socket or the host
-IPC) and half of it to one plugin. A call over a limit is answered
+and at most three quarters of that from one channel (the page socket or the
+host IPC). A per-plugin cap is off by default; set `maxInflightPerPlugin` to
+stop one slow plugin taking every slot. A call over a limit is answered
 `TRANSPORT_ERROR` instead of being queued.
 
 ## Host delegation

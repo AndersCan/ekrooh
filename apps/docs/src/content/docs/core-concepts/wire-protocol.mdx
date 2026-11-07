@@ -33,7 +33,7 @@ pinned at `1` by the contract test — changing it is a **major-version event**.
 A decoded header is rebuilt from the known fields of its `type`: unknown
 fields are dropped, and `args`/`result` objects are rebuilt without a
 prototype (`__proto__`, `constructor` and `prototype` keys are removed).
-`pluginId`, `event` and `requestId` are at most 256 characters, and the header
+`pluginId`, `event` and `requestId` are at most 256 UTF-8 bytes, and the header
 must be valid UTF-8 JSON.
 
 ## Bad frames

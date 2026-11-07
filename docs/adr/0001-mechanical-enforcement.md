@@ -19,7 +19,10 @@ The enforcement has grown; the decision is unchanged:
 - The public API snapshot now covers **types and signatures**, not only value
   names: `contract.test.ts` compares the built `dist/*.d.mts` surface with the
   committed `api/public-api.d.mts.snap` (regenerate after a reviewed change
-  with `npm run build:pkg && npm run api:snapshot`).
+  with `npm run build:pkg && npm run api:snapshot`). The normalizer resolves
+  chunk aliases to their declarations and keeps each entry's export list
+  verbatim, so a rebuild with new chunk hashes is not a diff but any type or
+  signature change is.
 - The `package.json` `exports` **keys** are frozen too: a new subpath fails the
   test, because it is a new stability boundary.
 - The host APIs are pinned the same way: the Kotlin API by

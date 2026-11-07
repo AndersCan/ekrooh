@@ -12,7 +12,8 @@ The transports subpath exports the UI-facing transport surface.
 - `createWebSocketTransport(urlOrOptions?)` — same-origin default, cookie
   bootstrap, reconnect with backoff.
 - `createMockTransport()` — deterministic, in-process responses for tests and
-  browser dev, routed through the real plugin kernel. Never ship it.
+  browser dev, routed through the real plugin kernel. It is part of the
+  transports bundle; select it only behind a dev/test guard.
 
 ## Options
 

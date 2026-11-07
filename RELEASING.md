@@ -7,7 +7,8 @@ document with no human step beyond the tag decision.
 ## Rules
 
 - One version across npm (`@ekrooh/bare`), the Android AAR, and every artifact.
-- Breaking a stability boundary ([`vision.md`](vision.md#stability-contract)) requires a **major** bump.
+- Breaking a stability boundary ([`vision.md`](vision.md#stability-contract)) requires a **major** bump. While the version is `0.x`, a breaking change
+  bumps the **minor** instead (ADR 0006 shipped as 0.6.0).
 - Release from `main`. Everything merged must already pass `vp check`, `vp test`,
   and `./gradlew build` (the `main` ruleset requires these checks).
 - The tag must name a commit on `main` and equal `v` + the `package.json` version.

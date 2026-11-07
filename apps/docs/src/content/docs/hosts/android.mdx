@@ -39,10 +39,14 @@ regenerated with `./gradlew :bare-host:apiDump` and reviewed.
 - The worklet runs in the `Application` (`BareApplication` +
   `ReferenceHost`), not per Activity, so rotation and a second launch do not
   restart the backend. `MainActivity` is the only exported component, with
-  `launchMode="singleTask"`.
+  `launchMode="singleTop"`, and its `configChanges` cover rotation, UI mode,
+  density, font scale, locale and layout direction. Only the first WebView
+  gets the bootstrap nonce; later ones log in with the session cookie.
 - The host starts the worklet with `[webAssets, storage, cache]`, where durable
   storage is `noBackupFilesDir/bare` (moved once from the old `cacheDir/bare`),
-  reads `handoff.json` through `BareHandoff.consume`, injects
+  (a failed move falls back to the old directory and is retried each launch),
+  reads `handoff.json` through `BareHandoff.consume` (a late handoff is still
+  consumed after the error page is shown), injects
   `window.__ekrooh = { bootstrap }` (a one-time nonce, never the raw token;
   plus `window.BareShell`) with `addDocumentStartJavaScript` after a WebView
   feature check, and loads `http://127.0.0.1:<port>/index.html`.

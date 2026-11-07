@@ -227,7 +227,7 @@ export type WorkletRuntimeOptions = {
    * `maxInflight`. */
   maxInflightPerChannel?: number;
   /** Cap on calls routed at once to one plugin, so a slow plugin cannot take
-   * every slot. Defaults to half of `maxInflight`. */
+   * every slot. Defaults to `maxInflight` (no per-plugin cap). */
   maxInflightPerPlugin?: number;
   /** Plugin ids whose calls must run one at a time, in arrival order. All
    * other plugins run concurrently, so one slow call never blocks the rest. */

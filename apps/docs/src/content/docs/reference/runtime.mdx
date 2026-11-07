@@ -23,7 +23,8 @@ backend, the unified loopback server, and IPC helpers.
     fails pending host calls and stops feeding this runtime's log store. It is
     idempotent; the console is restored when the last runtime closes.
   - Router limits: `maxInflight` (64), `maxInflightPerChannel` (default three
-    quarters of it) and `maxInflightPerPlugin` (default half); a call over a
+    quarters of it) and `maxInflightPerPlugin` (default `maxInflight`, so no
+    separate per-plugin cap unless you set one); a call over a
     limit fails with `TRANSPORT_ERROR`.
 - `resolveWorkletConfig()` — reads the host-provided worklet configuration
   from `Bare.argv`, falling back to labeled CLI tokens (`resolveCliConfig()`).

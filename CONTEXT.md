@@ -25,7 +25,7 @@ The no-regress threshold on statement/line/function coverage over every TypeScri
 _Avoid_: "coverage requirement" alone
 
 **Public API snapshot**:
-The contract tests that freeze each stability boundary's surface, so an accidental break fails CI as a test, not a review note: `contract.test.ts` freezes the `exports` keys, the exported value names of each `@ekrooh/bare` subpath, and the built type surface (`api/public-api.d.mts.snap`; regenerate after review with `npm run build:pkg && npm run api:snapshot`). The Kotlin host API is pinned by `android/api/bare-host.api` (`./gradlew :bare-host:apiDump`; `apiCheck` runs in `./gradlew check`) and the Swift API by `ios/public-api.swift.snap` (`vp test security.apple.test.ts -u`).
+The contract tests that freeze each stability boundary's surface, so an accidental break fails CI as a test, not a review note: `contract.test.ts` freezes the `exports` keys, the exported value names of each `@ekrooh/bare` subpath, and the built type surface (`api/public-api.d.mts.snap`, with chunk aliases resolved and each entry's export list kept verbatim; regenerate after review with `npm run build:pkg && npm run api:snapshot`). The Kotlin host API is pinned by `android/api/bare-host.api` (`./gradlew :bare-host:apiDump`; `apiCheck` runs in `./gradlew check`) and the Swift API by `ios/public-api.swift.snap` (`vp test security.apple.test.ts -u`).
 _Avoid_: "API test" (too generic)
 
 ## Autonomy
