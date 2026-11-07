@@ -28,6 +28,10 @@ core/harness.core.gen.js
 core/p2p-verify.core.gen.js
 .p2p-smoke/
 
+# sync smoke worklet bundle and scratch dir (smoke:sync)
+core/sync-smoke.core.gen.js
+.sync-smoke/
+
 # Swift package build artifacts
 ios/.build/
 ios/.swiftpm/

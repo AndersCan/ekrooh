@@ -7,6 +7,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`@ekrooh/bare/sync`**: peer-to-peer sync of one JSON value per device.
+  `createSync` returns invite/join/publish/values/onChange; devices that share
+  an invite code see each other's latest value. `hyperswarm` is now a runtime
+  dependency.
+
 ## [0.6.2] - 2026-11-07
 
 ### Fixed

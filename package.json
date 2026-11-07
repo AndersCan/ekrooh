@@ -25,6 +25,7 @@
     "./plugins/media/events": "./dist/plugins-media-events.mjs",
     "./plugins/logs/events": "./dist/plugins-logs-events.mjs",
     "./transports": "./dist/transports.mjs",
+    "./sync": "./dist/sync.mjs",
     "./package.json": "./package.json"
   },
   "files": [
@@ -69,8 +70,10 @@
     "test:e2e:harness": "node scripts/playwright-local-browsers.mjs test --config playwright.harness.config.ts",
     "playwright:install": "node scripts/playwright-local-browsers.mjs install chromium",
     "smoke:loopback": "esbuild scripts/smoke-loopback.mjs --bundle --packages=external --platform=node --format=esm --outfile=scripts/smoke-loopback.gen.mjs && bare scripts/smoke-loopback.gen.mjs",
-    "smoke:p2p": "npm run build:p2p-verify && rm -rf .p2p-smoke && mkdir .p2p-smoke && bare core/p2p-verify.core.gen.js .p2p-smoke",
+    "smoke:p2p": "npm run build:p2p-verify && rm -rf .p2p-smoke && mkdir .p2p-smoke && bare core/p2p-verify.core.gen.js .p2p-smoke && npm run smoke:sync",
+    "smoke:sync": "npm run build:sync-smoke && rm -rf .sync-smoke && mkdir -p .sync-smoke/a .sync-smoke/b && PATH=\"$PWD/node_modules/bare/bin:$PATH\" bare core/sync-smoke.core.gen.js .sync-smoke",
     "build:p2p-verify": "esbuild core/p2p-verify.core.ts --bundle --packages=external --platform=node --format=esm --outfile=core/p2p-verify.core.gen.js",
+    "build:sync-smoke": "esbuild core/sync-smoke.core.ts --bundle --packages=external --platform=node --format=esm --outfile=core/sync-smoke.core.gen.js",
     "prebuilds": "node scripts/fetch-prebuilds.mjs",
     "prepare": "vp config"
   },
@@ -86,7 +89,6 @@
     "corestore": "^7.12.0",
     "esbuild": "^0.28.0",
     "hyperdrive": "^13.3.3",
-    "hyperswarm": "^4.17.0",
     "typescript": "^7.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
     "vite-plus": "1.4.0"
@@ -103,6 +105,7 @@
     "bare-tcp": "^2.2.7",
     "bare-ws": "^3.1.0",
     "fs-native-extensions": "1.5.0",
+    "hyperswarm": "^4.17.0",
     "quickbit-native": "2.4.8",
     "rabin-native": "2.0.0",
     "rocksdb-native": "3.19.1",
