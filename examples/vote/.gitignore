@@ -7,3 +7,8 @@ android/.gradle/
 android/local.properties
 **/build/
 .kotlin/
+ios/addons/
+ios/Vote/main.core.bundle
+ios/Vote/WebAssets/
+xcuserdata/
+.DS_Store

@@ -1,0 +1,81 @@
+# Maintainers only. Users open Vote.xcodeproj; regenerate with `xcodegen generate` after changing this file.
+name: Vote
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: '14.0'
+  createIntermediateGroups: true
+packages:
+  BareHost:
+    url: https://github.com/AndersCan/ekrooh
+    exactVersion: 0.6.1
+targets:
+  Vote:
+    type: application
+    platform: iOS
+    deploymentTarget: '14.0'
+    sources:
+      - path: Vote
+        excludes:
+          - main.core.bundle
+          - WebAssets
+      - path: Vote/main.core.bundle
+        buildPhase: resources
+      - path: Vote/WebAssets
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: BareHost
+      - framework: addons/bare-buffer.3.7.1.xcframework
+        embed: true
+      - framework: addons/bare-crypto.1.15.4.xcframework
+        embed: true
+      - framework: addons/bare-dns.2.3.1.xcframework
+        embed: true
+      - framework: addons/bare-fs.4.8.4.xcframework
+        embed: true
+      - framework: addons/bare-hrtime.2.1.2.xcframework
+        embed: true
+      - framework: addons/bare-inspect.3.1.10.xcframework
+        embed: true
+      - framework: addons/bare-os.3.9.4.xcframework
+        embed: true
+      - framework: addons/bare-path.3.1.2.xcframework
+        embed: true
+      - framework: addons/bare-pipe.4.4.0.xcframework
+        embed: true
+      - framework: addons/bare-tcp.2.6.1.xcframework
+        embed: true
+      - framework: addons/bare-tls.3.2.0.xcframework
+        embed: true
+      - framework: addons/bare-type.1.4.0.xcframework
+        embed: true
+      - framework: addons/bare-url.2.5.6.xcframework
+        embed: true
+      - framework: addons/fs-native-extensions.1.5.0.xcframework
+        embed: true
+      - framework: addons/quickbit-native.2.4.8.xcframework
+        embed: true
+      - framework: addons/rabin-native.2.0.0.xcframework
+        embed: true
+      - framework: addons/rocksdb-native.3.19.1.xcframework
+        embed: true
+      - framework: addons/simdle-native.1.3.9.xcframework
+        embed: true
+      - framework: addons/sodium-native.5.1.0.xcframework
+        embed: true
+      - framework: addons/udx-native.1.21.0.xcframework
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.vote
+        INFOPLIST_FILE: Vote/Info.plist
+        SWIFT_VERSION: '5.0'
+        CODE_SIGN_STYLE: Automatic
+schemes:
+  Vote:
+    build:
+      targets:
+        Vote: all
+    run:
+      config: Debug
