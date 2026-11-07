@@ -20,6 +20,13 @@ updates:
     directory: '/'
     schedule:
       interval: 'weekly'
+    # One PR for all Gradle bumps (AGP's application and library plugins move
+    # together, and every bump needs gradle/verification-metadata.xml
+    # regenerated once, not per PR).
+    groups:
+      gradle-dependencies:
+        patterns:
+          - '*'
     open-pull-requests-limit: 10
 
   - package-ecosystem: 'github-actions'
@@ -28,4 +35,10 @@ updates:
       interval: 'weekly'
     # Keep the `uses: owner/action@<sha> # <tag>` pins in sync with new
     # releases; Dependabot updates the SHA and the trailing tag comment.
+    # One PR for all action bumps (codeql-action's init/analyze/autobuild
+    # must stay on the same version anyway).
+    groups:
+      github-actions:
+        patterns:
+          - '*'
     open-pull-requests-limit: 10
