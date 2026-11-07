@@ -141,10 +141,8 @@ final class BareRuntime {
       let deadline = Date().addingTimeInterval(Self.handoffTimeout)
       var timedOut = false
       while !Task.isCancelled {
-        if let handoff = BareHandoff.consume(at: handoffURL) {
-          BareWebHost.load(handoff, in: webView, delegate: delegate)
-          return
-        }
+        // Deadline first, so a forced 0 s timeout (UI test) shows the message
+        // even when the handoff is already on disk.
         if !timedOut && Date() >= deadline {
           timedOut = true
           BareHostLogger.log("Timed out waiting for worklet handoff; still polling")
@@ -154,6 +152,10 @@ final class BareRuntime {
           )
           // Test hook only (debug builds): keep the message on screen.
           if Self.stopPollingAfterTimeout { break }
+        }
+        if let handoff = BareHandoff.consume(at: handoffURL) {
+          BareWebHost.load(handoff, in: webView, delegate: delegate)
+          return
         }
         try? await Task.sleep(nanoseconds: timedOut ? 500_000_000 : 100_000_000)
       }
