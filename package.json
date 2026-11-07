@@ -3,7 +3,7 @@
   "version": "0.6.2",
   "type": "module",
   "description": "One soul, many platforms — the boring bootstrap for cross-platform apps on the Bare runtime: wire protocol, plugin kernel, RPC messenger, transports, and native host bridges.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/AndersCan/ekrooh.git"

@@ -17,6 +17,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   bare-kit is bumped, because Maven Central limits monthly release size. No
   consumer changes are needed.
 
+### Fixed
+
+- **npm license metadata**: `package.json` declared `MIT`, but the `LICENSE`
+  file shipped in every tarball, the Maven POMs and upstream Bare / Bare Kit
+  are all Apache-2.0. The field now says `Apache-2.0`. The license itself is
+  unchanged.
+
 ## [0.6.2] - 2026-11-07
 
 ### Fixed
