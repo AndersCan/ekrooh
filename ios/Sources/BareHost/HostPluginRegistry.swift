@@ -34,6 +34,11 @@ public final class HostPluginRegistry {
   /// `MEDIA_INVOKE_TIMEOUT_MS` in `plugins/media/events.ts`.
   public static let userMediatedInvokeTimeout: TimeInterval = 5 * 60
 
+  /// Upper bound for a handler's own deadline (one day). Larger values,
+  /// including `.infinity`, are clamped to it: the deadline is converted to
+  /// nanoseconds for `Task.sleep`, which would trap on overflow.
+  public static let maxInvokeTimeout: TimeInterval = 24 * 60 * 60
+
   /// `handlers` is mutated from `register` (main/UI thread) and read from
   /// `dispatch` (an IPC Task) — guard with an unfair lock to avoid a data race.
   private var handlers: [Key: Handler] = [:]
@@ -53,13 +58,19 @@ public final class HostPluginRegistry {
   /// Registers a handler with its own invoke deadline. `timeout == nil` uses
   /// `defaultInvokeTimeout`; pass `userMediatedInvokeTimeout` for a handler that
   /// shows UI and waits for the user. When the deadline passes the caller gets
-  /// a `TIMEOUT` error and a later `respond` is ignored.
+  /// a `TIMEOUT` error and a later `respond` is ignored. `timeout` must be
+  /// positive (a programming error otherwise); values over `maxInvokeTimeout`
+  /// are clamped to it.
   public func register(
     pluginId: String,
     event: String,
     timeout: TimeInterval?,
     handler: @escaping Handler
   ) {
+    if let timeout {
+      precondition(!timeout.isNaN && timeout > 0, "invoke timeout must be positive")
+    }
+    let timeout = timeout.map { Swift.min($0, Self.maxInvokeTimeout) }
     let key = Key(pluginId: pluginId, event: event)
     os_unfair_lock_lock(&lock)
     handlers[key] = handler

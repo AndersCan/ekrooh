@@ -5,11 +5,14 @@ import {
   createProtocolMessenger,
 } from '@ekrooh/bare/core';
 import { basicEvents } from '../shared/basic-events';
+import { diagnosticsEnabled } from './diagnostics';
 import { transport } from './transport';
 
+// A variable, not a literal: also type-checks against an older `dist/`.
+const messengerOptions = { diagnostics: diagnosticsEnabled() };
 const messenger = createProtocolMessenger((request, payload) => {
   transport.send(MessageType.ENVELOPE, request, payload);
-});
+}, messengerOptions);
 const bus = createPluginBus(messenger);
 
 const renderRoot = document.getElementById('render-root');

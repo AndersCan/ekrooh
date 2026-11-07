@@ -8,7 +8,6 @@ import {
   PluginInvokeResponseHeader,
   PluginManifest,
 } from '../../core/messages';
-import { isCanonicalErrorCode } from '../../core/messages/error-codes';
 import type { LoopbackServer } from '../../core/server/static-file-server';
 import { mediaSpecs, MediaKind } from './events';
 import { isMediaKind, MEDIA_HOST_TIMEOUT_MS } from './kinds';
@@ -94,11 +93,14 @@ export function createMediaPlugin(deps: MediaPluginDeps): PluginManifest {
       return err(ErrorCode.HOST_ERROR, `Host did not answer ${event}`);
     }
     if (host.error) {
-      // Only canonical codes pass through; anything else the host sends is a
-      // host failure, not a code the page should branch on.
-      const code = isCanonicalErrorCode(host.error.code)
-        ? host.error.code
-        : ErrorCode.HOST_ERROR;
+      // The host bridge (`createHostIpcBridge`) already reduced the code to a
+      // canonical or app-scoped one (`app.media/cancelled`) and bounded the
+      // message; it is the trust boundary for host data. Here only the shape
+      // is checked, so a malformed answer still reads as a host failure.
+      const code =
+        typeof host.error.code === 'string' && host.error.code.length > 0
+          ? host.error.code
+          : ErrorCode.HOST_ERROR;
       const message =
         typeof host.error.message === 'string' && host.error.message.length > 0
           ? host.error.message.slice(0, MAX_HOST_ERROR_MESSAGE_CHARS)

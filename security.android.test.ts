@@ -82,7 +82,9 @@ describe('Android WebView', () => {
     expect(calls[0][1]).toMatch(/setOf\(handoff\.origin\)/);
     expect(activity).not.toMatch(/setOf\("\*"\)/);
     // Removed after the first load (A-7): later documents get no nonce.
-    expect(activity).toMatch(/bootstrapScript\?\.remove\(\)/);
+    expect(activity).toMatch(
+      /val script = bootstrapScript \?: return\s+script\.remove\(\)/,
+    );
     // Confinement and page URL come from the same checked origin (E-13).
     expect(activity).toMatch(/allowedOrigin = handoff\.origin/);
     expect(activity).toMatch(/loadUrl\(handoff\.indexUrl\)/);
@@ -111,11 +113,27 @@ describe('Android handoff', () => {
     );
   });
 
-  it('keeps durable storage out of the cache dir', () => {
+  it('keeps durable storage out of the cache dir, migrating without data loss', () => {
     const host = code(`${APP}/${KOTLIN}/ReferenceHost.kt`);
     expect(host).toMatch(
-      /val storageDir: File get\(\) = File\(app\.noBackupFilesDir, "bare"\)/,
+      /val storageDir: File get\(\) = activeStorage \?: File\(app\.noBackupFilesDir, "bare"\)/,
     );
+    // The move goes through StorageMigration (pinned by StorageMigrationTest).
+    expect(host).toMatch(/activeStorage = StorageMigration\.resolve\(/);
+  });
+
+  it('keeps polling for a late handoff after showing the error', () => {
+    const host = code(`${APP}/${KOTLIN}/ReferenceHost.kt`);
+    expect(host).toMatch(/main\.postDelayed\(this, HANDOFF_SLOW_POLL_MS\)/);
+    expect(host).not.toMatch(/finishHandoff\(null\)/);
+  });
+
+  it('does not re-inject a spent bootstrap nonce into a later WebView', () => {
+    const activity = code(`${APP}/${KOTLIN}/MainActivity.kt`);
+    expect(activity).toMatch(
+      /if \(host\.bootstrapDelivered\) \{[\s\S]*?\} else if \(WebViewFeature\.isFeatureSupported/,
+    );
+    expect(activity).toMatch(/host\.markBootstrapDelivered\(\)/);
   });
 });
 
@@ -124,6 +142,10 @@ describe('Android IPC', () => {
     const coordinator = code(`${HOST}/HostIpcCoordinator.kt`);
     // The single raw write is the Port adapter; every frame goes via send().
     expect([...coordinator.matchAll(/ipc\.write\(/g)]).toHaveLength(1);
+    // stop() changes the readable callback under the writer's lock.
+    expect(coordinator).toMatch(
+      /fun stop\(\) \{[\s\S]*?synchronized\(outboundLock\) \{\s*port\.readable\(null\)/,
+    );
     expect(coordinator).toMatch(/val written = try \{\s*port\.write\(head\)/);
   });
 });
@@ -140,12 +162,32 @@ describe('Android manifest and resources', () => {
     expect(manifest).not.toMatch(/usesCleartextTraffic="true"/);
   });
 
-  it('exports only the launcher activity, as singleTask, and a private FileProvider', () => {
+  it('exports only the launcher activity, as singleTop, and a private FileProvider', () => {
     const exported = [...manifest.matchAll(/android:exported="true"/g)];
     expect(exported).toHaveLength(1);
     expect(manifest).toMatch(
-      /<activity\s+android:name="to\.holepunch\.bare\.android\.MainActivity"[\s\S]*?android:exported="true"[\s\S]*?android:launchMode="singleTask"/,
+      /<activity\s+android:name="to\.holepunch\.bare\.android\.MainActivity"[\s\S]*?android:exported="true"[\s\S]*?android:launchMode="singleTop"/,
     );
+    // singleTask/singleInstance would clear the camera, picker and permission
+    // screens when the user returns through the launcher icon.
+    expect(manifest).not.toMatch(/singleTask|singleInstance/);
+    const changes = manifest
+      .match(/android:configChanges="([^"]*)"/)?.[1]
+      .split('|');
+    for (const c of [
+      'orientation',
+      'screenSize',
+      'screenLayout',
+      'smallestScreenSize',
+      'keyboardHidden',
+      'uiMode',
+      'density',
+      'fontScale',
+      'locale',
+      'layoutDirection',
+    ]) {
+      expect(changes, c).toContain(c);
+    }
     const filters = [
       ...manifest.matchAll(/<intent-filter>([\s\S]*?)<\/intent-filter>/g),
     ];
@@ -227,9 +269,9 @@ describe('Kotlin host public API', () => {
     expect(gradle).toMatch(
       /tasks\.named\("check"\) \{ dependsOn "apiCheck" \}/,
     );
-    expect(fs.existsSync(path.join(ROOT, 'android/api/bare-host.api'))).toBe(
-      true,
-    );
+    const dump = read('android/api/bare-host.api');
+    // Private implementation constants must not leak as public static fields.
+    expect(dump).not.toMatch(/MIN_PARTIAL_BYTES|RETAIN_BYTES/);
   });
 });
 

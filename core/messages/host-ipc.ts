@@ -1,5 +1,6 @@
 import { ErrorCode, MessageType } from './constants';
 import { isCanonicalErrorCode } from './error-codes';
+import { timerMs } from './timers';
 import { CoreError } from './types';
 import { MessageProtocol } from './wire-codec';
 import { createRequestId } from './request-id';
@@ -52,14 +53,6 @@ function sanitizeHostError(
     code,
     message: error.message.slice(0, MAX_HOST_ERROR_MESSAGE_LENGTH),
   };
-}
-
-function validTimeout(timeoutMs: number | undefined, fallback: number) {
-  return typeof timeoutMs === 'number' &&
-    Number.isFinite(timeoutMs) &&
-    timeoutMs > 0
-    ? timeoutMs
-    : fallback;
 }
 
 export type BareIpcLike = {
@@ -118,15 +111,18 @@ export function createHostIpcBridge(config: {
         reject(new Error(closedReason));
         return;
       }
-      const timer = setTimeout(() => {
-        pending.delete(requestId);
-        reject(
-          new CoreError(
-            ErrorCode.TIMEOUT,
-            `Host IPC timeout waiting for ${String(expectedType)} (${requestId})`,
-          ),
-        );
-      }, timeoutMs);
+      const timer = setTimeout(
+        () => {
+          pending.delete(requestId);
+          reject(
+            new CoreError(
+              ErrorCode.TIMEOUT,
+              `Host IPC timeout waiting for ${String(expectedType)} (${requestId})`,
+            ),
+          );
+        },
+        timerMs(timeoutMs, DEFAULT_HOST_INVOKE_TIMEOUT_MS),
+      );
       track(requestId, {
         timer,
         resolve: (h: MessageHeader) => {
@@ -211,6 +207,9 @@ export function createHostIpcBridge(config: {
         toIpcChunk(protocol.encode(MessageType.ENVELOPE, header, null)),
       );
       const response = await promise;
+      if (response.error) {
+        throw new CoreError(response.error.code, response.error.message);
+      }
       return response.capabilities ?? [];
     },
 
@@ -232,7 +231,7 @@ export function createHostIpcBridge(config: {
       const promise = waitFor<HostInvokeResponseHeader>(
         requestId,
         'HOST_INVOKE_RESPONSE',
-        validTimeout(timeoutMs, DEFAULT_HOST_INVOKE_TIMEOUT_MS),
+        timerMs(timeoutMs, DEFAULT_HOST_INVOKE_TIMEOUT_MS),
       );
       const hostHeader = {
         type: 'HOST_INVOKE_REQUEST' as const,

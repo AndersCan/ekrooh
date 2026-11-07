@@ -21,13 +21,17 @@
 
         <activity
             android:name="to.holepunch.bare.android.MainActivity"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
             android:exported="true"
-            android:launchMode="singleTask">
-            <!-- singleTask: another app starting this Activity reaches the
-                 existing instance. The worklet is process-wide
-                 (BareApplication), so even a second instance attaches to it
-                 instead of starting another backend. -->
+            android:launchMode="singleTop">
+            <!-- singleTop, not singleTask: singleTask would clear the camera,
+                 picker and permission screens above this Activity when the
+                 user comes back through the launcher icon, cancelling the
+                 call. The worklet is process-wide (BareApplication), so a
+                 second instance started by another app attaches to the same
+                 backend instead of starting another one. configChanges keeps
+                 the WebView (and the page session) across rotation, theme,
+                 font-scale and locale changes. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

@@ -59,7 +59,9 @@ final class BareRuntime {
 
     let configuration = Worklet.Configuration(
       memoryLimit: 128 << 20,
-      assets: dirs.storage.appendingPathComponent("asset-cache").path
+      // Disposable: lives with the cache (Caches/bare-cache), not in the
+      // backed-up-excluded durable storage.
+      assets: dirs.cache.appendingPathComponent("asset-cache").path
     )
     // The engine may fail to initialize (e.g. out of memory); degrade rather
     // than crash so the app stays alive without the worklet.

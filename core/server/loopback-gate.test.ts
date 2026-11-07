@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { HashOptions } from 'node:crypto';
 import {
+  BOOTSTRAP_TTL_MAX_MS,
   BOOTSTRAP_TTL_MS,
+  BOOTSTRAP_UNLOADED_TTL_MS,
   cookieSession,
   createLoopbackGate,
   secretEquals,
@@ -277,6 +279,45 @@ describe('createLoopbackGate', () => {
       },
     );
 
+    it('exempts an explicitly allowed origin, never a no-Origin request', () => {
+      const gate = boundGate({ allowedOrigins: ['http://localhost:5173'] });
+      const listed = {
+        host: HOST,
+        origin: 'http://localhost:5173',
+        'sec-fetch-site': 'cross-site',
+        'x-bare-token': TOKEN,
+      };
+      expect(gate.admitRequest(listed, 'gated')).toEqual({ ok: true });
+      expect(
+        gate.admitUpgrade({
+          ...listed,
+          'x-bare-token': undefined,
+          cookie: COOKIE,
+        }),
+      ).toEqual({
+        ok: true,
+      });
+      // The same-site <img> case: no Origin, so no exemption.
+      expect(
+        gate.admitRequest(
+          { host: HOST, cookie: COOKIE, 'sec-fetch-site': 'same-site' },
+          'gated',
+        ),
+      ).toMatchObject({ ok: false, status: 403 });
+      // A bound-origin alias is not an explicit entry: no exemption either.
+      expect(
+        gate.admitRequest(
+          {
+            host: HOST,
+            origin: 'http://localhost:4000',
+            cookie: COOKIE,
+            'sec-fetch-site': 'same-site',
+          },
+          'gated',
+        ),
+      ).toMatchObject({ ok: false, status: 403 });
+    });
+
     it('leaves the public app and dev mode (no credential) alone', () => {
       expect(
         boundGate().admitRequest(
@@ -299,10 +340,14 @@ describe('createLoopbackGate', () => {
       vi.useRealTimers();
     });
 
-    it('expires an unredeemed nonce BOOTSTRAP_TTL_MS after bind', () => {
+    const page = { host: HOST, accept: 'text/html' };
+
+    it('expires an unredeemed nonce BOOTSTRAP_TTL_MS after the page load', () => {
       vi.useFakeTimers();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
       const gate = boundGate();
       const nonce = gate.bootstrap();
+      gate.admitRequest(page, 'public');
       vi.advanceTimersByTime(BOOTSTRAP_TTL_MS);
       expect(gate.login(nonce, { host: HOST })).toEqual({
         ok: false,
@@ -313,7 +358,70 @@ describe('createLoopbackGate', () => {
       expect(gate.login(nonce, { host: HOST, cookie: COOKIE }).ok).toBe(true);
     });
 
-    it('accepts the nonce within the lifetime', () => {
+    it('starts the clock at the page load, not at bind (slow cold start)', () => {
+      vi.useFakeTimers();
+      const gate = boundGate();
+      const nonce = gate.bootstrap();
+      vi.advanceTimersByTime(BOOTSTRAP_TTL_MS * 2);
+      gate.admitRequest(page, 'public');
+      vi.advanceTimersByTime(BOOTSTRAP_TTL_MS - 1);
+      expect(gate.login(nonce, { host: HOST }).ok).toBe(true);
+    });
+
+    it('does not count time spent suspended', () => {
+      vi.useFakeTimers();
+      const gate = boundGate();
+      const nonce = gate.bootstrap();
+      gate.admitRequest(page, 'public');
+      vi.advanceTimersByTime(1_000);
+      // Backgrounded between the page load and /login, for an hour.
+      gate.pauseBootstrapClock();
+      gate.pauseBootstrapClock();
+      vi.advanceTimersByTime(3_600_000);
+      gate.resumeBootstrapClock();
+      gate.resumeBootstrapClock();
+      vi.advanceTimersByTime(BOOTSTRAP_TTL_MS - 1_001);
+      expect(gate.login(nonce, { host: HOST }).ok).toBe(true);
+    });
+
+    it('still expires after resume once the running time is used up', () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const gate = boundGate();
+      const nonce = gate.bootstrap();
+      gate.admitRequest(page, 'public');
+      gate.pauseBootstrapClock();
+      vi.advanceTimersByTime(3_600_000);
+      gate.resumeBootstrapClock();
+      vi.advanceTimersByTime(BOOTSTRAP_TTL_MS);
+      expect(gate.login(nonce, { host: HOST }).ok).toBe(false);
+    });
+
+    it('expires a nonce whose page never loaded BOOTSTRAP_UNLOADED_TTL_MS after bind', () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const gate = boundGate();
+      const nonce = gate.bootstrap();
+      vi.advanceTimersByTime(BOOTSTRAP_UNLOADED_TTL_MS - 1);
+      expect(gate.bootstrap()).toBe(nonce);
+      vi.advanceTimersByTime(1);
+      expect(gate.bootstrap()).toBe('');
+      expect(gate.login(nonce, { host: HOST }).ok).toBe(false);
+    });
+
+    it('a late /login is not mistaken for the page load', () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const gate = boundGate();
+      const nonce = gate.bootstrap();
+      vi.advanceTimersByTime(BOOTSTRAP_UNLOADED_TTL_MS);
+      // What the server does for POST /login: admit as public, then login.
+      const login = { host: HOST, origin: ORIGIN };
+      expect(gate.admitRequest(login, 'public')).toEqual({ ok: true });
+      expect(gate.login(nonce, login)).toEqual({ ok: false, status: 401 });
+    });
+
+    it('accepts the nonce within a custom lifetime', () => {
       vi.useFakeTimers();
       const gate = createLoopbackGate({
         auth: true,
@@ -322,8 +430,36 @@ describe('createLoopbackGate', () => {
       });
       gate.bind(ORIGIN);
       const nonce = gate.bootstrap();
+      gate.admitRequest(page, 'public');
       vi.advanceTimersByTime(999);
       expect(gate.login(nonce, { host: HOST }).ok).toBe(true);
+    });
+
+    it.each([
+      ['NaN', Number.NaN, BOOTSTRAP_TTL_MS],
+      ['Infinity', Number.POSITIVE_INFINITY, BOOTSTRAP_TTL_MS],
+      ['zero', 0, BOOTSTRAP_TTL_MS],
+      ['negative', -5, BOOTSTRAP_TTL_MS],
+      ['above the cap', 10 * BOOTSTRAP_TTL_MAX_MS, BOOTSTRAP_TTL_MAX_MS],
+    ])('clamps a bootstrapTtlMs that is %s', (_, ttl, effective) => {
+      vi.useFakeTimers();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const make = () => {
+        const gate = createLoopbackGate({
+          auth: true,
+          token: TOKEN,
+          bootstrapTtlMs: ttl,
+        });
+        gate.bind(ORIGIN);
+        gate.admitRequest(page, 'public');
+        return gate;
+      };
+      const live = make();
+      vi.advanceTimersByTime(effective - 1);
+      expect(live.bootstrap()).not.toBe('');
+      const dead = make();
+      vi.advanceTimersByTime(effective);
+      expect(dead.bootstrap()).toBe('');
     });
   });
 

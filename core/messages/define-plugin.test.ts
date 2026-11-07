@@ -176,3 +176,18 @@ describe('typed event builders', () => {
     });
   });
 });
+
+describe('host timeout cap', () => {
+  it('caps hostTimeoutMs at the setTimeout limit (adv-A-7)', () => {
+    const plugin = definePlugin('app.slow', {
+      e: {
+        pluginId: 'app.slow',
+        name: 'slow.e',
+        args: {} as Record<string, never>,
+        result: {} as unknown,
+        hostTimeoutMs: 1e12,
+      },
+    } as const);
+    expect(plugin.hostTimeoutsMs?.['slow.e']).toBe(2 ** 31 - 1);
+  });
+});

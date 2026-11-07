@@ -983,3 +983,65 @@ describe('createWebSocketTransport security-review fixes', () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 });
+
+describe('createWebSocketTransport stale-socket guards (adv-E-3)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('a socket that timed out and opens late sends nothing and delivers nothing', async () => {
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      backoffMs: 5,
+      openTimeoutMs: 1000,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const delivered: unknown[] = [];
+    transport.subscribe((m) => delivered.push(m.header));
+    const hung = lastSocket();
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'queued',
+      },
+      null,
+    );
+    await vi.advanceTimersByTimeAsync(1000); // open timeout drops `hung`
+    await vi.advanceTimersByTimeAsync(10); // backoff → a fresh socket
+    const fresh = lastSocket();
+    expect(fresh).not.toBe(hung);
+
+    // The old socket opens late: it must not flush the queue (onopen guard)
+    // nor mark the transport connected.
+    hung.open();
+    expect(hung.sent).toHaveLength(0);
+    expect(fresh.sent).toHaveLength(0);
+
+    // A frame arriving on the old socket is not delivered (onmessage guard).
+    hung.message(
+      protocol.encode(
+        MessageType.ENVELOPE,
+        {
+          type: 'INVOKE_RESPONSE',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          requestId: 'queued',
+          result: { message: 'forged', ts: 0 },
+        },
+        null,
+      ),
+    );
+    expect(delivered).toEqual([]);
+
+    // Only the current socket opening flushes the queue, exactly once.
+    fresh.open();
+    expect(fresh.sent).toHaveLength(1);
+    expect(hung.sent).toHaveLength(0);
+  });
+});

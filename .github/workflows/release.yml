@@ -129,7 +129,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Keep the gated AAR as a provenance record
+        # Not consumed by any job: publish-maven rebuilds the AAR (its Gradle
+        # publication needs the build). This is the AAR the gates above ran
+        # against, kept so a maintainer can diff it with what was published.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bare-host-aar
           path: android/build/outputs/aar/bare-host-release.aar
@@ -157,16 +161,25 @@ jobs:
           name: npm-package
           path: ${{ runner.temp }}/npm
 
+      - name: npm is new enough for trusted publishing (>= 11.5.1)
+        # An older npm cannot exchange the OIDC token and would fall back to
+        # an unauthenticated publish that fails late. security.test.ts allows
+        # this exact line in the OIDC job.
+        run: node -e 'const v = require("child_process").execFileSync("npm", ["--version"]).toString().trim(); const [a, b, c] = v.split(".").map(Number); if (!(a * 1e6 + b * 1e3 + c >= 11005001)) throw new Error("npm " + v + " is older than 11.5.1, which trusted publishing needs");'
+
       - name: Publish the packed tarball
         # Idempotent: skips when this exact version is already on the registry
-        # so a partial release can be re-run after a failed later step.
+        # (npm view exits non-zero on E404) so a partial release can be re-run.
+        # No pipes, redirections or substitutions: security.test.ts allows
+        # only these exact lines in a job that can mint an OIDC token.
         env:
           VERSION: ${{ needs.build.outputs.version }}
           DIST_TAG: ${{ needs.build.outputs.dist_tag }}
         run: |
           test -f "$RUNNER_TEMP/npm/ekrooh-bare-$VERSION.tgz"
-          if npm view "@ekrooh/bare@$VERSION" version >/dev/null 2>&1; then
-            echo "npm: @ekrooh/bare@$VERSION already published — skipping"
+          if npm view "@ekrooh/bare@$VERSION" version
+          then
+            echo "npm: @ekrooh/bare@$VERSION already published, skipping"
             exit 0
           fi
           npm publish "$RUNNER_TEMP/npm/ekrooh-bare-$VERSION.tgz" --access public --tag "$DIST_TAG" --ignore-scripts

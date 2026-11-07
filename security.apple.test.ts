@@ -153,6 +153,10 @@ describe('iOS host invariants (docs/security.md §5)', () => {
     // No hand-rolled injection, storage location or delegate.
     expect(src).not.toContain('WKUserScript(');
     expect(src).not.toContain('.documentDirectory');
+    // The worklet's asset cache is disposable: Caches, not durable storage.
+    expect(src).toContain(
+      'assets: dirs.cache.appendingPathComponent("asset-cache")',
+    );
     expect(src).not.toMatch(/class \w+: NSObject, WKNavigationDelegate/);
   });
 

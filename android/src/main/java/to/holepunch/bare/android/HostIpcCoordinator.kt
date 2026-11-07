@@ -102,8 +102,10 @@ class HostIpcCoordinator(
      * Responses that arrive afterwards are ignored. Call before closing the IPC. */
     fun stop() {
         stopped = true
-        port.readable(null)
+        // Under the same lock as every write and writable() call, so the
+        // native IPC never sees callback changes and writes concurrently.
         synchronized(outboundLock) {
+            port.readable(null)
             outbound.clear()
             if (waitingForWritable) {
                 waitingForWritable = false

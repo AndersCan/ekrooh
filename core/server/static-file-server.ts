@@ -104,19 +104,36 @@ function openVerified(realPath: string): ResolvedFile | null {
   }
 }
 
-/** A path in the form mount roots are compared in: its real path when it
- * exists (a root may be missing at mount time), lowercased and NFC-normalized
- * because the default APFS volume on macOS and iOS ignores case and
- * normalization. Folding can only make two roots compare as overlapping more
- * often, which errs toward refusing a layout, never toward serving. */
-function comparableRoot(dirPath: string): string {
-  let resolved: string;
+/** Whether a platform's default filesystem ignores case (and, on Apple,
+ * Unicode normalization): APFS on macOS and iOS, NTFS on Windows. Android and
+ * Linux filesystems are case-sensitive, so folding there would refuse
+ * layouts that are fine (`/x/Media` next to `/x/media`). */
+export function platformFoldsPathCase(platform: string): boolean {
+  return platform === 'darwin' || platform === 'ios' || platform === 'win32';
+}
+
+/** The running platform: `Bare.platform` in the worklet, `process.platform`
+ * under Node (tests, tooling). */
+function currentPlatform(): string {
+  const bare = (globalThis as { Bare?: { platform?: unknown } }).Bare;
+  if (typeof bare?.platform === 'string') return bare.platform;
+  return typeof process !== 'undefined' ? process.platform : '';
+}
+
+/** A path in the form mount roots are compared in. `fold` lowercases and
+ * NFC-normalizes it for a case-insensitive filesystem. */
+function comparablePath(p: string, fold: boolean): string {
+  return fold ? p.normalize('NFC').toLowerCase() : p;
+}
+
+/** A mount root's real path, or null while it does not exist (a root may be
+ * created after it is mounted). */
+function realRoot(dirPath: string): string | null {
   try {
-    resolved = fs.realpathSync(dirPath);
+    return fs.realpathSync(dirPath);
   } catch {
-    resolved = path.resolve(dirPath);
+    return null;
   }
-  return resolved.normalize('NFC').toLowerCase();
 }
 
 /** The longest Origin/Host value echoed into a log line. */
@@ -316,6 +333,10 @@ export interface LoopbackServerOptions {
    * this (to 8x) and then the socket is closed rather than lose one. Defaults to
    * 2 MiB. */
   wsMaxQueuedBytes?: number;
+  /** Compare mount roots ignoring case and Unicode normalization, as a
+   * case-insensitive filesystem does. Defaults to on for darwin, ios and
+   * win32, off for android and linux. */
+  foldPathCase?: boolean;
   /** How long the bootstrap nonce stays redeemable after binding, in ms.
    * Defaults to the gate's `BOOTSTRAP_TTL_MS`. */
   bootstrapTtlMs?: number;
@@ -331,6 +352,12 @@ export interface LoopbackServer {
   /** The per-session token. The host reads it from `credentials()` for its own
    * `X-Bare-Token` calls and never injects it into the page. */
   token(): string;
+  /** Pause/resume the bootstrap nonce's lifetime clock across a worklet
+   * suspend. Both are idempotent. Optional in the type so a consumer's own
+   * `LoopbackServer` fake keeps compiling; `createLoopbackServer` always
+   * provides them. */
+  pauseBootstrapClock?(): void;
+  resumeBootstrapClock?(): void;
   /** Resolves to the bound origin, port, token and the one-time bootstrap
    * nonce (empty once spent). The host injects `bootstrap` into the page (not
    * the token); the page exchanges it once via `POST /login` for the HttpOnly
@@ -420,6 +447,43 @@ export function isLoopbackHost(host: string): boolean {
   );
 }
 
+/** Whether `candidate` lies strictly below `root` (not `root` itself). */
+function isStrictlyWithin(root: string, candidate: string): boolean {
+  return root !== candidate && isWithin(root, candidate);
+}
+
+/** Whether a response has already been ended by its handler. Node exposes
+ * `writableEnded`; bare-http1 responses are streamx writables, whose state
+ * says `ending` once `end()` has been called. */
+function responseEnded(res: HTTPServerResponse): boolean {
+  const r = res as unknown as {
+    writableEnded?: boolean;
+    destroyed?: boolean;
+    _writableState?: { ending?: boolean };
+  };
+  return (
+    r.writableEnded === true ||
+    r.destroyed === true ||
+    r._writableState?.ending === true
+  );
+}
+
+/** Drops every header a handler set before it failed, so a 500 carries only
+ * the framework's own headers (never a handler's `Set-Cookie` or
+ * `Content-Type`). Node has `removeHeader`; bare-http1 has a `headers`
+ * setter. */
+function clearHeaders(res: HTTPServerResponse): void {
+  const r = res as unknown as {
+    removeHeader?: (name: string) => void;
+    headers?: Record<string, unknown>;
+  };
+  if (typeof r.removeHeader === 'function') {
+    for (const name of Object.keys(res.getHeaders())) r.removeHeader(name);
+  } else {
+    r.headers = {};
+  }
+}
+
 /** Whether `candidate` is `root` or lies below it. Both must be absolute,
  * normalized paths. */
 function isWithin(root: string, candidate: string): boolean {
@@ -472,6 +536,26 @@ export function createLoopbackServer(
 
   const fileMounts = new Map<string, string>();
   const dirMounts = new Map<string, string>();
+  const foldCase =
+    options.foldPathCase ?? platformFoldsPathCase(currentPlatform());
+  /** Directory mount key → its root in comparable form. Resolved once at
+   * mount time instead of per request; a root that did not exist yet stays
+   * null and is retried until it does, and a gated mount's own requests
+   * refresh it (they resolve the root anyway). */
+  const rootCache = new Map<string, string | null>();
+
+  function cachedRoot(key: string): string | null {
+    let root = rootCache.get(key) ?? null;
+    if (root === null) {
+      const dirPath = dirMounts.get(key);
+      const real = dirPath === undefined ? null : realRoot(dirPath);
+      if (real !== null) {
+        root = comparablePath(real, foldCase);
+        rootCache.set(key, root);
+      }
+    }
+    return root;
+  }
   const publicDirMounts = new Set<string>();
   const routeHandlers = new Map<string, LoopbackRouteHandler>();
   let originPromise: Promise<string> | null = null;
@@ -479,14 +563,20 @@ export function createLoopbackServer(
     console.error(line),
   );
 
-  /** `Cross-Origin-Resource-Policy: same-origin` stops another site embedding
-   * a response (`<img>`, `<script>`) even if a credential rode along. It is
-   * left off when extra page origins are allowed: the Vite dev page lives on
-   * another origin and loads backend media cross-site. */
-  const resourcePolicy: Record<string, string> =
-    (options.allowedOrigins ?? []).length === 0
-      ? { 'Cross-Origin-Resource-Policy': 'same-origin' }
-      : {};
+  /** `Cross-Origin-Resource-Policy` stops another site embedding a gated
+   * response (`<img>`, `<script>`) even if a credential rode along. CORP
+   * governs no-cors embedding only, never a CORS `fetch`, so it does not
+   * interact with the `allowedOrigins` exemptions in the gate.
+   * - Auth off (dev): left off. The Vite dev page on `localhost:5173` loads
+   *   backend media cross-site, and there is no credential to protect.
+   * - Auth on: `same-origin`, `allowedOrigins` or not. An allowed page's
+   *   embed could not authenticate anyway: from another site the
+   *   `SameSite=Strict` cookie is not sent, and from another loopback port
+   *   (same-site) the no-`Origin` request is refused by the gate's
+   *   `Sec-Fetch-Site` rule, since an embed cannot prove which page made it. */
+  const resourcePolicy: Record<string, string> = auth
+    ? { 'Cross-Origin-Resource-Policy': 'same-origin' }
+    : {};
 
   /** Headers every framework-built response carries. */
   const BASE_HEADERS: Record<string, string> = {
@@ -522,6 +612,11 @@ export function createLoopbackServer(
   ) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[loopback] ${context} failed: ${message}`);
+    // A handler that already finished its response (and then threw or
+    // rejected) keeps it: the client has a complete answer, and destroying
+    // the socket now would only cut a keep-alive connection.
+    if (responseEnded(res)) return;
+    if (!res.headersSent) clearHeaders(res);
     writeError(res, 500, 'Internal Server Error');
   }
 
@@ -566,11 +661,22 @@ export function createLoopbackServer(
     segments: string[],
   ):
     | { kind: 'file'; filePath: string }
-    | { kind: 'dir'; dirPath: string; rel: string[]; public: boolean }
+    | {
+        kind: 'dir';
+        key: string;
+        dirPath: string;
+        rel: string[];
+        public: boolean;
+      }
     | null {
     const fileMount = fileMounts.get(cleanPath);
     if (fileMount) return { kind: 'file', filePath: fileMount };
-    let best: { dirPath: string; rel: string[]; public: boolean } | null = null;
+    let best: {
+      key: string;
+      dirPath: string;
+      rel: string[];
+      public: boolean;
+    } | null = null;
     let bestDepth = -1;
     for (const [prefix, dirPath] of dirMounts) {
       const prefixSegments = prefix.split('/').filter((s) => s !== '');
@@ -578,6 +684,7 @@ export function createLoopbackServer(
       if (depth <= bestDepth) continue;
       if (!prefixSegments.every((s, i) => segments[i] === s)) continue;
       best = {
+        key: prefix,
         dirPath,
         rel: segments.slice(depth),
         public: publicDirMounts.has(prefix),
@@ -595,7 +702,7 @@ export function createLoopbackServer(
    * (`Accept` without `text/html`) never fall back — a missing asset is a
    * 404. */
   function resolveDirFile(
-    mount: { dirPath: string; rel: string[]; public: boolean },
+    mount: { key: string; dirPath: string; rel: string[]; public: boolean },
     headers: Record<string, string | string[] | number | undefined>,
   ): (ResolvedFile & { rel: string }) | null {
     let root: string;
@@ -607,9 +714,13 @@ export function createLoopbackServer(
       );
       return null;
     }
+    if (!mount.public) {
+      // This request resolved the root anyway: keep the cache current.
+      rootCache.set(mount.key, comparablePath(root, foldCase));
+    }
     const served = (file: ResolvedFile | null) => {
       if (file === null) return null;
-      if (mount.public && insideGatedMount(file.filePath)) {
+      if (mount.public && insideGatedMount(mount.key, file.filePath)) {
         console.warn(
           `[static-server] refused a gated file through the public mount: ${file.filePath}`,
         );
@@ -635,16 +746,24 @@ export function createLoopbackServer(
     return served(fileWithin(root, path.join(root, 'index.html')));
   }
 
-  /** Whether a real path lies in a gated directory mount's root. The public
-   * mount refuses such a file even if the layout
-   * check in `mountDir` was sidestepped (a root that became a symlink into
-   * the web app after it was mounted, a case alias on a case-insensitive
-   * volume). */
-  function insideGatedMount(realPath: string): boolean {
-    const candidate = realPath.normalize('NFC').toLowerCase();
-    for (const [key, dirPath] of dirMounts) {
+  /** Whether a file the public mount `publicKey` is about to serve lies in
+   * a gated directory mount's root nested inside it. The public mount refuses
+   * such a file even if the layout check in `mountDir` was sidestepped (a
+   * root that became a symlink into the web app after it was mounted, a case
+   * alias on a case-insensitive volume). A gated root that contains the whole
+   * public root is skipped: everything the public mount serves is meant to be
+   * public, and refusing it would take the app down. */
+  function insideGatedMount(publicKey: string, realPath: string): boolean {
+    const candidate = comparablePath(realPath, foldCase);
+    const publicRoot = cachedRoot(publicKey);
+    for (const key of dirMounts.keys()) {
       if (publicDirMounts.has(key)) continue;
-      if (isWithin(comparableRoot(dirPath), candidate)) return true;
+      const gatedRoot = cachedRoot(key);
+      if (gatedRoot === null) continue;
+      if (publicRoot !== null && isStrictlyWithin(gatedRoot, publicRoot)) {
+        continue;
+      }
+      if (isWithin(gatedRoot, candidate)) return true;
     }
     return false;
   }
@@ -982,6 +1101,8 @@ export function createLoopbackServer(
     origin,
     url,
     token: () => gate.token(),
+    pauseBootstrapClock: () => gate.pauseBootstrapClock(),
+    resumeBootstrapClock: () => gate.resumeBootstrapClock(),
     async credentials() {
       const originUrl = await origin();
       return {
@@ -1000,22 +1121,31 @@ export function createLoopbackServer(
     mountDir(prefix, dirPath, opts) {
       const key = mountKey(prefix);
       const isPublic = opts?.public === true;
-      // A public root that contains a gated one (or sits inside it) would
+      // A public root that contains a gated one (or is the same folder) would
       // serve the gated files before login, as app code, under another URL
       // (`/peer/x` for a `/shared` mount at `<web>/peer`, or `/Shared/x` on a
-      // case-insensitive volume). Refuse the layout outright.
-      const root = comparableRoot(dirPath);
+      // case-insensitive volume). Refuse that layout outright. A gated root
+      // strictly around the public one is fine: it only re-serves public
+      // files, sandboxed.
+      const real = realRoot(dirPath);
+      const root = comparablePath(real ?? path.resolve(dirPath), foldCase);
       for (const [otherKey, otherPath] of dirMounts) {
         if (otherKey === key) continue;
         if (publicDirMounts.has(otherKey) === isPublic) continue;
-        const other = comparableRoot(otherPath);
-        if (isWithin(root, other) || isWithin(other, root)) {
+        const other =
+          cachedRoot(otherKey) ??
+          comparablePath(path.resolve(otherPath), foldCase);
+        const [publicRoot, gatedRoot] = isPublic
+          ? [root, other]
+          : [other, root];
+        if (isWithin(publicRoot, gatedRoot)) {
           throw new Error(
-            `mountDir('${prefix}'): '${dirPath}' overlaps the ${isPublic ? 'gated' : 'public'} mount '${otherKey}' at '${otherPath}'; a public and a gated directory mount must not contain each other`,
+            `mountDir('${prefix}'): '${dirPath}' overlaps the ${isPublic ? 'gated' : 'public'} mount '${otherKey}' at '${otherPath}'; a gated directory mount must not be inside the public one`,
           );
         }
       }
       dirMounts.set(key, dirPath);
+      rootCache.set(key, real === null ? null : root);
       if (isPublic) publicDirMounts.add(key);
       else publicDirMounts.delete(key);
     },

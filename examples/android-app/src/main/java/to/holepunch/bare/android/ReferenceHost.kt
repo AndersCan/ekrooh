@@ -60,6 +60,11 @@ class ReferenceHost(private val app: Application) {
         private const val HANDOFF_TIMEOUT_MS = 15_000L
         private const val HANDOFF_POLL_MS = 100L
 
+        /** After [HANDOFF_TIMEOUT_MS] the error is shown, but polling goes on
+         * at this slower rate: a late handoff still loads the page and is
+         * still consumed (deleted), so its nonce never lingers on disk. */
+        private const val HANDOFF_SLOW_POLL_MS = 1_000L
+
         /** Largest picked file copied into the cache for the worklet. */
         const val MAX_PICK_BYTES: Long = 1L shl 30
 
@@ -93,7 +98,11 @@ class ReferenceHost(private val app: Application) {
     /** Durable worklet storage (p2p corestore, keys, `handoff.json`). In
      * `noBackupFilesDir`: survives "Clear cache" and storage pressure, and is
      * never backed up or transferred. */
-    val storageDir: File get() = File(app.noBackupFilesDir, "bare")
+    val storageDir: File get() = activeStorage ?: File(app.noBackupFilesDir, "bare")
+
+    /** The storage chosen at [start] (the legacy directory only while a
+     * migration keeps failing; see [StorageMigration]). */
+    private var activeStorage: File? = null
     private val legacyStorageDir: File get() = File(app.cacheDir, "bare")
     private val webappDir: File get() = File(app.cacheDir, "webapp")
     private val bareCacheDir: File get() = File(app.cacheDir, "bare-cache")
@@ -106,6 +115,12 @@ class ReferenceHost(private val app: Application) {
     private var coordinator: HostIpcCoordinator? = null
     private var handoff: BareHandoff? = null
     private var handoffFailed = false
+
+    /** True once a WebView has run the bootstrap script and finished loading:
+     * the nonce is spent and the session cookie is set (process-wide), so a
+     * WebView created later (recreation, a second Activity) gets no nonce. */
+    var bootstrapDelivered = false
+        private set
     private val readyListeners = LinkedHashMap<Any, (BareHandoff?) -> Unit>()
     private val activities = LinkedHashSet<Ui>()
     private var pollRunnable: Runnable? = null
@@ -139,15 +154,22 @@ class ReferenceHost(private val app: Application) {
     }
 
     /** Calls [listener] with the handoff once the loopback server is up (at
-     * once if it already is), or with null if the worklet never wrote it.
+     * once if it already is). While it is late it is also called with null
+     * (show an error), and called again with the handoff if it still arrives.
      * [owner] keys the registration so [detach] drops it. Main thread. */
     fun whenReady(owner: Any, listener: (BareHandoff?) -> Unit) {
         val ready = handoff
-        when {
-            ready != null -> listener(ready)
-            handoffFailed -> listener(null)
-            else -> readyListeners[owner] = listener
+        if (ready != null) {
+            listener(ready)
+            return
         }
+        readyListeners[owner] = listener
+        if (handoffFailed) listener(null)
+    }
+
+    /** Records that a WebView loaded the page with the bootstrap script. */
+    fun markBootstrapDelivered() {
+        bootstrapDelivered = true
     }
 
     private fun start() {
@@ -156,7 +178,10 @@ class ReferenceHost(private val app: Application) {
         // error instead of a native SIGSEGV.
         BareHostAbi.requireSupportedAbi()
 
-        migrateLegacyStorage()
+        activeStorage = StorageMigration.resolve(
+            legacyStorageDir,
+            File(app.noBackupFilesDir, "bare"),
+        ) { message -> Log.e(TAG, message) }
         storageDir.mkdirs()
         bareCacheDir.mkdirs()
         capturesDir.mkdirs()
@@ -172,6 +197,7 @@ class ReferenceHost(private val app: Application) {
         File(storageDir, "handoff.json").delete()
         handoff = null
         handoffFailed = false
+        bootstrapDelivered = false
 
         val w = Worklet(
             Worklet.Options()
@@ -198,7 +224,7 @@ class ReferenceHost(private val app: Application) {
             coordinator = HostIpcCoordinator(channel, registry).also { it.start() }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start worklet: ${e.javaClass.simpleName}")
-            finishHandoff(null)
+            reportHandoffLate()
             return
         }
         pollHandoff()
@@ -215,6 +241,8 @@ class ReferenceHost(private val app: Application) {
         worklet = null
         handoff = null
         handoffFailed = false
+        bootstrapDelivered = false
+        activeStorage = null
         synchronized(slotLock) {
             permissionSlot = null
             mediaSlot = null
@@ -233,8 +261,11 @@ class ReferenceHost(private val app: Application) {
                     parsed != null -> finishHandoff(parsed)
                     SystemClock.elapsedRealtime() < deadline -> main.postDelayed(this, HANDOFF_POLL_MS)
                     else -> {
-                        Log.e(TAG, "Timed out waiting for a valid worklet handoff file")
-                        finishHandoff(null)
+                        if (!handoffFailed) {
+                            Log.e(TAG, "Timed out waiting for a valid worklet handoff file; still polling")
+                            reportHandoffLate()
+                        }
+                        main.postDelayed(this, HANDOFF_SLOW_POLL_MS)
                     }
                 }
             }
@@ -243,27 +274,20 @@ class ReferenceHost(private val app: Application) {
         poll.run()
     }
 
-    private fun finishHandoff(result: BareHandoff?) {
+    private fun finishHandoff(result: BareHandoff) {
         pollRunnable = null
         handoff = result
-        handoffFailed = result == null
+        handoffFailed = false
         val listeners = readyListeners.values.toList()
         readyListeners.clear()
         for (listener in listeners) listener(result)
     }
 
-    /** Moves storage written by older builds (under `cacheDir`) into
-     * [storageDir] once, so an upgrade keeps the p2p identity and data. */
-    private fun migrateLegacyStorage() {
-        val legacy = legacyStorageDir
-        if (!legacy.isDirectory || storageDir.exists()) return
-        storageDir.parentFile?.mkdirs()
-        if (legacy.renameTo(storageDir)) {
-            // The asset cache is cache, not storage: it now lives in bare-cache.
-            File(storageDir, "asset-cache").deleteRecursively()
-        } else {
-            Log.w(TAG, "Could not migrate legacy worklet storage out of the cache dir")
-        }
+    /** Tells listeners the handoff is late (they show an error) but keeps
+     * them registered for a handoff that still arrives. */
+    private fun reportHandoffLate() {
+        handoffFailed = true
+        for (listener in readyListeners.values.toList()) listener(null)
     }
 
     private fun pruneCaptures() {

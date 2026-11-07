@@ -38,7 +38,15 @@ export {
 export { getIPC } from './lib/get-ipc';
 
 /** Global provided by the Bare runtime (also present in bare-kit worklets). */
-declare const Bare: { argv?: string[] } | undefined;
+declare const Bare:
+  | {
+      argv?: string[];
+      /** `Bare` is an event emitter (`bare-events`): `suspend`, `wakeup`,
+       * `idle` and `resume` mark the app's suspension lifecycle. */
+      on?(event: string, listener: () => void): unknown;
+      off?(event: string, listener: () => void): unknown;
+    }
+  | undefined;
 
 function readBareArgv(): string[] {
   return typeof Bare !== 'undefined' && Array.isArray(Bare.argv)
@@ -398,7 +406,6 @@ export function createWorkletRuntime(
   // log routes. Retention is a consumer knob (`logsCapacity`); the rotating file
   // sink is an app decision, kept out of the framework.
   const logStore = createLogRingBuffer(options.logsCapacity ?? 500);
-  const detachConsole = attachConsoleSink(logStore, options.logsMinLevel);
   registerLogRoutes(server, logStore);
 
   for (const plugin of createDefaultPlugins({
@@ -416,6 +423,22 @@ export function createWorkletRuntime(
   for (const plugin of options.plugins ?? []) {
     pluginRegistry.register(plugin);
   }
+
+  // Patch the console only once nothing above can throw: a factory that fails
+  // (a reserved or duplicate plugin id) returns no runtime to close, so a sink
+  // attached earlier would leak and keep the console patched for good.
+  const detachConsole = attachConsoleSink(logStore, options.logsMinLevel);
+
+  // The bootstrap nonce's lifetime counts running time only: a page
+  // backgrounded between load and `/login` must still log in on resume. Only
+  // `resume` restarts the clock; `wakeup` is a brief pass while still
+  // suspended.
+  const onSuspend = () => server.pauseBootstrapClock?.();
+  const onResume = () => server.resumeBootstrapClock?.();
+  const bareEvents =
+    typeof Bare !== 'undefined' && typeof Bare?.on === 'function' ? Bare : null;
+  bareEvents?.on?.('suspend', onSuspend);
+  bareEvents?.on?.('resume', onResume);
 
   let onIpcData: ((data: unknown) => void) | null = null;
   if (ipc) {
@@ -509,6 +532,8 @@ export function createWorkletRuntime(
         return;
       }
       closed = true;
+      bareEvents?.off?.('suspend', onSuspend);
+      bareEvents?.off?.('resume', onResume);
       detachConsole();
       if (ipc && onIpcData) ipc.removeListener('data', onIpcData);
       // Pending host calls would otherwise wait out their timeout (up to

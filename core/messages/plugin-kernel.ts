@@ -13,8 +13,9 @@ import {
   RuntimeTarget,
 } from './types';
 import { InvokeRequest, ProtocolMessenger } from './rpc-messenger';
-import { MAX_ID_LENGTH } from './frame-content';
+import { isShortId, MAX_ID_LENGTH } from './frame-content';
 import { isCanonicalErrorCode } from './error-codes';
+import { MAX_TIMER_MS } from './timers';
 
 export interface PluginRegistry {
   register(plugin: PluginManifest): void;
@@ -32,7 +33,7 @@ export interface PluginRegistry {
 }
 
 /** A plugin id is two or more dot-separated segments of letters, digits, `-`
- * and `_` (`app.photos`), at most {@link MAX_ID_LENGTH} characters. */
+ * and `_` (`app.photos`), at most {@link MAX_ID_LENGTH} bytes. */
 const PLUGIN_ID_PATTERN = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/;
 
 /** Namespaces the framework owns. A consumer plugin there could shadow a
@@ -55,7 +56,7 @@ export function createPluginRegistry(): PluginRegistry {
       const id: unknown = plugin.id;
       if (
         typeof id !== 'string' ||
-        id.length > MAX_ID_LENGTH ||
+        !isShortId(id) ||
         !PLUGIN_ID_PATTERN.test(id)
       ) {
         throw new Error(
@@ -141,8 +142,9 @@ export type PluginRouterOptions = {
    * `maxInflight`. */
   maxInflightPerChannel?: number;
   /** Cap on calls routed at once to one plugin, so a plugin whose calls are
-   * slow cannot take every slot from the others. Defaults to half of
-   * `maxInflight`. */
+   * slow cannot take every slot from the others. Defaults to `maxInflight`
+   * (no separate cap): a bursty single-plugin app, such as a photo grid, may
+   * use every slot. */
   maxInflightPerPlugin?: number;
   /** Plugin ids whose calls must run one at a time, in arrival order. Every
    * other plugin's calls run concurrently, so a slow call never delays them. */
@@ -183,8 +185,7 @@ export function createPluginRouter(
   const maxPerChannel =
     options?.maxInflightPerChannel ??
     Math.max(1, Math.floor((maxInflight * 3) / 4));
-  const maxPerPlugin =
-    options?.maxInflightPerPlugin ?? Math.max(1, Math.floor(maxInflight / 2));
+  const maxPerPlugin = options?.maxInflightPerPlugin ?? maxInflight;
   const serialPlugins = new Set(options?.serialPlugins);
   const serialTails = new Map<string, Promise<unknown>>();
   let inflight = 0;
@@ -548,7 +549,7 @@ function hostTimeoutFor(
   }
   const value = timeouts[event];
   return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? value
+    ? Math.min(value, MAX_TIMER_MS)
     : undefined;
 }
 

@@ -532,4 +532,46 @@ describe('createHostIpcBridge', () => {
     expect(ipc.writes.length).toBe(writes);
     bridge.close();
   });
+
+  it('rejects a capabilities query answered with an error (adv-A-5)', async () => {
+    const ipc = new FakeIpc();
+    const protocol = new MessageProtocol();
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
+    const query = bridge.queryCapabilities();
+    expect(
+      bridge.tryConsumeDownstream({
+        type: MessageType.ENVELOPE,
+        header: {
+          type: 'HOST_CAPABILITIES_RESPONSE',
+          requestId: sentRequestId(protocol, ipc, 0),
+          capabilities: [],
+          error: {
+            code: 'FRAME_INVALID',
+            message: 'Frame could not be decoded',
+          },
+        },
+        payload: new Uint8Array(0),
+      }),
+    ).toBe(true);
+    await expect(query).rejects.toMatchObject({ code: 'FRAME_INVALID' });
+  });
+
+  it('caps a huge per-call timeout instead of letting setTimeout fire at once (adv-A-7)', async () => {
+    vi.useFakeTimers();
+    const ipc = new FakeIpc();
+    const protocol = new MessageProtocol();
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
+    let settled = false;
+    const call = bridge
+      .invokeOnHost(permissionsCall('huge'), new Uint8Array(0), 2 ** 31 + 1000)
+      .finally(() => {
+        settled = true;
+      });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(settled).toBe(false);
+    bridge.tryConsumeDownstreamFromHost(
+      hostAnswer(protocol, sentRequestId(protocol, ipc, 0)),
+    );
+    await expect(call).resolves.toMatchObject({ requestId: 'huge' });
+  });
 });

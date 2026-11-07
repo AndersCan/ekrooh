@@ -433,4 +433,23 @@ describe('MessageProtocol encode/decode', () => {
     const badVersion = new Uint8Array([9, 1, 0, 0, 0, 0, 0]);
     expect(() => protocol.decode(badVersion)).not.toThrow(FrameContentError);
   });
+
+  it('counts the id cap in UTF-8 bytes, like the Kotlin and Swift hosts (adv-B-6)', () => {
+    const protocol = new MessageProtocol();
+    const frame = (event: string) =>
+      protocol.encode(
+        MessageType.ENVELOPE,
+        { type: 'INVOKE_REQUEST', pluginId: 'app.x', event, requestId: 'r' },
+        null,
+      );
+    // 'é' is 1 UTF-16 unit but 2 UTF-8 bytes: 129 of them is 258 bytes.
+    expect(() => protocol.decode(frame('é'.repeat(129)))).toThrow(
+      /longer than 256 UTF-8 bytes/,
+    );
+    expect(() => protocol.decode(frame('é'.repeat(128)))).not.toThrow();
+    // An emoji is 2 units, 4 bytes: 65 of them is 260 bytes.
+    expect(() => protocol.decode(frame('😀'.repeat(65)))).toThrow(
+      FrameContentError,
+    );
+  });
 });

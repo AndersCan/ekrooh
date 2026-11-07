@@ -184,7 +184,12 @@ public final class HostIpcRouter {
     // Invoke deadline: emit a canonical timeout if the handler never responds.
     // The deadline is per handler (a picker waits on the user for minutes).
     let timeout = hostPlugins.invokeTimeout(pluginId: pluginId, event: event)
-    let nanoseconds = UInt64(max(0, timeout) * 1_000_000_000)
+    // Clamped again here: the registry already bounds it, but a NaN or
+    // out-of-range Double would trap in the UInt64 conversion.
+    let bounded =
+      timeout.isNaN ? HostPluginRegistry.defaultInvokeTimeout
+      : Swift.min(Swift.max(0, timeout), HostPluginRegistry.maxInvokeTimeout)
+    let nanoseconds = UInt64(bounded * 1_000_000_000)
     // The timer holds the responder strongly, so a handler that drops
     // `respond` without calling it is still answered at the deadline.
     responder.setTimer(

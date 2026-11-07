@@ -8,6 +8,7 @@ import {
   SNAPSHOT_PATH,
   UPDATE_COMMAND,
   buildApiSnapshot,
+  chunkExportMap,
   normalizeDeclaration,
 } from './scripts/api-snapshot.mjs';
 
@@ -257,25 +258,78 @@ describe('public API snapshot', () => {
   });
 
   it('the snapshot normalizer ignores comments and chunk aliases, not types', () => {
+    // Two builds of one surface: different hashes, minified aliases, docs.
+    const chunkA = chunkExportMap('export { Foo as $, Bar as Q };');
+    const chunkB = chunkExportMap('export { Foo as Z, Bar as $ };');
     const a = normalizeDeclaration(
       [
-        'import { $ as Foo } from "./index-Do-kTNXw.mjs";',
-        "/** docs */ export declare function f(a: Foo, s?: '//x'): void;",
+        'import { $ as Foo, Q as Bar } from "./index-Do-kTNXw.mjs";',
+        "/** docs */ export declare function f(a: Foo, b: Bar, s?: '//x'): void;",
       ].join('\n'),
+      { chunkExports: new Map([['./index-Do-kTNXw.mjs', chunkA]]) },
     );
     const b = normalizeDeclaration(
       [
-        'import { Q as Foo } from "./index-AbCdEf12.mjs";',
+        'import { Z as Foo, $ as Bar } from "./index-AbCdEf12.mjs";',
         '// other docs',
-        "export declare function f(a: Foo, s?: '//x'): void;",
+        "export declare function f(a: Foo, b: Bar, s?: '//x'): void;",
       ].join('\n'),
+      { chunkExports: new Map([['./index-AbCdEf12.mjs', chunkB]]) },
     );
     expect(a).toBe(b);
     expect(a).toContain("'//x'");
-    const changed = normalizeDeclaration(
-      "export declare function f(a: Foo, s: '//x'): void;",
+
+    // A shared chunk's minified export aliases are dropped.
+    expect(
+      normalizeDeclaration('export { Foo as $, Bar as Q };', {
+        isEntry: false,
+      }),
+    ).toBe(
+      normalizeDeclaration('export { Bar as Z, Foo as $ };', {
+        isEntry: false,
+      }),
     );
-    expect(changed).not.toBe(a.split('\n')[1]);
+
+    // A type change shows.
+    expect(
+      normalizeDeclaration(
+        "export declare function f(a: Foo, s: '//x'): void;",
+      ),
+    ).not.toBe(a.split('\n')[1]);
+  });
+
+  it('the snapshot normalizer sees alias swaps and public renames (adv-B-7)', () => {
+    const chunk = new Map([
+      [
+        './index-Do-kTNXw.mjs',
+        chunkExportMap('export { Foo as $, Bar as Q };'),
+      ],
+    ]);
+    // M2: the same local names bound to swapped chunk exports.
+    const bound = normalizeDeclaration(
+      'import { $ as Foo, Q as Bar } from "./index-Do-kTNXw.mjs";',
+      { chunkExports: chunk },
+    );
+    const swapped = normalizeDeclaration(
+      'import { Q as Foo, $ as Bar } from "./index-Do-kTNXw.mjs";',
+      { chunkExports: chunk },
+    );
+    expect(swapped).not.toBe(bound);
+    expect(swapped).toContain('Bar as Foo');
+    // An import of a name the chunk does not export is an error, not a guess.
+    expect(() =>
+      normalizeDeclaration('import { X as Foo } from "./index-Do-kTNXw.mjs";', {
+        chunkExports: chunk,
+      }),
+    ).toThrow(/not exported/);
+    // M3: an entry file renaming a public export to a short alias.
+    expect(
+      normalizeDeclaration('export { PluginBus as PB, ok };', {
+        isEntry: true,
+      }),
+    ).not.toBe(
+      normalizeDeclaration('export { PluginBus, ok };', { isEntry: true }),
+    );
   });
 
   it('wire protocol VERSION is pinned at 1', () => {

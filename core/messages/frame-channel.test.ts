@@ -407,4 +407,41 @@ describe('createFrameChannel', () => {
       { channel: '[ipc]' },
     );
   });
+
+  it('answers an undecodable capabilities response as a capabilities response (adv-A-5)', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const intercepted: MessageHeader[] = [];
+    const channel = createFrameChannel({
+      name: '[ipc]',
+      protocol,
+      router: echoRouter(),
+      write: vi.fn(),
+      onMalformed: { kind: 'tolerate' },
+      intercept: (message) => {
+        intercepted.push(message.header);
+        return true;
+      },
+    });
+    channel.push(
+      protocol.encode(
+        MessageType.ENVELOPE,
+        {
+          type: 'HOST_CAPABILITIES_RESPONSE',
+          requestId: 'caps-1',
+          capabilities: [],
+          // An over-long id is a content error on any header type.
+          pluginId: 'p'.repeat(300),
+        } as unknown as MessageHeader,
+        null,
+      ),
+    );
+    expect(intercepted).toEqual([
+      {
+        type: 'HOST_CAPABILITIES_RESPONSE',
+        requestId: 'caps-1',
+        capabilities: [],
+        error: { code: 'FRAME_INVALID', message: 'Frame could not be decoded' },
+      },
+    ]);
+  });
 });

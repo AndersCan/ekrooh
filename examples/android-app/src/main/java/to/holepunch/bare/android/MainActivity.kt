@@ -45,9 +45,16 @@ class MainActivity : AppCompatActivity(), ReferenceHost.Ui {
             // (and the page exchanged the nonce for the session cookie), later
             // documents in this WebView (a reload, an in-app navigation, a
             // mounted file opened as a page) do not get the nonce. A reload
-            // logs in with the surviving session cookie.
-            bootstrapScript?.remove()
+            // logs in with the surviving session cookie. Only the app page
+            // counts: a late error page finishing must not remove it early.
+            val origin = allowedOrigin ?: return
+            if (url == null || !BareWebViewClient.isAllowedNavigation(url, origin)) return
+            val script = bootstrapScript ?: return
+            script.remove()
             bootstrapScript = null
+            host.markBootstrapDelivered()
+            // Drop an earlier error page from history so Back leaves the app.
+            view?.clearHistory()
         }
     }
 
@@ -125,7 +132,11 @@ class MainActivity : AppCompatActivity(), ReferenceHost.Ui {
      * never exposed to page JS, only the single-use nonce. */
     private fun load(handoff: BareHandoff) {
         if (webViewReleased) return
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+        if (host.bootstrapDelivered) {
+            // The nonce is spent and the session cookie is set: a WebView
+            // created later (recreation, a second Activity) gets no nonce and
+            // the page connects on the cookie.
+        } else if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             bootstrapScript = WebViewCompat.addDocumentStartJavaScript(
                 webView,
                 handoff.bootstrapScript,
@@ -185,7 +196,7 @@ class MainActivity : AppCompatActivity(), ReferenceHost.Ui {
     }
 
     private companion object {
-        const val HANDOFF_FAILED = "The app backend did not start. Restart the app."
+        const val HANDOFF_FAILED = "The app backend has not started yet. Still waiting; restart the app if this stays."
         const val WEBVIEW_TOO_OLD = "This device's WebView is too old. Update Android System WebView and restart the app."
     }
 }

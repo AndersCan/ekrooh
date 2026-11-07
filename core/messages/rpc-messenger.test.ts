@@ -313,4 +313,28 @@ describe('createProtocolMessenger', () => {
     }
     await expect(promises[1024]).resolves.toBeDefined();
   });
+
+  it('caps a huge invoke timeout at the setTimeout limit (adv-A-7)', async () => {
+    vi.useFakeTimers();
+    const messenger = createProtocolMessenger(vi.fn());
+    let settled = false;
+    void messenger
+      .invoke(
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          args: {},
+        },
+        null,
+        2 ** 31 + 1000,
+      )
+      .catch(() => {})
+      .finally(() => {
+        settled = true;
+      });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(settled).toBe(false);
+    vi.useRealTimers();
+  });
 });

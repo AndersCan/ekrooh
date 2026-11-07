@@ -16,6 +16,7 @@ import {
 } from './types';
 import {
   FrameContentError,
+  isShortId,
   MAX_ID_LENGTH,
   type RecoveredHeader,
 } from './frame-content';
@@ -226,9 +227,7 @@ function isKnownMessageType(type: number): type is MessageTypeValue {
 }
 
 function shortString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length <= MAX_ID_LENGTH
-    ? value
-    : undefined;
+  return isShortId(value) ? value : undefined;
 }
 
 function recoverHeader(header: Record<string, unknown>): RecoveredHeader {
@@ -262,9 +261,9 @@ function parseAndValidateHeader(headerJson: string): MessageHeader {
 function validateHeader(header: Record<string, unknown>): MessageHeader {
   for (const field of ['requestId', 'pluginId', 'event'] as const) {
     const value = header[field];
-    if (typeof value === 'string' && value.length > MAX_ID_LENGTH) {
+    if (typeof value === 'string' && !isShortId(value)) {
       throw new Error(
-        `FRAME_INVALID: ${field} longer than ${MAX_ID_LENGTH} characters`,
+        `FRAME_INVALID: ${field} longer than ${MAX_ID_LENGTH} UTF-8 bytes`,
       );
     }
   }
@@ -317,6 +316,7 @@ function validateHeader(header: Record<string, unknown>): MessageHeader {
           type: 'HOST_CAPABILITIES_RESPONSE',
           requestId: header.requestId,
           capabilities: parseCapabilityDescriptors(header.capabilities),
+          error: parseCoreErrorWire(header.error),
         });
       }
       break;

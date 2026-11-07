@@ -28,14 +28,14 @@ import java.nio.ByteBuffer
 class FrameDecoder(
     private val onInvalidFrame: ((header: String?) -> Unit)? = null,
 ) {
-    private companion object {
-        /** Smallest buffer allocated for a partial frame whose length is not yet known. */
-        const val MIN_PARTIAL_BYTES = 64
+    // Plain private properties, not companion `const`s: a companion const
+    // compiles to a public static field and would leak into the public API.
 
-        /** A partial buffer larger than this is released once drained. */
-        const val RETAIN_BYTES = 64 * 1024
-    }
+    /** Smallest buffer allocated for a partial frame whose length is not yet known. */
+    private val minPartialBytes = 64
 
+    /** A partial buffer larger than this is released once drained. */
+    private val retainBytes = 64 * 1024
     /** Partial-frame storage: the first [length] bytes are buffered data. */
     private var buffer: ByteArray = ByteArray(0)
     private var length = 0
@@ -127,7 +127,7 @@ class FrameDecoder(
     /** Grows [buffer] to hold at least [bytes], preserving buffered data. */
     private fun reserve(bytes: Int) {
         if (buffer.size >= bytes) return
-        val next = ByteArray(maxOf(bytes, MIN_PARTIAL_BYTES))
+        val next = ByteArray(maxOf(bytes, minPartialBytes))
         buffer.copyInto(next, 0, 0, length)
         buffer = next
     }
@@ -140,7 +140,7 @@ class FrameDecoder(
         val rest = to - from
         if (rest == 0) {
             length = 0
-            if (buffer.size > RETAIN_BYTES) buffer = ByteArray(0)
+            if (buffer.size > retainBytes) buffer = ByteArray(0)
             return
         }
         if (source === buffer) {

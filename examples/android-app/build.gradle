@@ -214,6 +214,9 @@ dependencies {
   implementation "com.google.android.material:material:1.14.0"
   implementation "androidx.constraintlayout:constraintlayout:2.2.2"
 
+  // JVM unit tests (StorageMigrationTest).
+  testImplementation "junit:junit:4.13.2"
+
   // Instrumentation tests (P2PVerifyTest boots the on-device p2p verify
   // worklet on the emulator — issue #41 reproduction gate).
   androidTestImplementation "androidx.test:runner:1.7.0"

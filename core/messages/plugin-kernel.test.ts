@@ -1317,7 +1317,7 @@ describe('security-review hardening', () => {
     expect(after?.error).toBeUndefined();
   });
 
-  it('caps calls per plugin so a slow plugin cannot take every slot (D-9)', async () => {
+  it('caps calls per plugin when maxInflightPerPlugin is set (D-9)', async () => {
     let release!: () => void;
     const open = new Promise<void>((resolve) => (release = resolve));
     const router = createPluginRouter(
@@ -1325,10 +1325,10 @@ describe('security-review hardening', () => {
       'bare',
       {
         maxInflight: 8,
+        maxInflightPerPlugin: 4,
         logger: quiet(),
       },
     );
-    // Default per-plugin cap is half of maxInflight.
     const held = [1, 2, 3, 4].map((n) =>
       router.route(call('app.slow', `s${n}`), new Uint8Array()),
     );
@@ -1338,5 +1338,64 @@ describe('security-review hardening', () => {
     release();
     expect((await other)?.result).toEqual({ id: 'app.ok' });
     await Promise.all(held);
+  });
+
+  it('lets one plugin use every slot by default, so bursty apps are not throttled (adv-B-2)', async () => {
+    let release!: () => void;
+    const open = new Promise<void>((resolve) => (release = resolve));
+    const router = createPluginRouter(
+      slowRegistry(['app.grid'], open),
+      'bare',
+      {
+        maxInflight: 8,
+        logger: quiet(),
+      },
+    );
+    const held = Array.from({ length: 8 }, (_, n) =>
+      router.route(call('app.grid', `g${n}`), new Uint8Array()),
+    );
+    const over = await router.route(call('app.grid', 'g8'), new Uint8Array());
+    expect(over?.error?.message).toMatch(
+      /too many calls in flight \(limit 8\)/,
+    );
+    release();
+    for (const result of await Promise.all(held)) {
+      expect(result?.error).toBeUndefined();
+    }
+  });
+
+  it('caps a manifest host timeout at the setTimeout limit (adv-A-7)', async () => {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'core.permissions',
+      events: ['permissions.request'],
+      hostTimeoutsMs: { 'permissions.request': 1e12 },
+      runtimes: {},
+    });
+    const delegateToHost = vi.fn(
+      async (_h: unknown, _p: Uint8Array, _t?: number) => null,
+    );
+    const router = createPluginRouter(registry, 'bare', {
+      delegateToHost,
+      logger: quiet(),
+      getHostCapabilities: async () => [
+        {
+          pluginId: 'core.permissions',
+          capabilities: [],
+          events: ['permissions.request'],
+          runtimes: ['ios'],
+        },
+      ],
+    });
+    await router.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.permissions',
+        event: 'permissions.request',
+        requestId: 'r',
+      },
+      new Uint8Array(0),
+    );
+    expect(delegateToHost.mock.calls[0][2]).toBe(2 ** 31 - 1);
   });
 });

@@ -28,12 +28,19 @@ export function isDocsOnly(files) {
 
 function changedFiles() {
   const event = process.env.GITHUB_EVENT_NAME;
+  // --no-renames: a rename is a deletion plus an addition, so moving
+  // `foo.swift` to `foo.md` lists `foo.swift` too and is not docs-only.
   const git = (...args) =>
-    execFileSync('git', args, { encoding: 'utf8' }).split('\n').filter(Boolean);
+    execFileSync('git', args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .split('\n')
+      .filter(Boolean);
   if (event === 'pull_request') {
     // actions/checkout checks out the PR merge commit: its first parent is the
     // base branch, so this is exactly what the PR changes.
-    return git('diff', '--name-only', 'HEAD^1', 'HEAD');
+    return git('diff', '--name-only', '--no-renames', 'HEAD^1', 'HEAD');
   }
   const before = process.env.BEFORE_SHA ?? '';
   if (
@@ -41,7 +48,7 @@ function changedFiles() {
     /^[0-9a-f]{40}$/.test(before) &&
     !/^0+$/.test(before)
   ) {
-    return git('diff', '--name-only', before, 'HEAD');
+    return git('diff', '--name-only', '--no-renames', before, 'HEAD');
   }
   return [];
 }

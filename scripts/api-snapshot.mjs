@@ -13,8 +13,10 @@
  * Normalization keeps the snapshot about the surface, not the build:
  * - comments are dropped (JSDoc edits are not API changes);
  * - chunk hashes are dropped (`index-Do-kTNXw.d.mts` -> `index-<chunk>.d.mts`);
- * - the bundler's minified cross-chunk aliases (`import { $ as PluginManifest }`
- *   / `export { PluginManifest as $ }`) are replaced by the plain names, sorted;
+ * - the bundler's minified cross-chunk aliases are resolved: an import
+ *   `{ $ as PluginManifest }` is rewritten to the name the chunk really exports
+ *   under `$`, and a shared chunk's `export { PluginManifest as $ }` drops `$`.
+ *   Entry-file export lists are kept as written (a public rename shows);
  * - indentation and blank lines are dropped.
  *
  * Usage (from the repo root, after building the package):
@@ -83,42 +85,78 @@ function normalizeChunkName(name) {
   return `${m[1] ?? ''}${m[2].replace(/-[A-Za-z0-9_-]{8}$/, '-<chunk>')}${m[3]}`;
 }
 
-function sortedNames(list, pick) {
+/** `{ a as b, type c }` -> `[{ type: '', local: 'a', exported: 'b' }, ...]`. */
+function parseSpecifiers(list) {
   return list
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-    .map(pick)
+    .map((s) => {
+      const m = /^(type\s+)?(\S+)(?:\s+as\s+(\S+))?$/.exec(s);
+      if (!m) throw new Error(`api-snapshot: cannot parse specifier '${s}'`);
+      return { type: m[1] ? 'type ' : '', local: m[2], exported: m[3] ?? m[2] };
+    });
+}
+
+function printSpecifiers(specs) {
+  return specs
+    .map(({ type, local, exported }) =>
+      local === exported ? `${type}${local}` : `${type}${local} as ${exported}`,
+    )
     .sort()
     .join(', ');
 }
 
-/** One normalized declaration file. */
-export function normalizeDeclaration(source) {
+const IMPORT_RE =
+  /import\s*(type\s*)?\{([^}]*)\}\s*from\s*(["'])(\.\/[^"']+)\3;?/g;
+const LOCAL_EXPORT_RE = /export\s*(type\s*)?\{([^}]*)\}(?!\s*from);?/g;
+
+/** A chunk's export map: exported (minified) name -> the declared name. */
+export function chunkExportMap(source) {
+  const map = new Map();
+  for (const m of stripComments(source).matchAll(LOCAL_EXPORT_RE)) {
+    for (const spec of parseSpecifiers(m[2]))
+      map.set(spec.exported, spec.local);
+  }
+  return map;
+}
+
+/**
+ * One normalized declaration file.
+ *
+ * `chunkExports` maps a chunk specifier (`./index-HASH.mjs`) to that chunk's
+ * export map. An import binding `{ $ as PluginManifest }` is resolved through
+ * it to the declared name it really binds (`PluginManifest`), so a build that
+ * binds a different type under the same local name changes the snapshot. A
+ * shared chunk's own export list drops its minified aliases (they are the
+ * bundler's, not the API's); an entry file's export list is kept verbatim, so
+ * renaming a public export (`PluginBus as PB`) is a visible change.
+ */
+export function normalizeDeclaration(
+  source,
+  { isEntry = true, chunkExports = new Map() } = {},
+) {
   let text = stripComments(source);
-  // `import { $ as PluginManifest, ... } from "./chunk-HASH.mjs"`
-  text = text.replace(
-    /import\s*(type\s*)?\{([^}]*)\}\s*from\s*(["'])(\.\/[^"']+)\3;?/g,
-    (_m, type, names, _q, from) =>
-      `import ${type ?? ''}{ ${sortedNames(names, (s) => {
-        const m = /^(type\s+)?(\S+)\s+as\s+(\S+)$/.exec(s);
-        return m ? `${m[1] ?? ''}${m[3]}` : s;
-      })} } from "${normalizeChunkName(from)}";`,
-  );
-  // `export { PluginManifest as $, ... };` in a shared chunk (minified aliases
-  // only; a real rename such as `export { a as b }` with a readable target
-  // name is kept).
-  text = text.replace(
-    /export\s*(type\s*)?\{([^}]*)\};?/g,
-    (_m, type, names) =>
-      `export ${type ?? ''}{ ${sortedNames(names, (s) => {
-        const m = /^(type\s+)?(\S+)\s+as\s+(\S+)$/.exec(s);
-        if (m && /^[A-Za-z_$]{1,2}$/.test(m[3]) && m[3] !== m[2]) {
-          return `${m[1] ?? ''}${m[2]}`;
-        }
-        return s;
-      })} };`,
-  );
+  text = text.replace(IMPORT_RE, (_m, type, names, _q, from) => {
+    const exportsOf = chunkExports.get(from);
+    const specs = parseSpecifiers(names).map((spec) => {
+      if (!exportsOf) return spec;
+      const declared = exportsOf.get(spec.local);
+      if (declared === undefined) {
+        throw new Error(
+          `api-snapshot: '${spec.local}' is not exported by ${from}`,
+        );
+      }
+      return { ...spec, local: declared };
+    });
+    return `import ${type ?? ''}{ ${printSpecifiers(specs)} } from "${normalizeChunkName(from)}";`;
+  });
+  text = text.replace(LOCAL_EXPORT_RE, (_m, type, names) => {
+    let specs = parseSpecifiers(names);
+    if (!isEntry)
+      specs = specs.map((spec) => ({ ...spec, exported: spec.local }));
+    return `export ${type ?? ''}{ ${printSpecifiers(specs)} };`;
+  });
   return text
     .split('\n')
     .map((line) => line.trim())
@@ -131,23 +169,38 @@ export function buildApiSnapshot(distDir = path.join(ROOT, 'dist')) {
   if (!fs.existsSync(distDir)) {
     throw new Error(`no build at ${distDir}; run \`npm run build:pkg\` first`);
   }
-  const files = fs
+  const raw = fs
     .readdirSync(distDir)
     .filter((name) => name.endsWith('.d.mts'))
     .map((name) => ({
-      name: normalizeChunkName(name),
-      body: normalizeDeclaration(
-        fs.readFileSync(path.join(distDir, name), 'utf8'),
-      ),
+      name,
+      source: fs.readFileSync(path.join(distDir, name), 'utf8'),
+    }));
+  if (raw.length === 0) {
+    throw new Error(`no .d.mts files in ${distDir}`);
+  }
+  const isEntry = (name) => ENTRY_NAMES.has(name.replace(/\.d\.mts$/, ''));
+  const chunkExports = new Map(
+    raw
+      .filter((f) => !isEntry(f.name))
+      .map((f) => [
+        `./${f.name.replace(/\.d\.mts$/, '.mjs')}`,
+        chunkExportMap(f.source),
+      ]),
+  );
+  const files = raw
+    .map((f) => ({
+      name: normalizeChunkName(f.name),
+      body: normalizeDeclaration(f.source, {
+        isEntry: isEntry(f.name),
+        chunkExports,
+      }),
     }))
     .sort((a, b) =>
       a.name === b.name
         ? a.body.localeCompare(b.body)
         : a.name.localeCompare(b.name),
     );
-  if (files.length === 0) {
-    throw new Error(`no .d.mts files in ${distDir}`);
-  }
   const header =
     '// @ekrooh/bare public type surface (normalized dist/*.d.mts).\n' +
     `// Generated; do not edit. Regenerate: ${UPDATE_COMMAND}\n`;

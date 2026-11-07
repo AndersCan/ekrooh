@@ -113,7 +113,12 @@ final class BareWebHostTest: XCTestCase {
     XCTAssertEqual(.cancel, decide("https://example.com/"), "redirects and scripts never launch Safari")
     XCTAssertEqual(.openExternally, decide("https://example.com/", newWindow: true, link: true))
     XCTAssertEqual(.cancel, decide("https://example.com/", newWindow: true))
-    XCTAssertEqual(.cancel, decide("http://127.0.0.1:8080/", newWindow: true, link: true))
+    // The app's own origin in a new window loads in place (there is no
+    // second window), with or without a user gesture.
+    XCTAssertEqual(.loadInPlace, decide("http://127.0.0.1:8080/x", newWindow: true, link: true))
+    XCTAssertEqual(.loadInPlace, decide("http://127.0.0.1:8080/x", newWindow: true))
+    XCTAssertEqual(.cancel, decide("http://127.0.0.1:8081/x", newWindow: true))
+    XCTAssertEqual(.cancel, decide("about:blank", newWindow: true))
   }
 
   func testSubframesStayOnTheOriginByDefault() {
@@ -167,5 +172,42 @@ final class BareWebHostTest: XCTestCase {
       FileManager.default.fileExists(atPath: dirs.handoff.path), "a stale handoff is removed")
     let values = try dirs.storage.resourceValues(forKeys: [.isExcludedFromBackupKey])
     XCTAssertEqual(true, values.isExcludedFromBackup)
+  }
+
+  /// A FileManager whose moves fail while `failMoves` is set.
+  private final class FlakyMoves: FileManager {
+    var failMoves = true
+    override func moveItem(at srcURL: URL, to dstURL: URL) throws {
+      if failMoves { throw CocoaError(.fileWriteNoPermission) }
+      try super.moveItem(at: srcURL, to: dstURL)
+    }
+  }
+
+  func testAFailedMigrationIsExcludedFromBackupAndRetried() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("migrate-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let legacy = root.appendingPathComponent("Documents/bare", isDirectory: true)
+    try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+    try Data("corestore".utf8).write(to: legacy.appendingPathComponent("keep"))
+    let support = root.appendingPathComponent("Library/Application Support")
+    let caches = root.appendingPathComponent("Library/Caches")
+
+    let flaky = FlakyMoves()
+    let first = try BareStorage.prepare(
+      applicationSupport: support, caches: caches, legacyStorage: legacy, fileManager: flaky)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: legacy.path), "nothing is lost")
+    let legacyValues = try legacy.resourceValues(forKeys: [.isExcludedFromBackupKey])
+    XCTAssertEqual(true, legacyValues.isExcludedFromBackup, "the leftover is not backed up")
+
+    // Next launch: storage already exists, the move is retried entry by entry.
+    flaky.failMoves = false
+    let second = try BareStorage.prepare(
+      applicationSupport: support, caches: caches, legacyStorage: legacy, fileManager: flaky)
+    XCTAssertEqual(first, second)
+    XCTAssertEqual(
+      "corestore",
+      try String(contentsOf: second.storage.appendingPathComponent("keep"), encoding: .utf8))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
   }
 }

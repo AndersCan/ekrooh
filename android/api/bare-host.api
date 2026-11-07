@@ -117,8 +117,6 @@ public final class to.holepunch.bare.android.ErrorCodes {
 }
 
 public final class to.holepunch.bare.android.FrameDecoder {
-  public static final int MIN_PARTIAL_BYTES;
-  public static final int RETAIN_BYTES;
   public to.holepunch.bare.android.FrameDecoder(kotlin.jvm.functions.Function1<? super java.lang.String, kotlin.Unit>);
   public to.holepunch.bare.android.FrameDecoder(kotlin.jvm.functions.Function1, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final java.lang.Exception getError();

@@ -1,0 +1,19 @@
+# OSV-Scanner config for the "Dependency / vuln scan" job (test.yml).
+#
+# The scan stays `--recursive`, so every npm lockfile (package-lock.json,
+# examples/vote/package-lock.json) is fully scanned and fails the job.
+#
+# Maven is ignored because the only Maven input in this repo is
+# gradle/verification-metadata.xml: a SHA-256 list of every jar the Gradle
+# *build* downloads (AGP, Kotlin compiler, R8, lint and their transitive
+# tooling: jdom2, jose4j, jackson-core, httpclient, commons-lang3, ...). Those
+# are build tools, not dependencies the AAR or the apps ship, and their
+# advisories (XML/JWT/HTTP parsing of untrusted input) do not apply to a
+# build that only reads its own sources. Scanning them would fail the required
+# check on every AGP-transitive advisory. The AAR's runtime dependencies
+# (androidx.*) are declared in android/build.gradle and tracked by Dependabot
+# (gradle ecosystem) and GitHub's dependency graph instead.
+[[PackageOverrides]]
+ecosystem = "Maven"
+ignore = true
+reason = "gradle/verification-metadata.xml lists Gradle build-tool jars (not shipped); see comment above"

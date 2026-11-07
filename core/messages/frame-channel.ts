@@ -120,15 +120,26 @@ export function createFrameChannel(options: FrameChannelOptions): FrameChannel {
     ) {
       // Only a channel that consumes host responses (the host IPC) acts on
       // these; elsewhere they are dropped like any stray host response.
+      // The synthesized answer keeps the type of the frame it replaces, so a
+      // capabilities query fails as a capabilities query.
+      const header: MessageHeader =
+        recovered.type === 'HOST_CAPABILITIES_RESPONSE'
+          ? {
+              type: 'HOST_CAPABILITIES_RESPONSE',
+              requestId,
+              capabilities: [],
+              error,
+            }
+          : {
+              type: 'HOST_INVOKE_RESPONSE',
+              requestId,
+              pluginId: recovered.pluginId ?? '',
+              event: recovered.event ?? '',
+              error,
+            };
       options.intercept?.({
         type: MessageType.ENVELOPE,
-        header: {
-          type: 'HOST_INVOKE_RESPONSE',
-          requestId,
-          pluginId: recovered.pluginId ?? '',
-          event: recovered.event ?? '',
-          error,
-        },
+        header,
         payload: new Uint8Array(0),
       });
       return;

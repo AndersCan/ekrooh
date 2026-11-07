@@ -35,6 +35,30 @@ vi.mock('./server/static-file-server', async (importOriginal) => {
   };
 });
 
+/** One unfragmented binary WebSocket frame (masked when sent by a client). */
+const { wsFrame } = vi.hoisted(() => ({
+  wsFrame(payload: Buffer, mask: boolean): Buffer {
+    const len = payload.length;
+    const head =
+      len < 126
+        ? Buffer.from([0x82, (mask ? 0x80 : 0) | len])
+        : len < 0x10000
+          ? Buffer.from([0x82, (mask ? 0x80 : 0) | 126, len >> 8, len & 0xff])
+          : (() => {
+              const b = Buffer.alloc(10);
+              b[0] = 0x82;
+              b[1] = (mask ? 0x80 : 0) | 127;
+              b.writeBigUInt64BE(BigInt(len), 2);
+              return b;
+            })();
+    if (!mask) return Buffer.concat([head, payload]);
+    const key = Buffer.from([0x12, 0x34, 0x56, 0x78]);
+    const body = Buffer.from(payload);
+    for (let i = 0; i < body.length; i++) body[i] ^= key[i % 4];
+    return Buffer.concat([head, key, body]);
+  },
+}));
+
 vi.mock('bare-http1', async () => ({
   default: (await import('node:http')).default,
 }));
@@ -58,6 +82,7 @@ vi.mock('bare-crypto', async () => {
 });
 vi.mock('bare-ws', async () => {
   const crypto = await import('node:crypto');
+  const { EventEmitter } = await import('node:events');
   return {
     default: {
       Server: {
@@ -84,11 +109,65 @@ vi.mock('bare-ws', async () => {
           cb(null);
         },
       },
-      Socket: class {
-        on() {}
-        destroy() {}
-        write() {
+      // A minimal server-side WebSocket over the handshaken TCP socket:
+      // single-frame text/binary messages in, unmasked binary frames out.
+      // Enough to drive the real protocol socket end to end from a test.
+      Socket: class extends EventEmitter {
+        private sock: net.Socket | undefined;
+        private buf = Buffer.alloc(0);
+        constructor(opts?: { socket?: net.Socket }) {
+          super();
+          this.sock = opts?.socket;
+          if (!this.sock) return;
+          this.sock.on('data', (d: Buffer) => this.onBytes(d));
+          this.sock.on('close', () => this.emit('close'));
+          this.sock.on('error', (e: Error) => this.emit('error', e));
+        }
+        private onBytes(d: Buffer) {
+          this.buf = Buffer.concat([this.buf, d]);
+          for (;;) {
+            if (this.buf.length < 2) return;
+            const opcode = this.buf[0] & 0x0f;
+            const masked = (this.buf[1] & 0x80) !== 0;
+            let len = this.buf[1] & 0x7f;
+            let off = 2;
+            if (len === 126) {
+              if (this.buf.length < 4) return;
+              len = this.buf.readUInt16BE(2);
+              off = 4;
+            } else if (len === 127) {
+              if (this.buf.length < 10) return;
+              len = Number(this.buf.readBigUInt64BE(2));
+              off = 10;
+            }
+            const maskKey = masked ? this.buf.subarray(off, off + 4) : null;
+            if (masked) off += 4;
+            if (this.buf.length < off + len) return;
+            const payload = Buffer.from(this.buf.subarray(off, off + len));
+            if (maskKey) {
+              for (let i = 0; i < payload.length; i++) {
+                payload[i] ^= maskKey[i % 4];
+              }
+            }
+            this.buf = this.buf.subarray(off + len);
+            if (opcode === 8) {
+              this.destroy();
+              return;
+            }
+            if (opcode === 1 || opcode === 2) this.emit('data', payload);
+          }
+        }
+        write(data: Uint8Array) {
+          this.sock?.write(wsFrame(Buffer.from(data), false));
           return true;
+        }
+        pause() {}
+        resume() {}
+        close() {
+          this.destroy();
+        }
+        destroy() {
+          this.sock?.destroy();
         }
       },
     },
@@ -663,6 +742,138 @@ describe('runtime teardown', () => {
     await closeRuntime(runtime);
   });
 
+  it('a failed factory leaves the console unpatched (adv-A-2)', () => {
+    const before = console.log;
+    // A consumer plugin in a reserved namespace makes register() throw.
+    expect(() =>
+      createWorkletRuntime({
+        port: 0,
+        plugins: [
+          {
+            id: 'core.impostor',
+            events: ['impostor.x'],
+            runtimes: { bare: { invoke: () => [null, {}] } },
+          },
+        ],
+      }),
+    ).toThrow(/reserved/);
+    expect(console.log).toBe(before);
+  });
+
+  it('a forged HOST_INVOKE_RESPONSE over the real protocol socket never settles a pending host call (adv-A-4/E-5)', async () => {
+    const ipc = Object.assign(new EventEmitter(), {
+      write: vi.fn((_data: unknown) => true),
+      resume() {},
+    });
+    vi.stubGlobal('BareKit', { IPC: ipc });
+    const protocol = new MessageProtocol({
+      encode: (str) => new TextEncoder().encode(str),
+      decode: (bytes) => new TextDecoder().decode(bytes),
+    });
+    const frame = (header: Record<string, unknown>) =>
+      protocol.encode(
+        MessageType.ENVELOPE,
+        header as Parameters<typeof protocol.encode>[1],
+        null,
+      );
+    const runtime = createWorkletRuntime({ webAssets: webDir });
+    const creds = await runtime.start();
+
+    // A real host call, pending on the bridge under its own host-channel id.
+    let settled = false;
+    const pending = runtime
+      .hostBridge!.invokeOnHost(
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.permissions',
+          event: 'permissions.request',
+          requestId: 'page-1',
+        },
+        new Uint8Array(0),
+        60_000,
+      )
+      .then(
+        () => (settled = true),
+        () => (settled = true),
+      );
+    expect(ipc.write).toHaveBeenCalledTimes(1);
+    const hostId = (
+      protocol.decode(new Uint8Array(ipc.write.mock.calls[0][0] as Buffer))
+        .header as { requestId: string }
+    ).requestId;
+
+    const client = await openProtocolSocket(creds);
+    // Control: the socket really reaches the router.
+    client.send(
+      frame({
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'ctl-1',
+        args: { message: 'hi' },
+      }),
+    );
+    await vi.waitFor(
+      () =>
+        expect(
+          client
+            .messages()
+            .map((m) => (m.header as { requestId?: string }).requestId),
+        ).toContain('ctl-1'),
+      { timeout: 2000 },
+    );
+
+    const forged = {
+      type: 'HOST_INVOKE_RESPONSE',
+      requestId: hostId,
+      pluginId: 'core.permissions',
+      event: 'permissions.request',
+      result: { permission: 'camera', status: 'granted' },
+    };
+    // A well-formed forgery carrying the live host id...
+    client.send(frame(forged));
+    // ...and one whose header is not valid UTF-8.
+    const bad = Buffer.from(frame(forged));
+    const at = bad.indexOf('permissions.request');
+    expect(at).toBeGreaterThan(0);
+    bad[at] = 0xff;
+    client.send(bad);
+
+    await new Promise((r) => setTimeout(r, 300));
+    expect(settled).toBe(false);
+    // Nothing from the page was relayed to the host either.
+    expect(ipc.write).toHaveBeenCalledTimes(1);
+
+    client.close();
+    await closeRuntime(runtime);
+    // Closing the runtime fails the pending call instead of leaving it hanging.
+    await pending;
+    expect(settled).toBe(true);
+  });
+
+  it('pauses the bootstrap clock across a Bare suspend and resumes it only on resume', async () => {
+    // adv-A-1: the nonce TTL must count running time only.
+    const bare = Object.assign(new EventEmitter(), { argv: [] as string[] });
+    vi.stubGlobal('Bare', bare);
+    const runtime = createWorkletRuntime({ webAssets: webDir });
+    const pause = vi.spyOn(runtime.server, 'pauseBootstrapClock');
+    const resume = vi.spyOn(runtime.server, 'resumeBootstrapClock');
+    expect(bare.listenerCount('suspend')).toBe(1);
+    expect(bare.listenerCount('resume')).toBe(1);
+
+    bare.emit('suspend', 0);
+    expect(pause).toHaveBeenCalledTimes(1);
+    bare.emit('wakeup', 1000);
+    bare.emit('idle');
+    expect(resume).not.toHaveBeenCalled();
+    bare.emit('resume');
+    expect(resume).toHaveBeenCalledTimes(1);
+
+    await closeRuntime(runtime);
+    expect(bare.listenerCount('suspend')).toBe(0);
+    expect(bare.listenerCount('resume')).toBe(0);
+  });
+
   it('the reference worklet entry handles a failed start()', () => {
     // H-13: `void runtime.start()` turned a bind or handoff failure into an
     // unhandled rejection with no cleanup.
@@ -677,6 +888,85 @@ describe('runtime teardown', () => {
     expect(entry).toMatch(/runtime\.start\(\)\.catch\(/);
   });
 });
+
+/** A raw client on the runtime's protocol socket, authenticated with the
+ * host's `X-Bare-Token` (the page path uses the cookie; both pass the gate). */
+function openProtocolSocket(creds: {
+  origin: string;
+  port: number;
+  token: string;
+}): Promise<{
+  send(bytes: Uint8Array): void;
+  messages(): ReturnType<MessageProtocol['decode']>[];
+  close(): void;
+}> {
+  const codec = new MessageProtocol({
+    encode: (str) => new TextEncoder().encode(str),
+    decode: (bytes) => new TextDecoder().decode(bytes),
+  });
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host: '127.0.0.1', port: creds.port });
+    let buf = Buffer.alloc(0);
+    let upgraded = false;
+    const received: ReturnType<MessageProtocol['decode']>[] = [];
+    const client = {
+      send: (bytes: Uint8Array) =>
+        void socket.write(wsFrame(Buffer.from(bytes), true)),
+      messages: () => received,
+      close: () => socket.destroy(),
+    };
+    socket.on('error', reject);
+    socket.on('connect', () => {
+      socket.write(
+        [
+          'GET / HTTP/1.1',
+          `Host: 127.0.0.1:${creds.port}`,
+          'Upgrade: websocket',
+          'Connection: Upgrade',
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+          'Sec-WebSocket-Version: 13',
+          `Origin: ${creds.origin}`,
+          `X-Bare-Token: ${creds.token}`,
+          '\r\n',
+        ].join('\r\n'),
+      );
+    });
+    socket.on('data', (d: Buffer) => {
+      buf = Buffer.concat([buf, d]);
+      if (!upgraded) {
+        const end = buf.indexOf('\r\n\r\n');
+        if (end < 0) return;
+        const status = buf.subarray(0, buf.indexOf('\r\n')).toString();
+        if (!status.includes('101')) {
+          reject(new Error(`upgrade refused: ${status}`));
+          return;
+        }
+        upgraded = true;
+        buf = buf.subarray(end + 4);
+        resolve(client);
+      }
+      // Server frames are unmasked, unfragmented binary frames.
+      while (buf.length >= 2) {
+        let len = buf[1] & 0x7f;
+        let off = 2;
+        if (len === 126) {
+          if (buf.length < 4) return;
+          len = buf.readUInt16BE(2);
+          off = 4;
+        } else if (len === 127) {
+          if (buf.length < 10) return;
+          len = Number(buf.readBigUInt64BE(2));
+          off = 10;
+        }
+        if (buf.length < off + len) return;
+        const opcode = buf[0] & 0x0f;
+        const payload = buf.subarray(off, off + len);
+        buf = buf.subarray(off + len);
+        if (opcode === 2) received.push(codec.decode(new Uint8Array(payload)));
+      }
+    });
+  });
+}
 
 function closeRuntime(
   runtime: ReturnType<typeof createWorkletRuntime>,

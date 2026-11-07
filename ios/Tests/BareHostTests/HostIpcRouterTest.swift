@@ -189,4 +189,19 @@ final class HostIpcRouterTest: XCTestCase {
     XCTAssertEqual("p", decoded?["pluginId"] as? String)
     XCTAssertEqual("", decoded?["event"] as? String)
   }
+
+  func testHugeTimeoutsAreClampedNotATrap() {
+    let registry = HostPluginRegistry()
+    registry.register(pluginId: "test.plugin", event: "test.event", timeout: .infinity) {
+      _, _, respond in respond(.ok([:]))
+    }
+    registry.register(pluginId: "test.plugin", event: "big", timeout: 1e300) { _, _, _ in }
+    XCTAssertEqual(
+      HostPluginRegistry.maxInvokeTimeout,
+      registry.invokeTimeout(pluginId: "test.plugin", event: "test.event"))
+    XCTAssertEqual(
+      HostPluginRegistry.maxInvokeTimeout, registry.invokeTimeout(pluginId: "test.plugin", event: "big"))
+    // Scheduling the deadline for the clamped value must not trap.
+    XCTAssertNil(errorCode(responses(registry, invoke())[0]))
+  }
 }

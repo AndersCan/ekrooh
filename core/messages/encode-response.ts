@@ -1,14 +1,12 @@
 import { ErrorCode, MessageType } from './constants';
-import { MAX_ID_LENGTH } from './frame-content';
+import { isShortId } from './frame-content';
 import type { MessageProtocol } from './wire-codec';
 import type { PluginInvokeResponseHeader } from './types';
 
 /** Echoes a routing id only when it is a short string; anything else could push
  * the fallback response itself past the header cap. */
 function shortId(value: unknown): string {
-  return typeof value === 'string' && value.length <= MAX_ID_LENGTH
-    ? value
-    : '';
+  return isShortId(value) ? value : '';
 }
 
 /** Encodes a routed response. A response that cannot be encoded (a result over

@@ -62,10 +62,8 @@ public enum BareStorage {
     var storage = applicationSupport.appendingPathComponent("bare", isDirectory: true)
     let cache = caches.appendingPathComponent("bare-cache", isDirectory: true)
     try fileManager.createDirectory(at: applicationSupport, withIntermediateDirectories: true)
-    if let legacyStorage, fileManager.fileExists(atPath: legacyStorage.path),
-      !fileManager.fileExists(atPath: storage.path)
-    {
-      try? fileManager.moveItem(at: legacyStorage, to: storage)
+    if let legacyStorage, fileManager.fileExists(atPath: legacyStorage.path) {
+      migrate(from: legacyStorage, to: storage, fileManager: fileManager)
     }
     try fileManager.createDirectory(at: storage, withIntermediateDirectories: true)
     try fileManager.createDirectory(at: cache, withIntermediateDirectories: true)
@@ -85,6 +83,49 @@ public enum BareStorage {
     // A previous run may have left a handoff pointing at a dead port.
     try? fileManager.removeItem(at: dirs.handoff)
     return dirs
+  }
+
+  /// Moves a `Documents/bare` left by an older version into `storage`. Keyed
+  /// on the legacy directory existing, so a move that fails (or is cut short)
+  /// is retried on the next launch: entries already present in `storage` are
+  /// kept, the rest are moved one by one, and the legacy directory is removed
+  /// once empty. While anything is left behind it is logged and excluded from
+  /// backup, so the old copy never leaves the device either.
+  static func migrate(from legacy: URL, to storage: URL, fileManager: FileManager) {
+    var failed = false
+    if !fileManager.fileExists(atPath: storage.path) {
+      do {
+        try fileManager.moveItem(at: legacy, to: storage)
+        return
+      } catch {
+        failed = true
+      }
+    }
+    if !failed || fileManager.fileExists(atPath: storage.path) {
+      let entries = (try? fileManager.contentsOfDirectory(atPath: legacy.path)) ?? []
+      for name in entries {
+        let target = storage.appendingPathComponent(name)
+        if fileManager.fileExists(atPath: target.path) { continue }
+        do {
+          try fileManager.moveItem(at: legacy.appendingPathComponent(name), to: target)
+        } catch {
+          failed = true
+        }
+      }
+    }
+    let remaining = (try? fileManager.contentsOfDirectory(atPath: legacy.path)) ?? []
+    let leftOver = remaining.filter {
+      !fileManager.fileExists(atPath: storage.appendingPathComponent($0).path)
+    }
+    if leftOver.isEmpty && !failed {
+      try? fileManager.removeItem(at: legacy)
+      return
+    }
+    BareHostLogger.log("Storage migration from Documents incomplete; retrying next launch")
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    var legacyURL = legacy
+    try? legacyURL.setResourceValues(values)
   }
 }
 
@@ -160,6 +201,9 @@ public enum BareNavigationDecision: Equatable {
   case cancel
   /// Cancel in the WebView and hand the URL to the system browser.
   case openExternally
+  /// A new-window request (`target=_blank`, `window.open`) for the app's own
+  /// origin: there is no second window, so load it in this one.
+  case loadInPlace
 }
 
 /// The pure decision behind `BareNavigationDelegate` (unit-tested).
@@ -207,9 +251,11 @@ public struct BareNavigationPolicy: Equatable {
     let isWeb = ["http", "https"].contains(url.scheme?.lowercased() ?? "")
 
     if isNewWindow {
-      // There is no second window. A link the user activated to another site
-      // goes to the system browser; everything else is dropped.
-      return isWeb && !isAppURL(url) && isLinkActivated ? .openExternally : .cancel
+      // There is no second window. The app's own pages load in this one; a
+      // link the user activated to another site goes to the system browser;
+      // everything else is dropped.
+      if isAppURL(url) { return .loadInPlace }
+      return isWeb && isLinkActivated ? .openExternally : .cancel
     }
     if !isMainFrame {
       if isBlank || isAppURL(url) || (allowsForeignSubframes && isWeb) { return .allow }
@@ -266,6 +312,9 @@ open class BareNavigationDelegate: NSObject, WKNavigationDelegate {
     case .openExternally:
       decisionHandler(.cancel)
       if let url { openExternally(url) }
+    case .loadInPlace:
+      decisionHandler(.cancel)
+      webView.load(navigationAction.request)
     }
   }
 

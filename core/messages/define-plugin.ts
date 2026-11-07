@@ -1,5 +1,6 @@
 import { ErrorCode } from './constants';
 import { err } from './errors';
+import { MAX_TIMER_MS } from './timers';
 import {
   CoreError,
   DispatchEnvelope,
@@ -91,7 +92,9 @@ export function definePlugin<
       Number.isFinite(spec.hostTimeoutMs) &&
       spec.hostTimeoutMs > 0
     ) {
-      hostTimeoutsMs[spec.name] = spec.hostTimeoutMs;
+      // Capped so a huge value cannot overflow setTimeout into an
+      // immediate timeout.
+      hostTimeoutsMs[spec.name] = Math.min(spec.hostTimeoutMs, MAX_TIMER_MS);
     }
     const invoker = options.invoke?.[key];
     if (invoker) invokeByEvent.set(spec.name, invoker);

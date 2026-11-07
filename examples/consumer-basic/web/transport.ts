@@ -2,6 +2,7 @@ import {
   createWebSocketTransport,
   type MessageTransport,
 } from '@ekrooh/bare/transports';
+import { diagnosticsEnabled } from './diagnostics';
 
 const env = (import.meta as { env?: Record<string, string | undefined> }).env;
 
@@ -15,6 +16,10 @@ const env = (import.meta as { env?: Record<string, string | undefined> }).env;
 const devUrl =
   env?.VITE_BARE_WS_URL ?? (env?.DEV ? 'ws://localhost:8080' : undefined);
 
-export const transport: MessageTransport = createWebSocketTransport(
-  devUrl ? { url: devUrl } : {},
-);
+// A variable, not a literal: also type-checks against an older `dist/`.
+const options = {
+  ...(devUrl ? { url: devUrl } : {}),
+  diagnostics: diagnosticsEnabled(),
+};
+
+export const transport: MessageTransport = createWebSocketTransport(options);

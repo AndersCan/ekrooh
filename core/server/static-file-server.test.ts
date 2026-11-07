@@ -22,6 +22,7 @@ import {
   createLoopbackServer,
   createRejectionLogger,
   etagFor,
+  platformFoldsPathCase,
   etagMatches,
   isLoopbackHost,
   mimeTypeFor,
@@ -1784,7 +1785,7 @@ function closeServer(s: ReturnType<typeof createLoopbackServer>) {
 }
 
 describe('mount layout: public and gated roots never overlap (B-1)', () => {
-  it('refuses a gated directory mount inside, around or case-aliasing the public root', () => {
+  it('refuses a gated directory mount inside or equal to the public root, in either order', () => {
     const base = fs.realpathSync(
       fs.mkdtempSync(path.join(os.tmpdir(), 'loopback-overlap-')),
     );
@@ -1795,12 +1796,9 @@ describe('mount layout: public and gated roots never overlap (B-1)', () => {
       expect(() =>
         s1.mountDir('/shared', path.join(base, 'www', 'shared')),
       ).toThrow(/overlaps the public mount/);
-      // A case variant names the same folder on APFS; it is refused too.
-      expect(() =>
-        s1.mountDir('/shared', path.join(base, 'WWW', 'Shared')),
-      ).toThrow(/overlaps/);
-      // A gated root above the public one would also expose it.
-      expect(() => s1.mountDir('/all', base)).toThrow(/overlaps/);
+      expect(() => s1.mountDir('/same', path.join(base, 'www'))).toThrow(
+        /overlaps/,
+      );
 
       // Order does not matter: gated first, then a public root around it.
       const s2 = createLoopbackServer({ auth: true, token: TOKEN });
@@ -1814,6 +1812,77 @@ describe('mount layout: public and gated roots never overlap (B-1)', () => {
       s3.mountDir('/', path.join(base, 'www', 'shared'), { public: true });
       s3.mountDir('/', path.join(base, 'www', 'shared'), { public: true });
     } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('folds case only where the filesystem does (darwin, ios, win32)', () => {
+    expect(platformFoldsPathCase('darwin')).toBe(true);
+    expect(platformFoldsPathCase('ios')).toBe(true);
+    expect(platformFoldsPathCase('win32')).toBe(true);
+    expect(platformFoldsPathCase('android')).toBe(false);
+    expect(platformFoldsPathCase('linux')).toBe(false);
+    // Paths need not exist: the check falls back to the resolved path.
+    const base = path.join(os.tmpdir(), 'loopback-fold-does-not-exist');
+    const folding = createLoopbackServer({ auth: true, foldPathCase: true });
+    folding.mountDir('/', path.join(base, 'App'), { public: true });
+    // A case variant names the same folder on APFS or NTFS: refused.
+    expect(() =>
+      folding.mountDir('/media', path.join(base, 'app', 'media')),
+    ).toThrow(/overlaps/);
+    // On Android/Linux `App` and `app` are different folders: allowed.
+    const exact = createLoopbackServer({ auth: true, foldPathCase: false });
+    exact.mountDir('/', path.join(base, 'App'), { public: true });
+    expect(() =>
+      exact.mountDir('/media', path.join(base, 'app', 'media')),
+    ).not.toThrow();
+  });
+
+  it('allows a gated root strictly around the public root and keeps serving the app', async () => {
+    const base = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'loopback-around-')),
+    );
+    const www = path.join(base, 'www');
+    fs.mkdirSync(www);
+    fs.writeFileSync(path.join(www, 'index.html'), '<html>app</html>');
+    const s = createLoopbackServer({ auth: true, token: TOKEN });
+    try {
+      // The runtime mounts `/` last, at start(): it must not throw then.
+      s.mountDir('/all', base);
+      s.mountDir('/', www, { public: true });
+      const { origin: o } = await s.credentials();
+      const app = await fetchAt(o, '/index.html');
+      expect(app.status).toBe(200);
+      expect(app.body).toBe('<html>app</html>');
+    } finally {
+      await closeServer(s);
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves gated roots once, not on every public request', async () => {
+    const base = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'loopback-cache-')),
+    );
+    const www = path.join(base, 'www');
+    const peer = path.join(base, 'peer');
+    fs.mkdirSync(www);
+    fs.mkdirSync(peer);
+    fs.writeFileSync(path.join(www, 'a.js'), 'a');
+    const s = createLoopbackServer({ auth: true, token: TOKEN });
+    s.mountDir('/', www, { public: true });
+    s.mountDir('/peer', peer);
+    const spy = vi.spyOn(fs, 'realpathSync');
+    try {
+      const { origin: o } = await s.credentials();
+      for (let i = 0; i < 3; i++) {
+        expect((await fetchAt(o, '/a.js')).status).toBe(200);
+      }
+      const forPeer = spy.mock.calls.filter(([p]) => String(p) === peer);
+      expect(forPeer).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+      await closeServer(s);
       fs.rmSync(base, { recursive: true, force: true });
     }
   });
@@ -2206,6 +2275,210 @@ describe('IPv6 bind (A-4)', () => {
       } finally {
         await closeServer(s);
       }
+    }
+  });
+});
+
+describe('route failures after the handler wrote (adv-A-6)', () => {
+  it('leaves a response the handler already ended alone when it then rejects', async () => {
+    let captured: http.ServerResponse | null = null;
+    let destroy: ReturnType<typeof vi.spyOn> | null = null;
+    server!.registerRoute('GET', '/ended-then-throws', async (_req, res) => {
+      captured = res as unknown as http.ServerResponse;
+      destroy = vi.spyOn(captured, 'destroy');
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('done');
+      await Promise.resolve();
+      throw new Error('late');
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const r = await request('/ended-then-throws', { headers: { cookie } });
+      expect(r.status).toBe(200);
+      expect(r.body).toBe('done');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(captured).not.toBeNull();
+      expect(destroy!).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('late'));
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('drops headers the handler set before answering its failure with a 500', async () => {
+    server!.registerRoute('GET', '/half-set', (_req, res) => {
+      res.setHeader('Set-Cookie', 'leak=1');
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('X-Handler', 'yes');
+      throw new Error('mid-way');
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const r = await request('/half-set', { headers: { cookie } });
+      expect(r.status).toBe(500);
+      expect(r.headers['set-cookie']).toBeUndefined();
+      expect(r.headers['x-handler']).toBeUndefined();
+      expect(r.headers['content-type']).toBe('text/plain');
+      expect(r.headers['referrer-policy']).toBe('no-referrer');
+      expect(r.headers['x-content-type-options']).toBe('nosniff');
+      expect(r.headers['cross-origin-resource-policy']).toBe('same-origin');
+    } finally {
+      error.mockRestore();
+    }
+  });
+});
+
+describe('openVerified checks, each pinned alone (adv-E-4)', () => {
+  function setup(prefix: string) {
+    const base = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), prefix)),
+    );
+    const shared = path.join(base, 'shared');
+    fs.mkdirSync(path.join(shared, 'sub'), { recursive: true });
+    fs.mkdirSync(path.join(base, 'outside', 'sub'), { recursive: true });
+    const target = path.join(shared, 'sub', 'file.txt');
+    fs.writeFileSync(target, 'inside-original!');
+    fs.writeFileSync(
+      path.join(base, 'outside', 'sub', 'file.txt'),
+      'OUTSIDE-SECRET!!',
+    );
+    const s = createLoopbackServer({ auth: true, token: TOKEN });
+    s.mountDir('/shared', shared);
+    return { base, shared, target, s };
+  }
+
+  it('the re-realpath check alone catches a parent directory swapped for a symlink', async () => {
+    const { base, shared, target, s } = setup('loopback-verify-dir-');
+    const realpath = fs.realpathSync;
+    let armed = true;
+    // After the containment check, `sub/` becomes a symlink to an outside
+    // folder holding a same-named file. The open follows it; `lstat` of the
+    // path follows it too (same inode as the fd), so only the second
+    // realpath, which no longer returns the path itself, can refuse.
+    const spy = vi.spyOn(fs, 'realpathSync').mockImplementation(((
+      p: fs.PathLike,
+      o?: unknown,
+    ) => {
+      const out = (realpath as (p: fs.PathLike, o?: unknown) => string)(p, o);
+      if (armed && out === target) {
+        armed = false;
+        fs.renameSync(path.join(shared, 'sub'), path.join(shared, 'sub-old'));
+        fs.symlinkSync(
+          path.join(base, 'outside', 'sub'),
+          path.join(shared, 'sub'),
+        );
+      }
+      return out;
+    }) as typeof fs.realpathSync);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { origin: o } = await s.credentials();
+      const r = await fetchAt(o, '/shared/sub/file.txt', {
+        headers: { 'X-Bare-Token': TOKEN },
+      });
+      expect(armed).toBe(false);
+      expect(r.body).not.toContain('OUTSIDE-SECRET');
+      expect(r.status).toBe(404);
+    } finally {
+      spy.mockRestore();
+      warn.mockRestore();
+      await closeServer(s);
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('the inode check alone catches another regular file renamed onto the path after the open', async () => {
+    const { base, shared, target, s } = setup('loopback-verify-ino-');
+    const replacement = path.join(shared, 'replacement.txt');
+    fs.writeFileSync(replacement, 'other-regular!!!');
+    const fstat = fs.fstatSync;
+    let armed = true;
+    // Between the open and the checks, a different regular file is renamed
+    // onto the path: realpath still returns the path itself and `lstat` sees a
+    // regular file, so only the dev/ino comparison can refuse.
+    const spy = vi.spyOn(fs, 'fstatSync').mockImplementation(((
+      fd: number,
+      o?: unknown,
+    ) => {
+      const st = (fstat as (fd: number, o?: unknown) => fs.Stats)(fd, o);
+      if (armed) {
+        armed = false;
+        fs.renameSync(replacement, target);
+      }
+      return st;
+    }) as typeof fs.fstatSync);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { origin: o } = await s.credentials();
+      const r = await fetchAt(o, '/shared/sub/file.txt', {
+        headers: { 'X-Bare-Token': TOKEN },
+      });
+      expect(armed).toBe(false);
+      expect(r.status).toBe(404);
+    } finally {
+      spy.mockRestore();
+      warn.mockRestore();
+      await closeServer(s);
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('resource policy with auth on and extra origins (adv-A-3)', () => {
+  it('keeps Cross-Origin-Resource-Policy: same-origin when allowedOrigins is set', async () => {
+    const s = createLoopbackServer({
+      auth: true,
+      token: TOKEN,
+      allowedOrigins: ['http://127.0.0.1:5173'],
+    });
+    s.mount('/media/x.png', path.join(dir, 'app.js'));
+    try {
+      const { origin: o } = await s.credentials();
+      const r = await fetchAt(o, '/media/x.png', {
+        headers: { 'X-Bare-Token': TOKEN },
+      });
+      expect(r.status).toBe(200);
+      expect(r.headers['cross-origin-resource-policy']).toBe('same-origin');
+    } finally {
+      await closeServer(s);
+    }
+  });
+});
+
+describe('bootstrap clock passthrough', () => {
+  it('a paused clock keeps the nonce alive across a long suspend', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const paused = createLoopbackServer({ auth: true, token: TOKEN });
+    const running = createLoopbackServer({ auth: true, token: TOKEN });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      paused.mountDir('/', dir, { public: true });
+      running.mountDir('/', dir, { public: true });
+      const a = await paused.credentials();
+      const b = await running.credentials();
+      // The page load starts the nonce's lifetime.
+      expect((await fetchAt(a.origin, '/')).status).toBe(200);
+      expect((await fetchAt(b.origin, '/')).status).toBe(200);
+      paused.pauseBootstrapClock!();
+      paused.pauseBootstrapClock!(); // idempotent
+      vi.setSystemTime(Date.now() + 60 * 60 * 1000); // an hour suspended
+      paused.resumeBootstrapClock!();
+      const ok = await fetchAt(a.origin, '/login', {
+        method: 'POST',
+        body: a.bootstrap,
+      });
+      expect(ok.status).toBe(200);
+      // Without the pause the same hour expires the nonce.
+      const expired = await fetchAt(b.origin, '/login', {
+        method: 'POST',
+        body: b.bootstrap,
+      });
+      expect(expired.status).not.toBe(200);
+    } finally {
+      vi.useRealTimers();
+      warn.mockRestore();
+      await closeServer(paused);
+      await closeServer(running);
     }
   });
 });

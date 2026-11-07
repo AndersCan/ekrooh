@@ -34,6 +34,7 @@ BareHandoff :: public var host: String
 BareHandoff :: public var pageURL: URL
 BareNavigationDecision :: case allow
 BareNavigationDecision :: case cancel
+BareNavigationDecision :: case loadInPlace
 BareNavigationDecision :: case openExternally
 BareNavigationDelegate :: open func webView( _ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void )
 BareNavigationDelegate :: open func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!)
@@ -107,6 +108,7 @@ HostPluginRegistry :: public func register( pluginId: String, event: String, tim
 HostPluginRegistry :: public func toCapabilitiesJSON() -> [[String: Any]]
 HostPluginRegistry :: public init()
 HostPluginRegistry :: public static let defaultInvokeTimeout: TimeInterval = 30
+HostPluginRegistry :: public static let maxInvokeTimeout: TimeInterval = 24 * 60 * 60
 HostPluginRegistry :: public static let userMediatedInvokeTimeout: TimeInterval = 5 * 60
 HostPluginRegistry :: public struct Key: Hashable
 HostPluginRegistry :: public typealias Handler = ([String: Any]?, Data?, @escaping (HostInvokeOutcome) -> Void) -> Void

@@ -5,6 +5,7 @@ import {
 } from './types';
 import { createRequestId } from './request-id';
 import { resolvePlatform, type Platform } from './platform';
+import { timerMs } from './timers';
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
   ? Omit<T, K>
@@ -96,10 +97,13 @@ export function createProtocolMessenger(
             new Error(tail ? `${reason}; recent logs: ${tail}` : reason),
           );
         };
-        const timer = setTimeout(() => {
-          pending.delete(requestId);
-          void fail(`invoke timeout for ${request.type} (${requestId})`);
-        }, timeoutMs);
+        const timer = setTimeout(
+          () => {
+            pending.delete(requestId);
+            void fail(`invoke timeout for ${request.type} (${requestId})`);
+          },
+          timerMs(timeoutMs, 5000),
+        );
 
         if (pending.size >= MAX_CONCURRENT_INVOKES) {
           const oldest = pending.keys().next().value;

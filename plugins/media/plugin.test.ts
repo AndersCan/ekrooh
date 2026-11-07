@@ -104,7 +104,7 @@ describe('createMediaPlugin', () => {
     expect(error?.message).toContain('no picker');
   });
 
-  it('maps a non-canonical host error code to HOST_ERROR and caps the message', async () => {
+  it('passes an app-scoped host code through and caps the message (adv-B-5)', async () => {
     const plugin = createMediaPlugin({
       staticServer: stubServer(),
       invokeOnHost: async () => ({
@@ -112,14 +112,33 @@ describe('createMediaPlugin', () => {
         pluginId: 'vendor.media',
         event: 'media.pick',
         requestId: 'host-1',
-        error: { code: '__proto__', message: 'x'.repeat(10_000) },
+        error: { code: 'app.media/cancelled', message: 'x'.repeat(10_000) },
       }),
     });
     const invoke = plugin.runtimes.bare?.invoke;
     if (!invoke) throw new Error('expected bare invoke adapter');
     const [error] = await invoke('media.pick', {}, context);
-    expect(error?.code).toBe('HOST_ERROR');
+    expect(error?.code).toBe('app.media/cancelled');
     expect(error?.message.length).toBeLessThanOrEqual(500);
+  });
+
+  it('reads a malformed host error as HOST_ERROR', async () => {
+    const plugin = createMediaPlugin({
+      staticServer: stubServer(),
+      invokeOnHost: async () =>
+        ({
+          type: 'INVOKE_RESPONSE',
+          pluginId: 'vendor.media',
+          event: 'media.pick',
+          requestId: 'host-1',
+          error: { code: 42, message: null },
+        }) as never,
+    });
+    const invoke = plugin.runtimes.bare?.invoke;
+    if (!invoke) throw new Error('expected bare invoke adapter');
+    const [error] = await invoke('media.pick', {}, context);
+    expect(error?.code).toBe('HOST_ERROR');
+    expect(error?.message).toContain('Host failed media.pick');
   });
 
   it('gives the host call a deadline just under the page timeout (R-04)', async () => {

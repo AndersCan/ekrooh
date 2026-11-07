@@ -46,7 +46,7 @@ const MAX_TRACKED_INFLIGHT = 1024;
 export const REPLACED_CLOSE_CODE = 4001;
 const SOCKET_LOST_MESSAGE = 'WebSocket closed before the response arrived';
 const REPLACED_MESSAGE =
-  'WebSocket replaced by another document holding the session (reconnects when this page returns to the foreground)';
+  'WebSocket replaced by another page holding the session; reconnects in 30 s or when this page returns to the foreground';
 const CLOSED_MESSAGE = 'WebSocket transport was closed';
 
 /** Same-origin default: on-device the page is served by the loopback server,

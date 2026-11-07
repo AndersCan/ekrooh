@@ -85,6 +85,7 @@ type HostCapabilitiesResponseHeader = {
 type: 'HOST_CAPABILITIES_RESPONSE';
 requestId: string;
 capabilities: CapabilityDescriptor[];
+error?: CoreErrorWire;
 };
 type HostInvokeRequestHeader = {
 type: 'HOST_INVOKE_REQUEST';
@@ -588,12 +589,15 @@ wsIdleTimeoutMs?: number;
 wsDeadPeerTimeoutMs?: number;
 wsReplaceMinIntervalMs?: number;
 wsMaxQueuedBytes?: number;
+foldPathCase?: boolean;
 bootstrapTtlMs?: number;
 }
 interface LoopbackServer {
 origin(): Promise<string>;
 url(path: string): Promise<string>;
 token(): string;
+pauseBootstrapClock?(): void;
+resumeBootstrapClock?(): void;
 credentials(): Promise<{
 origin: string;
 port: number;

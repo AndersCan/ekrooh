@@ -28,17 +28,26 @@ export interface LoopbackGateOptions {
    * at `http://localhost:5173`). The bound origin and its loopback aliases are
    * always allowed. Each entry must be a bare `scheme://host[:port]` origin. */
   allowedOrigins?: readonly string[];
-  /** How long (ms) after `bind` an unredeemed bootstrap nonce stays valid.
-   * Defaults to `BOOTSTRAP_TTL_MS`. */
+  /** How long (ms of running, not suspended, time) an unredeemed bootstrap
+   * nonce stays valid after the first public request (the page load).
+   * Defaults to `BOOTSTRAP_TTL_MS`; a value that is not a positive finite
+   * number falls back to it, and it is capped at `BOOTSTRAP_TTL_MAX_MS`. */
   bootstrapTtlMs?: number;
 }
 
-/** Default lifetime of an unredeemed bootstrap nonce, counted from `bind`. A
- * host reads the handoff and loads the page within moments of the bind, so a
- * nonce still unspent after two minutes is one the page never got: it must not
- * stay a live credential for the whole process lifetime. A reload after that
- * logs in with the surviving session cookie, not the nonce. */
+/** Default lifetime of an unredeemed bootstrap nonce, counted from the first
+ * public request (the host loading the page) in running time: the clock
+ * pauses while the worklet is suspended (`pauseBootstrapClock`), so an app
+ * backgrounded between the page load and `/login` still logs in on resume. A
+ * nonce still unspent after two running minutes is one the page never used:
+ * it must not stay a live credential for the whole process lifetime. A reload
+ * after that logs in with the surviving session cookie, not the nonce. */
 export const BOOTSTRAP_TTL_MS = 120_000;
+/** Upper bound for `bootstrapTtlMs`. */
+export const BOOTSTRAP_TTL_MAX_MS = 600_000;
+/** Lifetime of a nonce whose page never loaded at all (no public request),
+ * counted from `bind` in running time. */
+export const BOOTSTRAP_UNLOADED_TTL_MS = 600_000;
 
 /**
  * The loopback server's admission policy (ADR 0003), in one place: the session
@@ -75,6 +84,11 @@ export interface LoopbackGate {
   /** The `connect-src` source for the protocol socket of a page whose request
    * carried `headers` (already admitted), e.g. `ws://127.0.0.1:49152`. */
   socketSource(headers: RequestHeaders): string;
+  /** Stops the bootstrap nonce's lifetime clock while the worklet is
+   * suspended (Bare `suspend`). Idempotent. */
+  pauseBootstrapClock(): void;
+  /** Restarts the clock on resume (Bare `resume`). Idempotent. */
+  resumeBootstrapClock(): void;
 }
 
 const COOKIE_PREFIX = 'bare_session';
@@ -166,25 +180,45 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
   }
   const token = options.token ?? randomSecret();
   const cookieValue = sessionNonce(token);
-  const bootstrapTtlMs = options.bootstrapTtlMs ?? BOOTSTRAP_TTL_MS;
+  const requestedTtl = options.bootstrapTtlMs;
+  const bootstrapTtlMs =
+    typeof requestedTtl === 'number' &&
+    Number.isFinite(requestedTtl) &&
+    requestedTtl > 0
+      ? Math.min(requestedTtl, BOOTSTRAP_TTL_MAX_MS)
+      : BOOTSTRAP_TTL_MS;
+  const unloadedTtlMs = Math.max(BOOTSTRAP_UNLOADED_TTL_MS, bootstrapTtlMs);
   let bootstrapNonce: string | null = randomSecret();
-  /** When the nonce stops being accepted; set by `bind`. */
-  let bootstrapExpiresAt = Infinity;
+  /** Running-time clock: wall time minus the time spent suspended. */
+  let pausedAt: number | null = null;
+  let pausedTotal = 0;
+  const runningNow = () => (pausedAt ?? Date.now()) - pausedTotal;
+  /** Running time at `bind` and at the first public request (null until). */
+  let boundAt: number | null = null;
+  let firstPublicAt: number | null = null;
   /** The most recently spent bootstrap nonce, kept only to answer replays of
    * it with 409 (valid once but consumed) instead of 401 (bad credential). */
   let spentBootstrapNonce: string | null = null;
   let allowedHosts = new Set<string>();
   let allowedOrigins = new Set<string>();
+  const explicitOrigins = new Set<string>(options.allowedOrigins ?? []);
   let cookieName = COOKIE_PREFIX;
 
   /** The nonce, or null once it is spent or has expired unredeemed. An expired
    * nonce is dropped for good, so it can never come back to life. */
   function liveNonce(): string | null {
-    if (bootstrapNonce !== null && Date.now() >= bootstrapExpiresAt) {
-      console.warn(
-        `[loopback] bootstrap nonce expired unredeemed after ${bootstrapTtlMs}ms`,
-      );
-      bootstrapNonce = null;
+    if (bootstrapNonce !== null && boundAt !== null) {
+      const now = runningNow();
+      const expired =
+        firstPublicAt !== null
+          ? now - firstPublicAt >= bootstrapTtlMs
+          : now - boundAt >= unloadedTtlMs;
+      if (expired) {
+        console.warn(
+          `[loopback] bootstrap nonce expired unredeemed (${firstPublicAt !== null ? `${bootstrapTtlMs}ms after the page load` : `${unloadedTtlMs}ms with no page load`})`,
+        );
+        bootstrapNonce = null;
+      }
     }
     return bootstrapNonce;
   }
@@ -195,6 +229,13 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
    * cross-site. */
   function checkFetchSite(headers: RequestHeaders): GateVerdict {
     if (!auth) return { ok: true };
+    // An origin the consumer listed explicitly is trusted to be cross-site
+    // (that is why it is listed); the rule targets pages nobody listed. A
+    // no-Origin request (the same-site `<img>` case) never matches this.
+    const origin = headers['origin'];
+    if (typeof origin === 'string' && explicitOrigins.has(origin)) {
+      return { ok: true };
+    }
     const site = headers['sec-fetch-site'];
     if (site === undefined || ALLOWED_FETCH_SITES.has(String(site))) {
       return { ok: true };
@@ -253,7 +294,7 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
       const port = hostPort.slice(hostPort.lastIndexOf(':') + 1);
       allowedHosts = new Set([hostPort, ...loopbackHosts(port)]);
       cookieName = sessionCookieName(port);
-      bootstrapExpiresAt = Date.now() + bootstrapTtlMs;
+      boundAt = runningNow();
       allowedOrigins = new Set([
         origin,
         ...loopbackHosts(port).map((h) => `http://${h}`),
@@ -265,7 +306,21 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
     admitRequest(headers, resource) {
       const origin = checkOrigin(headers, false);
       if (!origin.ok) return origin;
-      if (resource === 'public') return { ok: true };
+      if (resource === 'public') {
+        // The page load starts the nonce's lifetime, not the bind: a slow
+        // cold start must not eat into the time the page has to log in.
+        // Expire first: `POST /login` is admitted as public too, so a login
+        // arriving past the unloaded lifetime must not count as the page load
+        // and revive the nonce it is about to present.
+        if (
+          boundAt !== null &&
+          firstPublicAt === null &&
+          liveNonce() !== null
+        ) {
+          firstPublicAt = runningNow();
+        }
+        return { ok: true };
+      }
       const site = checkFetchSite(headers);
       if (!site.ok) return site;
       if (!hasCredential(headers)) {
@@ -317,6 +372,14 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
         ok: true,
         cookie: `${cookieName}=${cookieValue}; HttpOnly; SameSite=Strict; Path=/`,
       };
+    },
+    pauseBootstrapClock() {
+      if (pausedAt === null) pausedAt = Date.now();
+    },
+    resumeBootstrapClock() {
+      if (pausedAt === null) return;
+      pausedTotal += Math.max(0, Date.now() - pausedAt);
+      pausedAt = null;
     },
     socketSource(headers) {
       const host = headers['host'];
