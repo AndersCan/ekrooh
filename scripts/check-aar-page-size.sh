@@ -17,13 +17,20 @@ for abi in arm64-v8a x86_64; do
   for so in "$dir/$prefix/$abi"/*.so; do
     [ -e "$so" ] || continue
     count=$((count + 1))
+    out="$("$readelf" -lW "$so")"
+    aligns="$(printf "%s\n" "$out" | awk '$1 == "LOAD" { print $NF }')"
+    if [ -z "$aligns" ]; then
+      echo "$prefix/$abi/$(basename "$so"): no LOAD segments" >&2
+      fail=1
+    fi
     while read -r align; do
+      [ -n "$align" ] || continue
       echo "$prefix/$abi/$(basename "$so") LOAD align $align"
       if [ $((align)) -lt $((0x4000)) ]; then
         echo "  ^ below 0x4000" >&2
         fail=1
       fi
-    done < <("$readelf" -lW "$so" | awk '$1 == "LOAD" { print $NF }')
+    done <<< "$aligns"
   done
 done
 
