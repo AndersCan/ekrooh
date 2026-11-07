@@ -184,7 +184,8 @@ tasks.register("packApp", Exec) {
 // On-device p2p verification bundle (issue #41): `core/p2p-verify.core.ts`
 // (esbuild'd by `build:p2p-verify`, then bare-pack'd) is booted by the
 // instrumentation test (`P2PVerifyTest`) to reproduce peer-drive replication
-// on the emulator. Dev tooling — never shipped in a release APK surface.
+// on the emulator. Dev tooling: it is written to the androidTest assets, so it
+// ships only in the instrumentation test APK, never in the app APK.
 tasks.register("buildP2pVerifyJs", Exec) {
   def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
   def npm = isWindows ? "npm.cmd" : "npm"
@@ -195,7 +196,8 @@ tasks.register("packP2pVerify", Exec) {
   dependsOn "buildP2pVerifyJs"
   def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
   def bin = isWindows ? "node_modules\\.bin\\bare-pack.cmd" : "node_modules/.bin/bare-pack"
-  configureExec(it, "${bin} --preset android --out ${projectDir}/src/main/assets/p2p-verify.bundle ${project.ext.repoRoot}/core/p2p-verify.core.gen.js")
+  doFirst { file("src/androidTest/assets").mkdirs() }
+  configureExec(it, "${bin} --preset android --out ${projectDir}/src/androidTest/assets/p2p-verify.bundle ${project.ext.repoRoot}/core/p2p-verify.core.gen.js")
 }
 
 tasks.register("pack") {

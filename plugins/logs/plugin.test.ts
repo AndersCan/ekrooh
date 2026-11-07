@@ -72,6 +72,44 @@ describe('createLogsPlugin', () => {
     );
   });
 
+  it('logs.view rejects a non-number tail instead of returning the whole ring (D-5)', async () => {
+    const big = createLogRingBuffer(500);
+    for (let i = 0; i < 500; i++) {
+      big.append({ ts: i, level: 'info', source: 'backend', message: 'x' });
+    }
+    const view = createLogsPlugin({ store: big }).runtimes.bare?.invoke;
+    if (!view) throw new Error('expected bare invoke adapter');
+    for (const tail of ['all', {}, null, Number.NaN, Infinity]) {
+      const [error, result] = await view(
+        'logs.view',
+        { tail } as never,
+        context,
+      );
+      expect(result).toBeNull();
+      expect(error?.code).toBe('PLUGIN_ERROR');
+    }
+    const [, frac] = await view('logs.view', { tail: 2.9 }, context);
+    expect((frac as LogsViewResult).entries).toHaveLength(2);
+    const [, negative] = await view('logs.view', { tail: -5 }, context);
+    expect((negative as LogsViewResult).entries).toHaveLength(0);
+  });
+
+  it('logs.view rejects an unknown level or source (D-5)', async () => {
+    seed();
+    const [badLevel] = await invoke(
+      'logs.view',
+      { level: 'fatal' } as never,
+      context,
+    );
+    expect(badLevel?.code).toBe('PLUGIN_ERROR');
+    const [badSource] = await invoke(
+      'logs.view',
+      { source: { $ne: 1 } } as never,
+      context,
+    );
+    expect(badSource?.code).toBe('PLUGIN_ERROR');
+  });
+
   it('logs.clear empties the buffer and reports the count', async () => {
     seed();
     const [error, result] = await invoke('logs.clear', {}, context);

@@ -4,11 +4,18 @@
 # and fill in the placeholders + secrets (see templates/deploy/README.md).
 #
 #   workflow_dispatch   → build the signed AAB, upload to the chosen track:
-#                         `internal` (testers) or `production`. Only users in
-#                         DEPLOY_APPROVERS may trigger a run (see below).
+#                         `internal` (testers) or `production`.
 #
-# Production uploads also wait on the `production` environment approval gate
-# (only DEPLOY_APPROVERS may approve).
+# The security boundary is GitHub environments, not this file. Anyone with
+# write access can dispatch this workflow from a branch where they edited it,
+# so every secret lives in an environment whose deployment policy allows only
+# the default branch:
+#   android-signing  upload keystore (no reviewers needed)
+#   internal         a Play service account that can release to testing
+#                    tracks only
+#   production       a service account with production rights + required
+#                    reviewers
+# Repository-level secrets would be readable from any branch: do not use them.
 #
 # Requires your app module's build.gradle to read `-PversionCode`/`-PversionName`
 # and a `release` signingConfig fed by the ANDROID_KEYSTORE_* env vars
@@ -37,70 +44,52 @@ env:
   APPLICATION_ID: to.holepunch.bare.android # must already exist in Play Console
   ANDROID_MODULE: ':examples:android-app' # gradle path of your app module (e.g. ":app")
   AAB_PATH: examples/android-app/build/outputs/bundle/release/app-release.aab
-  # Who may trigger deploys via workflow_dispatch — comma-separated GitHub
-  # usernames. Anyone not on the list gets a no-op run. Leave "<repo-owner>"
-  # replaced with your account (fail-closed until configured).
-  DEPLOY_APPROVERS: <repo-owner>
 
 jobs:
-  authorize:
-    name: Check deploy permissions
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      allowed: ${{ steps.check.outputs.allowed }}
-    steps:
-      - name: Allow only approved deployers to trigger a run
-        id: check
-        run: |
-          if [ -z "${{ env.DEPLOY_APPROVERS }}" ] || [ "${{ env.DEPLOY_APPROVERS }}" = "<repo-owner>" ]; then
-            echo "DEPLOY_APPROVERS is unset or still a placeholder — no one can deploy until set."
-            echo "allowed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if echo "${{ env.DEPLOY_APPROVERS }}" | grep -qw "${{ github.actor }}"; then
-            echo "allowed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "allowed=false" >> "$GITHUB_OUTPUT"
-          fi
-
   build:
     name: Build signed AAB
-    needs: authorize
-    if: needs.authorize.outputs.allowed == 'true'
+    # Defense in depth only: the environment's branch policy is the gate.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    environment: android-signing
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*
-          cache: npm
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           distribution: temurin
           java-version: '21'
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
         with:
           packages: tools platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
 
       - name: Install npm dependencies
-        run: npm ci
+        # This job holds the upload keystore: no dependency install script
+        # runs. Rebuild only packages you have checked need one (esbuild does).
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
 
       - name: Fetch Bare Kit prebuilds
         run: npm run prebuilds
-        env:
-          GH_TOKEN: ${{ github.token }}
 
       - name: Build JS core + web assets
         run: npm run build
 
       - name: Restore the Play upload keystore
-        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload.jks"
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
 
       - name: Build + sign the release AAB
         env:
@@ -114,68 +103,54 @@ jobs:
             -PversionCode="$GITHUB_RUN_NUMBER" \
             -PversionName="$MARKETING_VERSION"
 
+      - name: Remove the keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload.jks"
+
       - name: Upload AAB artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: app-release-aab
           path: ${{ env.AAB_PATH }}
           if-no-files-found: error
           retention-days: 14
 
-  test:
-    name: Upload to internal testing track
-    if: needs.authorize.outputs.allowed == 'true' && inputs.track == 'internal'
-    needs: [build, authorize]
+  upload:
+    name: Upload to ${{ inputs.track }}
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # `internal` or `production`: each holds its own SERVICE_ACCOUNT_JSON;
+    # `production` also requires reviewer approval.
+    environment: ${{ inputs.track }}
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: app-release-aab
           path: build/aab
 
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@824c0e29fdfc7d689c191c27acc969d2d04b7dd8 # v1.331.0
         with:
           ruby-version: '3.3'
-          bundler-cache: true
+          bundler-cache: true # installs from your committed Gemfile.lock
           working-directory: fastlane
 
-      - name: Upload to Google Play (internal)
+      - name: Upload to Google Play
         working-directory: fastlane
-        run: bundle exec fastlane android internal
         env:
-          APPLICATION_ID: ${{ env.APPLICATION_ID }}
-          ANDROID_AAB_PATH: build/aab/app-release.aab
-          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
-
-  production:
-    name: Upload to production
-    if: needs.authorize.outputs.allowed == 'true' && inputs.track == 'production'
-    needs: [build, authorize]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: production # manual approval gate: only DEPLOY_APPROVERS may approve
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: app-release-aab
-          path: build/aab
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.3'
-          bundler-cache: true
-          working-directory: fastlane
-
-      - name: Upload to Google Play (production)
-        working-directory: fastlane
-        run: bundle exec fastlane android production
-        env:
+          TRACK: ${{ inputs.track }}
           APPLICATION_ID: ${{ env.APPLICATION_ID }}
           ANDROID_AAB_PATH: build/aab/app-release.aab
           SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
           PLAY_ROLLOUT_FRACTION: ${{ vars.PLAY_ROLLOUT_FRACTION }}
+        run: |
+          case "$TRACK" in
+            internal|production) bundle exec fastlane android "$TRACK" ;;
+            *) echo "unknown track: $TRACK" >&2; exit 1 ;;
+          esac

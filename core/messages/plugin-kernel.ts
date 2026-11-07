@@ -13,6 +13,8 @@ import {
   RuntimeTarget,
 } from './types';
 import { InvokeRequest, ProtocolMessenger } from './rpc-messenger';
+import { MAX_ID_LENGTH } from './frame-content';
+import { isCanonicalErrorCode } from './error-codes';
 
 export interface PluginRegistry {
   register(plugin: PluginManifest): void;
@@ -29,13 +31,43 @@ export interface PluginRegistry {
   }>;
 }
 
+/** A plugin id is two or more dot-separated segments of letters, digits, `-`
+ * and `_` (`app.photos`), at most {@link MAX_ID_LENGTH} characters. */
+const PLUGIN_ID_PATTERN = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/;
+
+/** Namespaces the framework owns. A consumer plugin there could shadow a
+ * framework plugin, or collide with one a later release adds. */
+const RESERVED_PLUGIN_NAMESPACES = ['core.', 'vendor.'] as const;
+
+/** The framework's own plugins: the only ids allowed in a reserved namespace. */
+const FRAMEWORK_PLUGIN_IDS: ReadonlySet<string> = new Set([
+  'core.health',
+  'core.discovery',
+  'core.permissions',
+  'core.logs',
+  'vendor.media',
+]);
+
 export function createPluginRegistry(): PluginRegistry {
   const plugins = new Map<string, PluginManifest>();
   return {
     register(plugin) {
-      if (!plugin.id.includes('.')) {
+      const id: unknown = plugin.id;
+      if (
+        typeof id !== 'string' ||
+        id.length > MAX_ID_LENGTH ||
+        !PLUGIN_ID_PATTERN.test(id)
+      ) {
         throw new Error(
-          `plugin id must be namespaced (example: "vendor.plugin"), got "${plugin.id}"`,
+          `plugin id must be namespaced (example: "app.photos": dot-separated letters, digits, "-" or "_"), got "${String(id).slice(0, MAX_ID_LENGTH)}"`,
+        );
+      }
+      if (
+        RESERVED_PLUGIN_NAMESPACES.some((ns) => id.startsWith(ns)) &&
+        !FRAMEWORK_PLUGIN_IDS.has(id)
+      ) {
+        throw new Error(
+          `plugin id "${id}" is in a namespace reserved for framework plugins (core.*, vendor.*); use your own namespace, e.g. "app.${id.slice(id.indexOf('.') + 1)}"`,
         );
       }
       if (plugins.has(plugin.id)) {
@@ -76,13 +108,21 @@ export interface PluginRouter {
   route(
     header: MessageHeader,
     payload: Uint8Array,
+    /** Where the message came from. `channel` names the channel it arrived
+     * on (e.g. `[ws]`, `[ipc]`); calls with a channel are also held to
+     * `maxInflightPerChannel`. */
+    context?: { channel?: string },
   ): Promise<PluginInvokeResponseHeader | null>;
 }
 
 export type PluginRouterOptions = {
+  /** Delegates an invoke to the host. `timeoutMs` is the event's
+   * `hostTimeoutMs` from its manifest, when it declares one; otherwise the
+   * bridge default applies. */
   delegateToHost?: (
     header: PluginInvokeRequestHeader,
     payload: Uint8Array,
+    timeoutMs?: number,
   ) => Promise<PluginInvokeResponseHeader | null>;
   /** Host-registered capabilities (from `HOST_CAPABILITIES_RESPONSE`).
    * Delegation to the host is only permitted for events the host announces
@@ -95,6 +135,15 @@ export type PluginRouterOptions = {
    * of being queued, so a flood cannot grow memory without bound. Defaults to
    * `DEFAULT_MAX_INFLIGHT`. */
   maxInflight?: number;
+  /** Cap on calls routed at once from one channel (see
+   * the `channel` passed to `route`), so one peer cannot take every slot: the
+   * page cannot starve requests from the host. Defaults to three quarters of
+   * `maxInflight`. */
+  maxInflightPerChannel?: number;
+  /** Cap on calls routed at once to one plugin, so a plugin whose calls are
+   * slow cannot take every slot from the others. Defaults to half of
+   * `maxInflight`. */
+  maxInflightPerPlugin?: number;
   /** Plugin ids whose calls must run one at a time, in arrival order. Every
    * other plugin's calls run concurrently, so a slow call never delays them. */
   serialPlugins?: readonly string[];
@@ -131,9 +180,47 @@ export function createPluginRouter(
 ): PluginRouter {
   const logger = options?.logger ?? console;
   const maxInflight = options?.maxInflight ?? DEFAULT_MAX_INFLIGHT;
+  const maxPerChannel =
+    options?.maxInflightPerChannel ??
+    Math.max(1, Math.floor((maxInflight * 3) / 4));
+  const maxPerPlugin =
+    options?.maxInflightPerPlugin ?? Math.max(1, Math.floor(maxInflight / 2));
   const serialPlugins = new Set(options?.serialPlugins);
   const serialTails = new Map<string, Promise<unknown>>();
   let inflight = 0;
+  // Keyed by channel name / registered plugin id only (unknown plugin ids are
+  // answered before they are counted), so both maps stay bounded.
+  const inflightByChannel = new Map<string, number>();
+  const inflightByPlugin = new Map<string, number>();
+
+  const bump = (map: Map<string, number>, key: string, by: 1 | -1) => {
+    const next = (map.get(key) ?? 0) + by;
+    if (next <= 0) map.delete(key);
+    else map.set(key, next);
+  };
+
+  /** Logs the detail of a thrown error and returns what the peer may see: the
+   * code of a canonical `CoreError`, otherwise `fallback`, and a fixed
+   * message. Raw exception text (paths, internals) never reaches the page. */
+  function thrownError(
+    e: unknown,
+    fallback: ErrorCode,
+    what: string,
+  ): CoreError {
+    const detail = e instanceof Error ? e.message : String(e);
+    logger.error(`${what} failed: ${detail}`);
+    const code =
+      e instanceof CoreError && isCanonicalErrorCode(e.code)
+        ? e.code
+        : fallback;
+    if (code === ErrorCode.TIMEOUT) {
+      return new CoreError(code, `${what} timed out`);
+    }
+    if (code === ErrorCode.UNSUPPORTED_EVENT) {
+      return new CoreError(code, `Unsupported event ${what} on ${runtime}`);
+    }
+    return new CoreError(code, `${what} failed`);
+  }
 
   const capsTtlMs =
     options?.hostCapabilitiesTtlMs ?? DEFAULT_HOST_CAPABILITIES_TTL_MS;
@@ -238,14 +325,14 @@ export function createPluginRouter(
         });
         return null;
       } catch (e) {
-        const error = new CoreError(
-          ErrorCode.PLUGIN_ERROR,
-          e instanceof Error ? e.message : String(e),
+        return invokeErrorResponse(
+          header,
+          thrownError(
+            e,
+            ErrorCode.PLUGIN_ERROR,
+            `${header.pluginId}.${header.event}`,
+          ),
         );
-        logger.error(
-          `dispatch ${header.pluginId}.${header.event} failed: ${error.message}`,
-        );
-        return invokeErrorResponse(header, error);
       }
     }
 
@@ -274,14 +361,14 @@ export function createPluginRouter(
               : undefined,
           };
         } catch (e) {
-          const error = new CoreError(
-            ErrorCode.PLUGIN_ERROR,
-            e instanceof Error ? e.message : String(e),
+          return invokeErrorResponse(
+            header,
+            thrownError(
+              e,
+              ErrorCode.PLUGIN_ERROR,
+              `${header.pluginId}.${header.event}`,
+            ),
           );
-          logger.error(
-            `invoke ${header.pluginId}.${header.event} failed: ${error.message}`,
-          );
-          return invokeErrorResponse(header, error);
         }
       }
       if (header.requestId && options?.delegateToHost) {
@@ -289,7 +376,11 @@ export function createPluginRouter(
         // the caller, not escape `route` and leave it waiting (ekrooh#268).
         try {
           if (await hostAnnounces(header.pluginId, header.event)) {
-            const delegated = await options.delegateToHost(header, payload);
+            const delegated = await options.delegateToHost(
+              header,
+              payload,
+              hostTimeoutFor(plugin, header.event),
+            );
             if (delegated) {
               // The host disowning the event means our snapshot is stale.
               const code = delegated.error?.code;
@@ -307,9 +398,10 @@ export function createPluginRouter(
           capsCache = null;
           return invokeErrorResponse(
             header,
-            new CoreError(
+            thrownError(
+              e,
               ErrorCode.HOST_ERROR,
-              e instanceof Error ? e.message : String(e),
+              `${header.pluginId}.${header.event}`,
             ),
           );
         }
@@ -327,23 +419,46 @@ export function createPluginRouter(
   }
 
   return {
-    async route(header, payload) {
+    async route(header, payload, context) {
       if (!isPluginEnvelopeHeader(header)) return routeNow(header, payload);
-      if (inflight >= maxInflight) {
+      const busy = (limit: number, scope: string) => {
         const error = new CoreError(
           ErrorCode.TRANSPORT_ERROR,
-          `too many calls in flight (limit ${maxInflight}); retry later`,
+          `too many calls in flight${scope} (limit ${limit}); retry later`,
         );
         logger.warn(`${header.pluginId}.${header.event}: ${error.message}`);
         return invokeErrorResponse(header, error);
+      };
+      if (inflight >= maxInflight) return busy(maxInflight, '');
+      const channel = context?.channel;
+      if (
+        channel !== undefined &&
+        (inflightByChannel.get(channel) ?? 0) >= maxPerChannel
+      ) {
+        return busy(maxPerChannel, ' on this channel');
+      }
+      // Only registered plugins are counted, so the map is bounded by the
+      // registry; an unknown id is answered by routeNow without a slot.
+      const pluginKey = registry.get(header.pluginId)
+        ? header.pluginId
+        : undefined;
+      if (
+        pluginKey !== undefined &&
+        (inflightByPlugin.get(pluginKey) ?? 0) >= maxPerPlugin
+      ) {
+        return busy(maxPerPlugin, ' for this plugin');
       }
       inflight++;
+      if (channel !== undefined) bump(inflightByChannel, channel, 1);
+      if (pluginKey !== undefined) bump(inflightByPlugin, pluginKey, 1);
       try {
         return serialPlugins.has(header.pluginId)
           ? await runSerial(header.pluginId, () => routeNow(header, payload))
           : await routeNow(header, payload);
       } finally {
         inflight--;
+        if (channel !== undefined) bump(inflightByChannel, channel, -1);
+        if (pluginKey !== undefined) bump(inflightByPlugin, pluginKey, -1);
       }
     },
   };
@@ -420,6 +535,21 @@ export function createPluginBus(messenger: ProtocolMessenger): PluginBus {
       ];
     },
   };
+}
+
+/** The manifest's host deadline for `event`, read as an own property. */
+function hostTimeoutFor(
+  plugin: PluginManifest | undefined,
+  event: string,
+): number | undefined {
+  const timeouts = plugin?.hostTimeoutsMs;
+  if (!timeouts || !Object.prototype.hasOwnProperty.call(timeouts, event)) {
+    return undefined;
+  }
+  const value = timeouts[event];
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
 }
 
 function invokeErrorResponse(

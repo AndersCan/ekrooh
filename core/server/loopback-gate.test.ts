@@ -1,18 +1,28 @@
-import { describe, expect, it, vi } from 'vite-plus/test';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { HashOptions } from 'node:crypto';
 import {
+  BOOTSTRAP_TTL_MS,
   cookieSession,
   createLoopbackGate,
+  secretEquals,
   sessionCookieName,
   sessionNonce,
   tokenFromHeaders,
 } from './loopback-gate';
+
+const timingSafeEqual = vi.hoisted(() => ({
+  calls: [] as Array<[Uint8Array, Uint8Array]>,
+}));
 
 vi.mock('bare-crypto', async () => {
   const crypto = await import('node:crypto');
   return {
     default: {
       ...crypto,
+      timingSafeEqual(a: Uint8Array, b: Uint8Array) {
+        timingSafeEqual.calls.push([a, b]);
+        return crypto.timingSafeEqual(a, b);
+      },
       createHash(algorithm: string, options?: HashOptions) {
         if (algorithm === 'blake2b-256') algorithm = 'sha256';
         return crypto.createHash(algorithm, options);
@@ -231,5 +241,119 @@ describe('createLoopbackGate', () => {
     expect(boundGate().socketSource({ host: 'localhost:4000' })).toBe(
       'ws://localhost:4000',
     );
+  });
+
+  describe('cross-site fetch metadata (cookies are not port-scoped)', () => {
+    const session = { host: HOST, cookie: COOKIE };
+
+    it.each(['same-site', 'cross-site'])(
+      'refuses a credentialed gated request with Sec-Fetch-Site: %s',
+      (site) => {
+        // A page on 127.0.0.1:<other port> is same-site: its <img> GET carries
+        // the Strict cookie and no Origin.
+        const headers = { ...session, 'sec-fetch-site': site };
+        expect(boundGate().admitRequest(headers, 'gated')).toMatchObject({
+          ok: false,
+          status: 403,
+          reason: `cross-site request (Sec-Fetch-Site: ${site})`,
+        });
+        expect(
+          boundGate().admitUpgrade({ ...headers, origin: ORIGIN }),
+        ).toMatchObject({ ok: false, status: 403 });
+      },
+    );
+
+    it.each([['same-origin'], ['none'], [undefined]])(
+      'admits Sec-Fetch-Site: %s',
+      (site) => {
+        const headers =
+          site === undefined ? session : { ...session, 'sec-fetch-site': site };
+        expect(boundGate().admitRequest(headers, 'gated')).toEqual({
+          ok: true,
+        });
+        expect(
+          boundGate().admitUpgrade({ ...headers, origin: ORIGIN }),
+        ).toEqual({ ok: true });
+      },
+    );
+
+    it('leaves the public app and dev mode (no credential) alone', () => {
+      expect(
+        boundGate().admitRequest(
+          { host: HOST, 'sec-fetch-site': 'cross-site' },
+          'public',
+        ),
+      ).toEqual({ ok: true });
+      // The Vite dev page (localhost:5173) loads backend media cross-site.
+      expect(
+        boundGate({ auth: false }).admitRequest(
+          { host: HOST, 'sec-fetch-site': 'cross-site' },
+          'gated',
+        ),
+      ).toEqual({ ok: true });
+    });
+  });
+
+  describe('bootstrap nonce lifetime', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('expires an unredeemed nonce BOOTSTRAP_TTL_MS after bind', () => {
+      vi.useFakeTimers();
+      const gate = boundGate();
+      const nonce = gate.bootstrap();
+      vi.advanceTimersByTime(BOOTSTRAP_TTL_MS);
+      expect(gate.login(nonce, { host: HOST })).toEqual({
+        ok: false,
+        status: 401,
+      });
+      expect(gate.bootstrap()).toBe('');
+      // A live session still re-logs in after expiry (the reload path).
+      expect(gate.login(nonce, { host: HOST, cookie: COOKIE }).ok).toBe(true);
+    });
+
+    it('accepts the nonce within the lifetime', () => {
+      vi.useFakeTimers();
+      const gate = createLoopbackGate({
+        auth: true,
+        token: TOKEN,
+        bootstrapTtlMs: 1_000,
+      });
+      gate.bind(ORIGIN);
+      const nonce = gate.bootstrap();
+      vi.advanceTimersByTime(999);
+      expect(gate.login(nonce, { host: HOST }).ok).toBe(true);
+    });
+  });
+
+  it('compares every credential through timingSafeEqual', () => {
+    // Fails if secretEquals is replaced by ===/!== or skips timingSafeEqual.
+    timingSafeEqual.calls.length = 0;
+    expect(secretEquals('abc', 'abc')).toBe(true);
+    expect(secretEquals('abc', 'abd')).toBe(false);
+    expect(timingSafeEqual.calls).toHaveLength(2);
+
+    const gate = boundGate();
+    const nonce = gate.bootstrap();
+    timingSafeEqual.calls.length = 0;
+    expect(
+      gate.admitRequest({ host: HOST, 'x-bare-token': TOKEN }, 'gated'),
+    ).toEqual({ ok: true });
+    expect(timingSafeEqual.calls.length).toBeGreaterThan(0);
+    timingSafeEqual.calls.length = 0;
+    expect(gate.admitRequest({ host: HOST, cookie: COOKIE }, 'gated')).toEqual({
+      ok: true,
+    });
+    expect(timingSafeEqual.calls.length).toBeGreaterThan(0);
+    timingSafeEqual.calls.length = 0;
+    expect(gate.login(nonce, { host: HOST }).ok).toBe(true);
+    expect(
+      timingSafeEqual.calls.some(
+        ([a, b]) =>
+          Buffer.from(a).toString() === nonce &&
+          Buffer.from(b).toString() === nonce,
+      ),
+    ).toBe(true);
   });
 });

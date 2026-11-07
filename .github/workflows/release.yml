@@ -4,31 +4,76 @@ on:
     tags:
       - 'v*'
 
+# Read-only by default; each job asks for exactly what it needs.
 permissions:
   contents: read
-  packages: write
-  id-token: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # never cancel a publish half-way
+
+# Three jobs, so that no job that runs build tooling holds a publishing
+# credential (G-3):
+#
+#   build          no secrets, no OIDC, read-only token. Gates the tag, runs
+#                  every gate, packs the npm tarball, builds the AAR.
+#   publish-npm    environment `release`, `id-token: write`. No checkout, no
+#                  install, no build: it publishes the tarball `build` packed,
+#                  with --ignore-scripts.
+#   publish-maven  environment `release`, signing + Sonatype secrets,
+#                  `packages: write`. No npm install and no JS build: only the
+#                  Gradle publish tasks. Residual risk: those tasks rebuild the
+#                  AAR, so Gradle, AGP, Kotlin, CMake and the nexus plugin run
+#                  next to the secrets. The wrapper is validated; dependency
+#                  verification (gradle/verification-metadata.xml) is what
+#                  closes the rest.
+#
+# Both publish jobs wait together on the `release` environment (required
+# reviewer = owner, deployment policy = tags `v*`), so one approval releases.
 jobs:
-  publish:
-    name: Publish v${{ github.ref_name }}
-    # Protected environment `release`: requires a maintainer reviewer before
-    # any publish step runs (issue #54). Maintainers must create the `release`
-    # environment in repo Settings → Environments with Required reviewers and
-    # a tag protection rule for `v*`. The `id-token: write` top-level
-    # permission below is what powers npm trusted publishing (OIDC).
-    environment: release
+  build:
+    name: Build and gate ${{ github.ref_name }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      dist_tag: ${{ steps.tag.outputs.dist_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history and every branch, for the ancestry check below.
+          fetch-depth: 0
+          persist-credentials: false
 
       - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
+      - name: The tag is the package version and is on main
+        id: tag
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::package.json version '$VERSION' is not semver"; exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $VERSION"; exit 1
+          fi
+          if ! git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; then
+            echo "::error::origin/main was not fetched; cannot check ancestry"; exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main: release only reviewed commits"; exit 1
+          fi
+          # npm refuses prerelease versions without an explicit dist-tag:
+          # beta/alpha/rc -> that identifier, stable -> latest.
+          DIST_TAG=$(node -e "const m=process.argv[1].match(/-([a-z]+)\./); process.stdout.write(m ? m[1] : 'latest')" "$VERSION")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dist_tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
+          # No dependency cache: the release builds from the lockfile alone.
           node-version: lts/*
-          cache: npm
-          registry-url: https://registry.npmjs.org
 
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
@@ -40,75 +85,144 @@ jobs:
           packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
 
       - name: Install npm dependencies
-        # This job holds the npm OIDC token and the signing secrets, so no
-        # dependency install script runs here except the allowlisted ones
-        # (esbuild resolves its platform binary in its install script).
+        # Only allowlisted install scripts run (esbuild resolves its platform
+        # binary in its install script). The `linux-android` test job uses the
+        # same install, so CI proves it.
         run: |
           npm ci --ignore-scripts
           npm rebuild esbuild
 
-      - name: Fetch Bare Kit prebuilds
+      - name: JS gates (the same as the test workflow's JS job)
+        run: |
+          npm run build:pkg
+          npm run docs:check
+          npm run check
+          npm run test:unit
+
+      - name: Fetch Bare Kit prebuilds (SHA-256 checked)
         run: npm run prebuilds
-        env:
-          GH_TOKEN: ${{ github.token }}
 
       - name: Build core bundle and web assets
         run: npm run build
 
-      - name: Run all gates (JS + Gradle, includes host JUnit)
+      - name: Gradle gates (includes host JUnit tests and the release AAR)
         run: ./gradlew build
 
-      - name: Publish @ekrooh/bare to npm
-        # Trusted publishing (OIDC): `id-token: write` above + the trusted
-        # publisher configured on npmjs.com for this workflow. No NPM_TOKEN.
-        # Idempotent: skips when this exact version is already on the registry
-        # so a partial release can be re-run after a failed later step.
-        # npm refuses prerelease versions without an explicit dist-tag: derive
-        # it from the version (beta/alpha/rc → that identifier, stable → latest).
+      - name: Pack the npm tarball
         # Drop the node_modules/@ekrooh/bare -> ../.. self-link (from the
-        # consumer-basic workspace's file:../.. dep) first: npm's arborist
-        # crashes on it while packing ("Cannot read properties of null
-        # (reading 'edgesOut')"), and nothing after the gates needs it.
+        # workspaces' file:../.. deps) first: npm's arborist crashes on it
+        # while packing ("Cannot read properties of null (reading 'edgesOut')").
+        # `npm pack` runs prepack (build:pkg) here, in the job with no secrets.
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
           rm -f node_modules/@ekrooh/bare
-          VERSION=$(node -e "console.log(require('./package.json').version)")
+          mkdir -p "$RUNNER_TEMP/npm"
+          npm pack --pack-destination "$RUNNER_TEMP/npm"
+          test -f "$RUNNER_TEMP/npm/ekrooh-bare-$VERSION.tgz"
+          ls -l "$RUNNER_TEMP/npm"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/npm/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bare-host-aar
+          path: android/build/outputs/aar/bare-host-release.aar
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-npm:
+    name: Publish @ekrooh/bare to npm
+    needs: build
+    environment: release
+    runs-on: ubuntu-latest
+    permissions:
+      # npm trusted publishing (OIDC), configured on npmjs.com for this
+      # workflow. No NPM_TOKEN. Nothing in this job runs repo or dependency
+      # code: no checkout, no install, no build.
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/npm
+
+      - name: Publish the packed tarball
+        # Idempotent: skips when this exact version is already on the registry
+        # so a partial release can be re-run after a failed later step.
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          DIST_TAG: ${{ needs.build.outputs.dist_tag }}
+        run: |
+          test -f "$RUNNER_TEMP/npm/ekrooh-bare-$VERSION.tgz"
           if npm view "@ekrooh/bare@$VERSION" version >/dev/null 2>&1; then
             echo "npm: @ekrooh/bare@$VERSION already published — skipping"
             exit 0
           fi
-          TAG=$(node -e "const v=require('./package.json').version; const m=v.match(/-([a-z]+)\./); process.stdout.write(m ? m[1] : 'latest')")
-          npm publish --access public --tag "$TAG"
+          npm publish "$RUNNER_TEMP/npm/ekrooh-bare-$VERSION.tgz" --access public --tag "$DIST_TAG" --ignore-scripts
 
-      - name: Publish :bare-host AAR to GitHub Packages
-        # The publication is signed (see android/build.gradle), so the signing
-        # secrets are required here too — not just the Maven Central step.
-        # Idempotent: skips when this exact version already exists on GitHub
-        # Packages (maven-metadata.xml check with the actions token), so a
-        # partial release can be re-run after a failed later step.
-        run: |
-          VERSION=$(node -e "console.log(require('./package.json').version)")
-          METADATA="https://maven.pkg.github.com/AndersCan/ekrooh/io/github/anderscan/ekrooh/bare-host/maven-metadata.xml"
-          if curl -fsS -H "Authorization: Bearer $GITHUB_TOKEN" "$METADATA" 2>/dev/null | grep -q "<version>$VERSION</version>"; then
-            echo "GitHub Packages: bare-host@$VERSION already published — skipping"
-          else
-            ./gradlew :bare-host:publishMavenAarPublicationToGitHubPackagesRepository
-          fi
+  publish-maven:
+    name: Publish :bare-host AAR (GitHub Packages + Maven Central)
+    needs: build
+    environment: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # GitHub Packages
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
+
+      - name: Fetch Bare Kit prebuilds (SHA-256 checked, Node built-ins only)
+        # Plain `node`, no `npm ci`: no dependency code runs in this job.
+        run: node scripts/fetch-prebuilds.mjs
+
+      - name: Publish to GitHub Packages
+        # The publication is signed (see android/build.gradle). Idempotent:
+        # skips when this exact version already exists on GitHub Packages.
         env:
+          VERSION: ${{ needs.build.outputs.version }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ github.token }}
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          METADATA="https://maven.pkg.github.com/AndersCan/ekrooh/io/github/anderscan/ekrooh/bare-host/maven-metadata.xml"
+          if curl -fsS -H "Authorization: Bearer $GITHUB_TOKEN" "$METADATA" 2>/dev/null | grep -q "<version>$VERSION</version>"; then
+            echo "GitHub Packages: bare-host@$VERSION already published — skipping"
+          else
+            ./gradlew --no-daemon :bare-host:publishMavenAarPublicationToGitHubPackagesRepository
+          fi
 
-      - name: Publish :bare-host AAR to Maven Central
-        # Sonatype Central Portal (OSSHR staging API) — no auth for consumers.
-        # Requires the io.github.anderscan namespace verified on central.sonatype.com
-        # (the io.github.anderscan.ekrooh groupId is a permitted sub-namespace) and
-        # these secrets: SONATYPE_USERNAME / SONATYPE_PASSWORD (user token from
-        # central.sonatype.com -> Account -> Generate User Token) and
-        # SIGNING_KEY (ASCII-armored PGP private key) / SIGNING_PASSWORD.
-        run: ./gradlew :bare-host:publishToSonatype closeAndReleaseSonatypeStagingRepository
+      - name: Publish to Maven Central
+        # Sonatype Central Portal (OSSRH staging API). Secrets live in the
+        # `release` environment: SONATYPE_USERNAME / SONATYPE_PASSWORD (user
+        # token) and SIGNING_KEY (ASCII-armored PGP key) / SIGNING_PASSWORD.
         env:
           ORG_GRADLE_PROJECT_sonatypeUsername: ${{ secrets.SONATYPE_USERNAME }}
           ORG_GRADLE_PROJECT_sonatypePassword: ${{ secrets.SONATYPE_PASSWORD }}
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: ./gradlew --no-daemon :bare-host:publishToSonatype closeAndReleaseSonatypeStagingRepository

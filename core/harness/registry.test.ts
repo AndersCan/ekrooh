@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import { createHarnessRegistry } from './registry';
 
 function instance(id: string, now: number, destroyed: string[] = []) {
@@ -65,7 +65,12 @@ describe('createHarnessRegistry', () => {
       },
     });
     r.register(instance('ok2', 0, destroyed));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const reaped = await r.reapDue(1001, 1000);
+    expect(error).toHaveBeenCalledWith(
+      '[harness] teardown of boom failed: teardown failed',
+    );
+    error.mockRestore();
     expect(reaped).toEqual(['ok', 'boom', 'ok2']);
     expect(destroyed).toEqual(['ok', 'boom', 'ok2']);
     expect(r.get('ok')).toBeUndefined();

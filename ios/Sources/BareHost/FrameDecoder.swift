@@ -7,11 +7,16 @@ import Foundation
  * arrive split across chunks or with several frames coalesced into one. This
  * buffers partial bytes until the binary length prefix (`headerLen` + `payloadLen`)
  * proves a complete frame is available, then parses exactly `frameLen` bytes and
- * keeps the remainder for the next `push`. The reassembly mirrors
- * `core/messages/framing.ts`'s `createFrameDecoder` so an oversized or
- * header-truncated frame drops precisely the corrupt bytes (self-resync) and a
- * complete frame that fails to parse is skipped rather than desyncing the rest
- * of the stream.
+ * keeps the remainder for the next `push`.
+ *
+ * Length-prefix handling mirrors `core/messages/framing.ts`'s
+ * `createFrameDecoder`: an oversized header or frame marks the decoder inert
+ * and drops everything buffered. It deliberately differs on a complete frame
+ * whose content fails to parse (bad version/type, header not UTF-8): the TS
+ * decoder goes inert, this one skips exactly that frame and keeps decoding,
+ * because the length prefix already proved where the next frame starts. A
+ * skipped frame has no readable `requestId`, so nothing can be answered for it;
+ * the worklet's own host-call deadline resolves the caller.
  */
 public struct FrameDecoder {
   private var buffer = Data()

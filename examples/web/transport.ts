@@ -36,7 +36,15 @@ export async function getTransport(
     const devUrl =
       (env?.VITE_BARE_WS_URL as string | undefined) ??
       (env?.DEV ? 'ws://localhost:8080' : undefined);
-    result = createWebSocketTransport(devUrl ? { url: devUrl } : {});
+    // Folding server log lines into transport errors is a diagnostic aid, not
+    // something a shipped UI should show: on only in dev, or when a test
+    // build opts in with `VITE_BARE_DIAGNOSTICS=true`.
+    const diagnostics =
+      env?.VITE_BARE_DIAGNOSTICS === 'true' || env?.DEV === true;
+    // Built as a variable, not a literal, so the call also type-checks
+    // against a `dist/` built before the `diagnostics` option existed.
+    const options = { ...(devUrl ? { url: devUrl } : {}), diagnostics };
+    result = createWebSocketTransport(options);
   }
 
   if (!forcedEnv) transport = result;

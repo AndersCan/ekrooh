@@ -28,7 +28,17 @@ export interface LoopbackGateOptions {
    * at `http://localhost:5173`). The bound origin and its loopback aliases are
    * always allowed. Each entry must be a bare `scheme://host[:port]` origin. */
   allowedOrigins?: readonly string[];
+  /** How long (ms) after `bind` an unredeemed bootstrap nonce stays valid.
+   * Defaults to `BOOTSTRAP_TTL_MS`. */
+  bootstrapTtlMs?: number;
 }
+
+/** Default lifetime of an unredeemed bootstrap nonce, counted from `bind`. A
+ * host reads the handoff and loads the page within moments of the bind, so a
+ * nonce still unspent after two minutes is one the page never got: it must not
+ * stay a live credential for the whole process lifetime. A reload after that
+ * logs in with the surviving session cookie, not the nonce. */
+export const BOOTSTRAP_TTL_MS = 120_000;
 
 /**
  * The loopback server's admission policy (ADR 0003), in one place: the session
@@ -69,6 +79,15 @@ export interface LoopbackGate {
 
 const COOKIE_PREFIX = 'bare_session';
 const ORIGIN_PATTERN = /^https?:\/\/[^/?#\s]+$/;
+
+/** `Sec-Fetch-Site` values a credentialed request may carry. Cookies are
+ * scoped to the host, not the port (RFC 6265 §8.5), so a page served from
+ * another port on `127.0.0.1` is *same-site* with this server: `SameSite=Strict`
+ * still attaches the session cookie to its no-`Origin` GETs (`<img>`,
+ * `<video>`, navigations). Fetch metadata names that case, so it is refused. A
+ * client that sends no `Sec-Fetch-Site` (a non-browser client, an older
+ * WebView) is judged by the Host/Origin rule alone. */
+const ALLOWED_FETCH_SITES = new Set(['same-origin', 'none']);
 
 /** Reads the token from the `X-Bare-Token` request header (parser-lowercased).
  * `fetch`-based non-browser clients that cannot carry cookies use this. It
@@ -112,7 +131,7 @@ export function sessionNonce(token: string): string {
 
 /** Constant-time string comparison. bare-crypto's `timingSafeEqual` requires
  * equal-length inputs (it throws otherwise), so guard on byte length first. */
-function secretEquals(a: string, b: string): boolean {
+export function secretEquals(a: string, b: string): boolean {
   const ab = Buffer.from(a);
   const bb = Buffer.from(b);
   if (ab.length !== bb.length) return false;
@@ -147,13 +166,45 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
   }
   const token = options.token ?? randomSecret();
   const cookieValue = sessionNonce(token);
+  const bootstrapTtlMs = options.bootstrapTtlMs ?? BOOTSTRAP_TTL_MS;
   let bootstrapNonce: string | null = randomSecret();
+  /** When the nonce stops being accepted; set by `bind`. */
+  let bootstrapExpiresAt = Infinity;
   /** The most recently spent bootstrap nonce, kept only to answer replays of
    * it with 409 (valid once but consumed) instead of 401 (bad credential). */
   let spentBootstrapNonce: string | null = null;
   let allowedHosts = new Set<string>();
   let allowedOrigins = new Set<string>();
   let cookieName = COOKIE_PREFIX;
+
+  /** The nonce, or null once it is spent or has expired unredeemed. An expired
+   * nonce is dropped for good, so it can never come back to life. */
+  function liveNonce(): string | null {
+    if (bootstrapNonce !== null && Date.now() >= bootstrapExpiresAt) {
+      console.warn(
+        `[loopback] bootstrap nonce expired unredeemed after ${bootstrapTtlMs}ms`,
+      );
+      bootstrapNonce = null;
+    }
+    return bootstrapNonce;
+  }
+
+  /** The cross-port rule (see `ALLOWED_FETCH_SITES`). Only applies with auth
+   * on: it protects the session credential, and with auth off (dev) there is
+   * none, while the Vite dev page legitimately loads backend media
+   * cross-site. */
+  function checkFetchSite(headers: RequestHeaders): GateVerdict {
+    if (!auth) return { ok: true };
+    const site = headers['sec-fetch-site'];
+    if (site === undefined || ALLOWED_FETCH_SITES.has(String(site))) {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      status: 403,
+      reason: `cross-site request (Sec-Fetch-Site: ${String(site)})`,
+    };
+  }
 
   function hasCredential(headers: RequestHeaders): boolean {
     if (!auth) return true;
@@ -202,6 +253,7 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
       const port = hostPort.slice(hostPort.lastIndexOf(':') + 1);
       allowedHosts = new Set([hostPort, ...loopbackHosts(port)]);
       cookieName = sessionCookieName(port);
+      bootstrapExpiresAt = Date.now() + bootstrapTtlMs;
       allowedOrigins = new Set([
         origin,
         ...loopbackHosts(port).map((h) => `http://${h}`),
@@ -209,11 +261,14 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
       ]);
     },
     token: () => token,
-    bootstrap: () => bootstrapNonce ?? '',
+    bootstrap: () => liveNonce() ?? '',
     admitRequest(headers, resource) {
       const origin = checkOrigin(headers, false);
       if (!origin.ok) return origin;
-      if (resource === 'gated' && !hasCredential(headers)) {
+      if (resource === 'public') return { ok: true };
+      const site = checkFetchSite(headers);
+      if (!site.ok) return site;
+      if (!hasCredential(headers)) {
         return { ok: false, status: 401, reason: 'unauthorized' };
       }
       return { ok: true };
@@ -223,6 +278,8 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
       // missing one is refused outright. Dev also admits non-browser clients.
       const origin = checkOrigin(headers, auth);
       if (!origin.ok) return origin;
+      const site = checkFetchSite(headers);
+      if (!site.ok) return site;
       if (!hasCredential(headers)) {
         return {
           ok: false,
@@ -237,8 +294,8 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
       // but still answers so the page transport proceeds.
       if (!auth) return { ok: true, cookie: null };
       const credential = body.trim();
-      const byBootstrap =
-        bootstrapNonce !== null && secretEquals(credential, bootstrapNonce);
+      const nonce = liveNonce();
+      const byBootstrap = nonce !== null && secretEquals(credential, nonce);
       // A reloaded page re-runs the shell with the same, now spent, nonce, but
       // its session cookie survives the reload. Accepting the session keeps
       // "reload reconnects" working; a replayed spent nonce alone still fails.
@@ -253,7 +310,7 @@ export function createLoopbackGate(options: LoopbackGateOptions): LoopbackGate {
         return { ok: false, status: spent ? 409 : 401 };
       }
       if (byBootstrap) {
-        spentBootstrapNonce = bootstrapNonce;
+        spentBootstrapNonce = nonce;
         bootstrapNonce = null;
       }
       return {

@@ -161,5 +161,10 @@ export interface PluginManifest {
   version?: string;
   capabilities?: string[];
   events?: string[];
+  /** Per-event deadline (ms) for an invoke the router delegates to the host,
+   * keyed by event name. A user-mediated host call (a permission prompt, a
+   * picker) needs far longer than the default host timeout. Read as own
+   * properties only. */
+  hostTimeoutsMs?: Readonly<Record<string, number>>;
   runtimes: Partial<Record<RuntimeTarget, PluginRuntimeAdapter>>;
 }

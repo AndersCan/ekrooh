@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { createMediaPlugin } from './plugin';
+import { mediaEvents } from './events';
 import type { LoopbackServer } from '../../core/server/static-file-server';
 import {
   createPluginRegistry,
@@ -101,6 +102,39 @@ describe('createMediaPlugin', () => {
     expect(result).toBeNull();
     expect(error?.code).toBe('UNSUPPORTED_CAPABILITY');
     expect(error?.message).toContain('no picker');
+  });
+
+  it('maps a non-canonical host error code to HOST_ERROR and caps the message', async () => {
+    const plugin = createMediaPlugin({
+      staticServer: stubServer(),
+      invokeOnHost: async () => ({
+        type: 'INVOKE_RESPONSE',
+        pluginId: 'vendor.media',
+        event: 'media.pick',
+        requestId: 'host-1',
+        error: { code: '__proto__', message: 'x'.repeat(10_000) },
+      }),
+    });
+    const invoke = plugin.runtimes.bare?.invoke;
+    if (!invoke) throw new Error('expected bare invoke adapter');
+    const [error] = await invoke('media.pick', {}, context);
+    expect(error?.code).toBe('HOST_ERROR');
+    expect(error?.message.length).toBeLessThanOrEqual(500);
+  });
+
+  it('gives the host call a deadline just under the page timeout (R-04)', async () => {
+    const invokeOnHost = vi.fn(okHost({ path: '/tmp/sample.png' }));
+    const plugin = createMediaPlugin({
+      staticServer: stubServer(),
+      invokeOnHost,
+    });
+    const invoke = plugin.runtimes.bare?.invoke;
+    if (!invoke) throw new Error('expected bare invoke adapter');
+    await invoke('media.capture', { kind: 'video' }, context);
+    const timeoutMs = (invokeOnHost.mock.calls[0] as unknown[])[2] as number;
+    const pageTimeout = mediaEvents.media.capture('video').timeoutMs ?? 0;
+    expect(timeoutMs).toBeGreaterThan(30_000);
+    expect(timeoutMs).toBeLessThan(pageTimeout);
   });
 
   it('refuses an unknown kind before reaching the host', async () => {

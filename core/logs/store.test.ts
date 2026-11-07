@@ -92,4 +92,20 @@ describe('createLogRingBuffer', () => {
     expect(store.view()).toEqual([]);
     expect(store.clear()).toBe(0);
   });
+
+  it('never treats an invalid tail as "everything" (D-5)', () => {
+    const store = createLogRingBuffer(10);
+    for (let i = 0; i < 5; i++) {
+      store.append({ ts: i, level: 'info', source: 'web', message: `m${i}` });
+    }
+    const tail = (t: unknown) =>
+      store.view({ tail: t as number }).map((e) => e.message);
+    expect(tail(Number.NaN)).toEqual([]);
+    expect(tail('all')).toEqual([]);
+    expect(tail(-3)).toEqual([]);
+    expect(tail(0)).toEqual([]);
+    expect(tail(2.7)).toEqual(['m3', 'm4']);
+    expect(tail(Number.POSITIVE_INFINITY)).toHaveLength(5);
+    expect(tail(undefined)).toHaveLength(5);
+  });
 });

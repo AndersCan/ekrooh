@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
+import { createPluginRegistry, createPluginRouter } from './plugin-kernel';
 import { definePlugin, dispatchEvent, invokeEvent } from './define-plugin';
 
 const specs = {
@@ -39,7 +40,7 @@ describe('definePlugin', () => {
     expect(result).toEqual([null, { message: 'hi' }]);
   });
 
-  it('throws on unhandled invoke events', () => {
+  it('answers UNSUPPORTED_EVENT for an event with no invoke handler (D-11)', async () => {
     const plugin = definePlugin('core.test', specs, {
       invoke: {
         ping: (args) => {
@@ -49,14 +50,93 @@ describe('definePlugin', () => {
     });
     const invoke = plugin.runtimes.bare?.invoke;
     if (!invoke) throw new Error('expected bare invoke adapter');
-    expect(() => invoke('test.other', {}, context)).toThrow(
-      /Unhandled invoke event test.other/,
-    );
+    const [error] = await invoke('test.other', {}, context);
+    expect(error?.code).toBe('UNSUPPORTED_EVENT');
   });
 
   it('omits the bare runtime when no handlers are supplied', () => {
     const plugin = definePlugin('core.test', specs);
     expect(plugin.runtimes.bare).toBeUndefined();
+  });
+});
+
+describe('definePlugin hardening', () => {
+  const twoSpecs = {
+    pick: {
+      pluginId: 'app.media',
+      name: 'media.pick',
+      args: {} as { kind?: 'image' | 'video' },
+      result: {} as { url: string },
+      validate: (args: unknown) => {
+        const kind = (args as { kind?: unknown } | undefined)?.kind;
+        return kind === undefined || kind === 'image' || kind === 'video';
+      },
+      hostTimeoutMs: 300_000,
+    },
+    other: {
+      pluginId: 'app.media',
+      name: 'media.other',
+      args: {} as Record<string, never>,
+      result: {} as unknown,
+    },
+  } as const;
+
+  it('routes a declared event with no handler to UNSUPPORTED_EVENT, not PLUGIN_ERROR (D-11)', async () => {
+    const registry = createPluginRegistry();
+    registry.register(
+      definePlugin('app.media', twoSpecs, {
+        invoke: { pick: () => [null, { url: 'u' }] },
+        dispatch: { pick: () => {} },
+      }),
+    );
+    const router = createPluginRouter(registry, 'bare', {
+      logger: { warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    });
+    for (const type of ['INVOKE_REQUEST', 'DISPATCH'] as const) {
+      const response = await router.route(
+        { type, pluginId: 'app.media', event: 'media.other', requestId: 'r' },
+        new Uint8Array(0),
+      );
+      expect(response?.error?.code).toBe('UNSUPPORTED_EVENT');
+    }
+  });
+
+  it('runs the spec validator before the handler (D-4)', async () => {
+    const handler = vi.fn(
+      () => [null, { url: 'u' }] as [null, { url: string }],
+    );
+    const plugin = definePlugin('app.media', twoSpecs, {
+      invoke: { pick: handler },
+    });
+    const invoke = plugin.runtimes.bare!.invoke!;
+    const [error] = await invoke('media.pick', { kind: '../etc' }, context);
+    expect(error?.code).toBe('PLUGIN_ERROR');
+    expect(error?.message).toBe('Invalid arguments for app.media.media.pick');
+    expect(handler).not.toHaveBeenCalled();
+    expect(await invoke('media.pick', { kind: 'image' }, context)).toEqual([
+      null,
+      { url: 'u' },
+    ]);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the spec validator before a dispatch handler (D-4)', () => {
+    const handler = vi.fn();
+    const plugin = definePlugin('app.media', twoSpecs, {
+      dispatch: { pick: handler },
+    });
+    const dispatch = plugin.runtimes.bare!.dispatch!;
+    expect(() => dispatch('media.pick', { kind: 1 }, context)).toThrow(
+      /Invalid arguments/,
+    );
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('carries a per-event host timeout into the manifest (C-1)', () => {
+    const plugin = definePlugin('app.media', twoSpecs);
+    expect(plugin.hostTimeoutsMs?.['media.pick']).toBe(300_000);
+    expect(plugin.hostTimeoutsMs?.['media.other']).toBeUndefined();
+    expect(definePlugin('core.test', specs).hostTimeoutsMs).toBeUndefined();
   });
 });
 

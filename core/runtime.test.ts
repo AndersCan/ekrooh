@@ -21,6 +21,19 @@ import {
 import { EventEmitter } from 'node:events';
 import { definePlugin, MessageProtocol, MessageType, ok } from './messages';
 import type { EventSpec } from './messages';
+import { createLoopbackServer } from './server/static-file-server';
+
+// Record the options each runtime hands its loopback server (the real server
+// still runs), so defaults such as the dev port are asserted without binding
+// a fixed port that a dev backend or a parallel run may hold.
+vi.mock('./server/static-file-server', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('./server/static-file-server')>();
+  return {
+    ...actual,
+    createLoopbackServer: vi.fn(actual.createLoopbackServer),
+  };
+});
 
 vi.mock('bare-http1', async () => ({
   default: (await import('node:http')).default,
@@ -164,6 +177,7 @@ describe('resolveCliConfig', () => {
       resolveCliConfig(['storage=/tmp/bare-storage']),
     );
     expect(runtime.config.deviceMode).toBe(true);
+    runtime.close();
   });
 
   it('mode=dev selects the dev backend (auth off, fixed port)', () => {
@@ -324,21 +338,27 @@ describe('createWorkletRuntime', () => {
     runtime.close();
   });
 
-  it('dev mode with a storage dir writes no handoff.json (auth off)', async () => {
-    const devStorage = path.join(root, 'dev-storage');
-    fs.mkdirSync(devStorage, { recursive: true });
-    const runtime = createWorkletRuntime({
-      webAssets: webDir,
-      storage: devStorage,
+  it('refuses auth: false in device mode', () => {
+    // A-2: device mode is the secure default; `auth: false` without
+    // `deviceMode: false` must not open an unauthenticated server.
+    const before = vi.mocked(createLoopbackServer).mock.calls.length;
+    expect(() =>
+      createWorkletRuntime({ webAssets: webDir, auth: false, port: 0 }),
+    ).toThrow(/auth: false requires deviceMode: false/);
+    expect(() =>
+      createWorkletRuntime({ deviceMode: true, auth: false }),
+    ).toThrow(/deviceMode: false/);
+    // Nothing was built for the refused configuration.
+    expect(vi.mocked(createLoopbackServer).mock.calls.length).toBe(before);
+  });
+
+  it('dev mode defaults to auth off on port 8080 (asserted without binding)', () => {
+    vi.mocked(createLoopbackServer).mockClear();
+    const runtime = createWorkletRuntime({ deviceMode: false });
+    expect(vi.mocked(createLoopbackServer).mock.calls[0][0]).toMatchObject({
+      port: 8080,
       auth: false,
-      port: 0,
     });
-    expect(runtime.config.deviceMode).toBe(true);
-
-    await runtime.start();
-    // auth: false → no handoff file left for a host to misinterpret.
-    expect(fs.existsSync(path.join(devStorage, 'handoff.json'))).toBe(false);
-
     runtime.close();
   });
 
@@ -349,20 +369,131 @@ describe('createWorkletRuntime', () => {
       webAssets: webDir,
       storage: devStorage,
       deviceMode: false,
+      // Ephemeral: a fixed 8080 collides with a running dev backend (H-12).
+      port: 0,
     });
     // Explicit override beats the storage-derived default.
     expect(runtime.config.deviceMode).toBe(false);
 
     const creds = await runtime.start();
-    // Dev defaults apply even though storage is set: auth off, fixed 8080,
-    // no handoff file.
-    expect(creds.origin).toBe('http://127.0.0.1:8080');
+    // Dev semantics apply even though storage is set: auth off, no handoff.
     expect(fs.existsSync(path.join(devStorage, 'handoff.json'))).toBe(false);
 
     const upgrade = await wsUpgrade(creds.origin);
     expect(upgrade.split('\r\n')[0]).toContain('101');
 
     runtime.close();
+  });
+
+  it('start() is idempotent: one bind, one mount, the same credentials', async () => {
+    const runtime = createWorkletRuntime({ webAssets: webDir });
+    const mountDir = vi.spyOn(runtime.server, 'mountDir');
+    const [a, b] = await Promise.all([runtime.start(), runtime.start()]);
+    const c = await runtime.start();
+    expect(b).toBe(a);
+    expect(c).toBe(a);
+    expect(mountDir).toHaveBeenCalledTimes(1);
+    await closeRuntime(runtime);
+    await expect(runtime.start()).rejects.toThrow(/after close/);
+  });
+
+  it('writes handoff.json atomically, owner-only, leaving no temp file', async () => {
+    const atomicStorage = path.join(root, 'atomic-storage');
+    fs.mkdirSync(atomicStorage, { recursive: true });
+    // A temp file left by a crashed earlier run is cleared too.
+    fs.writeFileSync(path.join(atomicStorage, 'handoff.json.tmp'), 'stale');
+    const rename = vi.spyOn(fs, 'renameSync');
+    const runtime = createWorkletRuntime({
+      webAssets: webDir,
+      storage: atomicStorage,
+    });
+    const creds = await runtime.start();
+    const target = path.join(atomicStorage, 'handoff.json');
+    expect(rename).toHaveBeenCalledWith(
+      path.join(atomicStorage, 'handoff.json.tmp'),
+      target,
+    );
+    rename.mockRestore();
+    expect(JSON.parse(fs.readFileSync(target, 'utf8')).origin).toBe(
+      creds.origin,
+    );
+    expect(fs.statSync(target).mode & 0o077).toBe(0);
+    expect(fs.existsSync(path.join(atomicStorage, 'handoff.json.tmp'))).toBe(
+      false,
+    );
+    await closeRuntime(runtime);
+  });
+
+  it('rejects start() when the device handoff file cannot be written', async () => {
+    const roStorage = path.join(root, 'unwritable-storage');
+    fs.mkdirSync(roStorage, { recursive: true });
+    const write = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {
+      throw new Error('EACCES: permission denied');
+    });
+    const runtime = createWorkletRuntime({
+      webAssets: webDir,
+      storage: roStorage,
+    });
+    try {
+      await expect(runtime.start()).rejects.toThrow(
+        /failed to write the handoff file: EACCES/,
+      );
+    } finally {
+      write.mockRestore();
+      await closeRuntime(runtime);
+    }
+    expect(fs.existsSync(path.join(roStorage, 'handoff.json'))).toBe(false);
+  });
+
+  it('passes the per-channel and per-plugin inflight caps to the router', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow = {
+      id: 'app.slow',
+      events: ['slow.a', 'slow.b'],
+      runtimes: {
+        bare: {
+          invoke: async () => {
+            await gate;
+            return [null, {}] as [null, object];
+          },
+        },
+      },
+    };
+    const route = (
+      runtime: ReturnType<typeof createWorkletRuntime>,
+      event: string,
+      requestId: string,
+      channel: string,
+    ) =>
+      runtime.pluginRouter.route(
+        { type: 'INVOKE_REQUEST', pluginId: 'app.slow', event, requestId },
+        new Uint8Array(0),
+        { channel },
+      );
+
+    const perChannel = createWorkletRuntime({
+      port: 0,
+      plugins: [slow],
+      maxInflightPerChannel: 1,
+    });
+    const first = route(perChannel, 'slow.a', 'c1', '[ws]');
+    const second = await route(perChannel, 'slow.a', 'c2', '[ws]');
+    expect(second?.error?.code).toBe('TRANSPORT_ERROR');
+
+    const perPlugin = createWorkletRuntime({
+      port: 0,
+      plugins: [slow],
+      maxInflightPerPlugin: 1,
+    });
+    const third = route(perPlugin, 'slow.a', 'p1', '[ws]');
+    const fourth = await route(perPlugin, 'slow.b', 'p2', '[ipc]');
+    expect(fourth?.error?.code).toBe('TRANSPORT_ERROR');
+
+    release();
+    await Promise.all([first, third]);
+    await closeRuntime(perChannel);
+    await closeRuntime(perPlugin);
   });
 
   it('registers consumer plugins passed via the plugins option', async () => {
@@ -396,6 +527,162 @@ describe('createWorkletRuntime', () => {
     runtime.close();
   });
 });
+
+describe('runtime teardown', () => {
+  async function viewLogs(runtime: ReturnType<typeof createWorkletRuntime>) {
+    const response = await runtime.pluginRouter.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.logs',
+        event: 'logs.view',
+        requestId: `view-${Math.random()}`,
+        args: {},
+      },
+      new Uint8Array(0),
+    );
+    const result = response?.result as { entries: { message: string }[] };
+    return result.entries.map((e) => e.message);
+  }
+
+  it('a closed runtime stops receiving console logs, and the console is restored', async () => {
+    // H-4: every runtime used to wrap the console again and never unwrap it,
+    // so a closed instance kept collecting (and retaining) every later log.
+    const before = console.log;
+    const a = createWorkletRuntime({ webAssets: webDir });
+    await a.start();
+    await closeRuntime(a);
+    expect(console.log).toBe(before);
+
+    const b = createWorkletRuntime({ webAssets: webDir });
+    const c = createWorkletRuntime({ webAssets: webDir });
+    // Two live runtimes share one console patch (no stacked wrappers).
+    const patched = console.log;
+    expect(patched).not.toBe(before);
+    console.log('only-after-a-closed');
+    expect(await viewLogs(a)).not.toContain('only-after-a-closed');
+    expect(await viewLogs(b)).toContain('only-after-a-closed');
+    expect(await viewLogs(c)).toContain('only-after-a-closed');
+    await closeRuntime(b);
+    expect(console.log).toBe(patched);
+    await closeRuntime(c);
+    expect(console.log).toBe(before);
+  });
+
+  it('logsMinLevel still filters per runtime under the shared capture', async () => {
+    const quiet = createWorkletRuntime({
+      webAssets: webDir,
+      logsMinLevel: 'warn',
+    });
+    const loud = createWorkletRuntime({ webAssets: webDir });
+    console.info('info-line');
+    expect(await viewLogs(quiet)).not.toContain('info-line');
+    expect(await viewLogs(loud)).toContain('info-line');
+    await closeRuntime(quiet);
+    await closeRuntime(loud);
+  });
+
+  it('close() detaches the IPC listener and fails pending host calls', async () => {
+    const ipc = Object.assign(new EventEmitter(), {
+      write: vi.fn((_data: unknown) => true),
+      resume() {},
+    });
+    vi.stubGlobal('BareKit', { IPC: ipc });
+    const runtime = createWorkletRuntime({ port: 0 });
+    expect(ipc.listenerCount('data')).toBe(1);
+    const bridge = runtime.hostBridge as unknown as {
+      close?: (reason?: string) => void;
+    };
+    const bridgeClose = vi.fn();
+    const realClose = bridge.close;
+    bridge.close = (reason) => {
+      bridgeClose(reason);
+      realClose?.call(bridge, reason);
+    };
+
+    await closeRuntime(runtime);
+    expect(ipc.listenerCount('data')).toBe(0);
+    expect(bridgeClose).toHaveBeenCalledTimes(1);
+    // A second close is a no-op that still calls back.
+    await closeRuntime(runtime);
+    expect(bridgeClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards per-event host deadlines to the host bridge', async () => {
+    const ipc = Object.assign(new EventEmitter(), {
+      write: vi.fn((_data: unknown) => true),
+      resume() {},
+    });
+    vi.stubGlobal('BareKit', { IPC: ipc });
+    const runtime = createWorkletRuntime({
+      port: 0,
+      plugins: [
+        {
+          id: 'app.slowhost',
+          events: ['slowhost.call'],
+          hostTimeoutsMs: { 'slowhost.call': 123_000 },
+          runtimes: { android: { invoke: () => [null, {}] } },
+        },
+      ],
+    });
+    const bridge = runtime.hostBridge!;
+    bridge.queryCapabilities = vi.fn(async () => [
+      {
+        pluginId: 'app.slowhost',
+        capabilities: [],
+        events: ['slowhost.call'],
+        runtimes: ['android' as const],
+      },
+    ]);
+    const invokeOnHost = vi.fn(async () => null);
+    bridge.invokeOnHost = invokeOnHost;
+
+    // Router delegation carries the manifest's deadline.
+    await runtime.pluginRouter.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'app.slowhost',
+        event: 'slowhost.call',
+        requestId: 'slow-1',
+      },
+      new Uint8Array(0),
+    );
+    // A built-in plugin's own host call (vendor.media) carries its deadline.
+    await runtime.pluginRouter.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'vendor.media',
+        event: 'media.pick',
+        requestId: 'pick-1',
+        args: { kind: 'image' },
+      },
+      new Uint8Array(0),
+    );
+    const deadlines = invokeOnHost.mock.calls.map((c) => (c as unknown[])[2]);
+    expect(deadlines[0]).toBe(123_000);
+    expect(typeof deadlines[1]).toBe('number');
+    await closeRuntime(runtime);
+  });
+
+  it('the reference worklet entry handles a failed start()', () => {
+    // H-13: `void runtime.start()` turned a bind or handoff failure into an
+    // unhandled rejection with no cleanup.
+    const entry = fs.readFileSync(
+      path.join(
+        path.dirname(new URL(import.meta.url).pathname),
+        'main.core.ts',
+      ),
+      'utf8',
+    );
+    expect(entry).not.toMatch(/void\s+runtime\.start\(\)/);
+    expect(entry).toMatch(/runtime\.start\(\)\.catch\(/);
+  });
+});
+
+function closeRuntime(
+  runtime: ReturnType<typeof createWorkletRuntime>,
+): Promise<void> {
+  return new Promise((resolve) => runtime.close(() => resolve()));
+}
 
 /** A credential-less WebSocket upgrade from the bound origin. */
 function wsUpgrade(origin: string): Promise<string> {

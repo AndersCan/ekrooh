@@ -1,0 +1,204 @@
+public abstract class to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome {
+  public to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+
+public class to.holepunch.bare.android.BareWebViewClient extends android.webkit.WebViewClient {
+  public static final to.holepunch.bare.android.BareWebViewClient$Companion Companion;
+  public to.holepunch.bare.android.BareWebViewClient();
+  public final java.lang.String getAllowedOrigin();
+  public final void setAllowedOrigin(java.lang.String);
+  public final kotlin.jvm.functions.Function1<android.webkit.WebView, kotlin.Unit> getOnRenderProcessGone();
+  public final void setOnRenderProcessGone(kotlin.jvm.functions.Function1<? super android.webkit.WebView, kotlin.Unit>);
+  public boolean shouldOverrideUrlLoading(android.webkit.WebView, android.webkit.WebResourceRequest);
+  public android.webkit.WebResourceResponse shouldInterceptRequest(android.webkit.WebView, android.webkit.WebResourceRequest);
+  public void onPageStarted(android.webkit.WebView, java.lang.String, android.graphics.Bitmap);
+  public boolean onRenderProcessGone(android.webkit.WebView, android.webkit.RenderProcessGoneDetail);
+  public void onReceivedError(android.webkit.WebView, android.webkit.WebResourceRequest, android.webkit.WebResourceError);
+  public void onReceivedHttpError(android.webkit.WebView, android.webkit.WebResourceRequest, android.webkit.WebResourceResponse);
+  public static final boolean isAllowedNavigation(java.lang.String, java.lang.String);
+  public static final boolean isExternalWebUrl(java.lang.String);
+  public static final boolean shouldOpenExternally(java.lang.String, boolean);
+  public static final boolean shouldBlockMainFrameRequest(java.lang.String, java.lang.String, boolean);
+}
+
+public final class to.holepunch.bare.android.BareHandoff {
+  public static final to.holepunch.bare.android.BareHandoff$Companion Companion;
+  public final java.lang.String getOrigin();
+  public final int getPort();
+  public final java.lang.String getBootstrap();
+  public final java.lang.String getIndexUrl();
+  public final java.lang.String getBootstrapScript();
+  public java.lang.String toString();
+  public static final to.holepunch.bare.android.BareHandoff parse(java.lang.String);
+  public static final to.holepunch.bare.android.BareHandoff consume(java.io.File);
+  public to.holepunch.bare.android.BareHandoff(java.lang.String, int, java.lang.String, kotlin.jvm.internal.DefaultConstructorMarker);
+}
+
+public final class to.holepunch.bare.android.BareHandoff$Companion {
+  public final to.holepunch.bare.android.BareHandoff parse(java.lang.String);
+  public final to.holepunch.bare.android.BareHandoff consume(java.io.File);
+  public to.holepunch.bare.android.BareHandoff$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+
+public final class to.holepunch.bare.android.BareHostAbi {
+  public static final to.holepunch.bare.android.BareHostAbi INSTANCE;
+  public final boolean has64BitAbi(java.util.List<java.lang.String>);
+  public final boolean isSupportedRuntime(boolean, java.util.List<java.lang.String>);
+  public final boolean hasSupportedAbi();
+  public final void requireSupportedAbi();
+}
+
+public final class to.holepunch.bare.android.BareProtocol {
+  public static final to.holepunch.bare.android.BareProtocol INSTANCE;
+  public static final byte VERSION;
+  public static final int MAX_HEADER_BYTES;
+  public static final int MAX_FRAME_BYTES;
+  public final java.nio.ByteBuffer buildMessage(byte, java.lang.String, byte[]);
+  public static java.nio.ByteBuffer buildMessage$default(to.holepunch.bare.android.BareProtocol, byte, java.lang.String, byte[], int, java.lang.Object);
+  public final to.holepunch.bare.android.BareProtocol$WireMessage parseMessage(java.nio.ByteBuffer);
+  public final to.holepunch.bare.android.BareProtocol$WireMessage buildErrorResponse(java.lang.String, java.lang.String, java.lang.String, java.lang.String);
+  public static to.holepunch.bare.android.BareProtocol$WireMessage buildErrorResponse$default(to.holepunch.bare.android.BareProtocol, java.lang.String, java.lang.String, java.lang.String, java.lang.String, int, java.lang.Object);
+}
+
+public final class to.holepunch.bare.android.BareProtocol$MessageType {
+  public static final to.holepunch.bare.android.BareProtocol$MessageType INSTANCE;
+  public static final byte ENVELOPE;
+}
+
+public final class to.holepunch.bare.android.BareProtocol$WireMessage {
+  public to.holepunch.bare.android.BareProtocol$WireMessage(byte, java.lang.String, byte[]);
+  public to.holepunch.bare.android.BareProtocol$WireMessage(byte, java.lang.String, byte[], int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final byte getType();
+  public final java.lang.String getHeader();
+  public final byte[] getPayload();
+  public final byte component1();
+  public final java.lang.String component2();
+  public final byte[] component3();
+  public final to.holepunch.bare.android.BareProtocol$WireMessage copy(byte, java.lang.String, byte[]);
+  public static to.holepunch.bare.android.BareProtocol$WireMessage copy$default(to.holepunch.bare.android.BareProtocol$WireMessage, byte, java.lang.String, byte[], int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+
+public final class to.holepunch.bare.android.BareWebViewClient$Companion {
+  public final boolean isAllowedNavigation(java.lang.String, java.lang.String);
+  public final boolean isExternalWebUrl(java.lang.String);
+  public final boolean shouldOpenExternally(java.lang.String, boolean);
+  public final boolean shouldBlockMainFrameRequest(java.lang.String, java.lang.String, boolean);
+  public to.holepunch.bare.android.BareWebViewClient$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+
+public final class to.holepunch.bare.android.BuildConfig {
+  public static final boolean DEBUG;
+  public static final java.lang.String LIBRARY_PACKAGE_NAME;
+  public static final java.lang.String BUILD_TYPE;
+  public to.holepunch.bare.android.BuildConfig();
+}
+
+public final class to.holepunch.bare.android.DefaultHostPluginsKt {
+  public static final java.lang.String resolvePermissionStatus(java.lang.String, android.content.Context);
+  public static final java.lang.String androidPermissionFor(java.lang.String);
+  public static final void registerDefaultHostPlugins(to.holepunch.bare.android.HostPluginRegistry, android.content.Context);
+  public static void registerDefaultHostPlugins$default(to.holepunch.bare.android.HostPluginRegistry, android.content.Context, int, java.lang.Object);
+}
+
+public final class to.holepunch.bare.android.ErrorCodes {
+  public static final to.holepunch.bare.android.ErrorCodes INSTANCE;
+  public static final java.lang.String UNSUPPORTED_CAPABILITY;
+  public static final java.lang.String UNSUPPORTED_EVENT;
+  public static final java.lang.String HOST_ERROR;
+  public static final java.lang.String TRANSPORT_ERROR;
+  public static final java.lang.String PLUGIN_ERROR;
+  public static final java.lang.String INVALID_RESPONSE;
+  public static final java.lang.String FRAME_TOO_LARGE;
+  public static final java.lang.String FRAME_INVALID;
+  public static final java.lang.String TIMEOUT;
+}
+
+public final class to.holepunch.bare.android.FrameDecoder {
+  public static final int MIN_PARTIAL_BYTES;
+  public static final int RETAIN_BYTES;
+  public to.holepunch.bare.android.FrameDecoder(kotlin.jvm.functions.Function1<? super java.lang.String, kotlin.Unit>);
+  public to.holepunch.bare.android.FrameDecoder(kotlin.jvm.functions.Function1, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final java.lang.Exception getError();
+  public final java.util.List<to.holepunch.bare.android.BareProtocol$WireMessage> push(byte[]);
+  public final void clear();
+  public to.holepunch.bare.android.FrameDecoder();
+}
+
+public final class to.holepunch.bare.android.HostIpcCoordinator {
+  public static final to.holepunch.bare.android.HostIpcCoordinator$Companion Companion;
+  public to.holepunch.bare.android.HostIpcCoordinator(to.holepunch.bare.android.HostIpcCoordinator$Port, to.holepunch.bare.android.HostPluginRegistry);
+  public to.holepunch.bare.android.HostIpcCoordinator(to.holepunch.bare.kit.IPC, to.holepunch.bare.android.HostPluginRegistry);
+  public final void start();
+  public final void stop();
+}
+
+public final class to.holepunch.bare.android.HostIpcCoordinator$Companion {
+  public to.holepunch.bare.android.HostIpcCoordinator$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+
+public final class to.holepunch.bare.android.HostPluginRegistry {
+  public static final to.holepunch.bare.android.HostPluginRegistry$Companion Companion;
+  public static final long DEFAULT_TIMEOUT_MS;
+  public static final long INTERACTIVE_TIMEOUT_MS;
+  public to.holepunch.bare.android.HostPluginRegistry();
+  public final void register(java.lang.String, java.lang.String, to.holepunch.bare.android.HostPluginRegistry$Handler);
+  public final void register(java.lang.String, java.lang.String, long, to.holepunch.bare.android.HostPluginRegistry$Handler);
+  public final long timeoutFor(java.lang.String, java.lang.String);
+  public final org.json.JSONArray toCapabilitiesJson();
+  public final void dispatch(java.lang.String, java.lang.String, org.json.JSONObject, byte[], kotlin.jvm.functions.Function1<? super to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome, kotlin.Unit>);
+}
+
+public final class to.holepunch.bare.android.HostPluginRegistry$Companion {
+  public to.holepunch.bare.android.HostPluginRegistry$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+
+public final class to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome$Fail extends to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome {
+  public to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome$Fail(java.lang.String, java.lang.String);
+  public final java.lang.String getCode();
+  public final java.lang.String getMessage();
+  public final java.lang.String component1();
+  public final java.lang.String component2();
+  public final to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome$Fail copy(java.lang.String, java.lang.String);
+  public static to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome$Fail copy$default(to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome$Fail, java.lang.String, java.lang.String, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+
+public final class to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome$Ok extends to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome {
+  public to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome$Ok(org.json.JSONObject);
+  public final org.json.JSONObject getValue();
+  public final org.json.JSONObject component1();
+  public final to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome$Ok copy(org.json.JSONObject);
+  public static to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome$Ok copy$default(to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome$Ok, org.json.JSONObject, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+
+public final class to.holepunch.bare.android.HostPluginRegistry$Key {
+  public to.holepunch.bare.android.HostPluginRegistry$Key(java.lang.String, java.lang.String);
+  public final java.lang.String getPluginId();
+  public final java.lang.String getEvent();
+  public final java.lang.String component1();
+  public final java.lang.String component2();
+  public final to.holepunch.bare.android.HostPluginRegistry$Key copy(java.lang.String, java.lang.String);
+  public static to.holepunch.bare.android.HostPluginRegistry$Key copy$default(to.holepunch.bare.android.HostPluginRegistry$Key, java.lang.String, java.lang.String, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+
+public interface to.holepunch.bare.android.HostIpcCoordinator$Port {
+  public abstract java.nio.ByteBuffer read();
+  public abstract int write(java.nio.ByteBuffer);
+  public abstract void readable(kotlin.jvm.functions.Function0<kotlin.Unit>);
+  public abstract void writable(kotlin.jvm.functions.Function0<kotlin.Unit>);
+}
+
+public interface to.holepunch.bare.android.HostPluginRegistry$Handler {
+  public abstract void invoke(org.json.JSONObject, byte[], kotlin.jvm.functions.Function1<? super to.holepunch.bare.android.HostPluginRegistry$HostInvokeOutcome, kotlin.Unit>);
+}

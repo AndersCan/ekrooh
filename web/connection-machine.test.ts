@@ -15,6 +15,8 @@ function machine(
     // Deterministic jitter (full = capped delay) so the timings below are
     // exact; production passes no `random` and gets real `Math.random`.
     random: () => 1,
+    // Give up on the retry count alone unless a test opts into the window.
+    minBootWindowMs: 0,
     ...overrides,
   });
   return { m, clock };
@@ -124,13 +126,13 @@ describe('connection-machine', () => {
     expect(seen).toEqual(['idle', 'opening', 'connected', 'backoff']);
   });
 
-  it('applies full jitter within the backoff window', () => {
+  it('applies equal jitter within the backoff window', () => {
     const randoms: number[] = [];
     const { m, clock } = machine({
       maxRetries: 3,
       initialBackoffMs: 250,
       maxBackoffMs: 2000,
-      // 0.5 → exactly half the exponential delay.
+      // 0.5 → half fixed (125ms) + half of the random half (62.5ms).
       random: () => {
         randoms.push(0.5);
         return 0.5;
@@ -139,12 +141,137 @@ describe('connection-machine', () => {
     m.sendLoginOk();
     m.sendClose();
     expect(randoms).toHaveLength(1);
-    // Capped exponential at retry 1 is 250ms; half of that is 125ms.
     expect(m.state()).toBe('backoff');
+    clock.advance(186);
+    expect(m.state()).toBe('backoff');
+    clock.advance(1);
+    expect(m.state()).toBe('opening');
+  });
+
+  it('never retries at ~0ms, however small the random draw (D-3)', () => {
+    const { m, clock } = machine({ random: () => 0 });
+    m.sendLoginOk();
+    m.sendClose();
     clock.advance(124);
     expect(m.state()).toBe('backoff');
     clock.advance(1);
     expect(m.state()).toBe('opening');
+  });
+
+  describe('boot window (D-3)', () => {
+    it('does not give up before minBootWindowMs even with the retries spent', () => {
+      const { m, clock } = machine({
+        maxRetries: 1,
+        minBootWindowMs: 10_000,
+        random: () => 0,
+      });
+      m.sendLoginOk();
+      for (let i = 0; i < 20 && clock.now() < 9_000; i++) {
+        m.sendClose();
+        expect(m.state()).toBe('backoff');
+        clock.advance(2000);
+      }
+      clock.advance(10_000);
+      m.sendClose();
+      expect(m.state()).toBe('gaveUp');
+    });
+
+    it('wake leaves gaveUp for idle with a fresh retry budget', () => {
+      const { m, clock } = machine({ maxRetries: 0 });
+      m.sendLoginOk();
+      m.sendClose();
+      expect(m.state()).toBe('gaveUp');
+      m.sendWake();
+      expect(m.state()).toBe('idle');
+      m.sendLoginOk();
+      expect(m.state()).toBe('opening');
+      clock.advance(1);
+      m.sendOpen();
+      expect(m.state()).toBe('connected');
+    });
+
+    it('wake also leaves a login give-up', () => {
+      const { m } = machine();
+      m.sendLoginFail();
+      m.sendWake();
+      expect(m.state()).toBe('idle');
+    });
+  });
+
+  describe('flapping sockets (D-2)', () => {
+    it('does not reset retries until the socket stayed open for stableMs', () => {
+      const { m, clock } = machine({ maxRetries: 3, stableMs: 5000 });
+      m.sendLoginOk();
+      // Open and drop at once, repeatedly: the backoff keeps growing.
+      const delays: number[] = [];
+      for (let i = 0; i < 4; i++) {
+        m.sendOpen();
+        m.sendClose();
+        let waited = 0;
+        while (m.state() === 'backoff') {
+          clock.advance(50);
+          waited += 50;
+        }
+        delays.push(waited);
+      }
+      expect(delays).toEqual([250, 500, 1000, 2000]);
+      expect(m.isDegraded()).toBe(true);
+    });
+
+    it('resets retries once the socket has been stable', () => {
+      const { m, clock } = machine({ maxRetries: 3, stableMs: 5000 });
+      m.sendLoginOk();
+      m.sendOpen();
+      m.sendClose();
+      clock.advance(250);
+      m.sendOpen();
+      clock.advance(5000);
+      m.sendClose();
+      clock.advance(249);
+      expect(m.state()).toBe('backoff');
+      clock.advance(1);
+      expect(m.state()).toBe('opening');
+    });
+
+    it('waits replacedBackoffMs after a 4001 replacement, or a wake', () => {
+      const { m, clock } = machine({ replacedBackoffMs: 30_000 });
+      m.sendLoginOk();
+      m.sendOpen();
+      m.sendReplaced();
+      expect(m.state()).toBe('backoff');
+      expect(m.isReplaced()).toBe(true);
+      clock.advance(29_999);
+      expect(m.state()).toBe('backoff');
+      clock.advance(1);
+      expect(m.state()).toBe('opening');
+      m.sendOpen();
+      expect(m.isReplaced()).toBe(false);
+      m.sendReplaced();
+      m.sendWake();
+      expect(m.state()).toBe('opening');
+    });
+  });
+
+  it('treats a socket stuck in opening past openTimeoutMs as failed', () => {
+    const { m, clock } = machine({ openTimeoutMs: 10_000 });
+    m.sendLoginOk();
+    clock.advance(9_999);
+    expect(m.state()).toBe('opening');
+    clock.advance(1);
+    expect(m.state()).toBe('backoff');
+  });
+
+  it('stop is final from any state and cancels pending timers', () => {
+    const { m, clock } = machine();
+    m.sendLoginOk();
+    m.sendClose();
+    m.sendStop();
+    expect(m.state()).toBe('closed');
+    clock.advance(10_000);
+    expect(m.state()).toBe('closed');
+    m.sendWake();
+    m.sendLoginOk();
+    expect(m.isClosed()).toBe(true);
   });
 
   describe('after a successful connect', () => {

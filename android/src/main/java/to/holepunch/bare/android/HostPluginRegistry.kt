@@ -10,6 +10,16 @@ import java.util.concurrent.ConcurrentHashMap
  * result), mirroring how native pickers/cameras return their payloads.
  */
 class HostPluginRegistry {
+    companion object {
+        /** Host-side deadline for a handler registered without one: the
+         * coordinator answers `TIMEOUT` if [Handler] has not responded by then. */
+        const val DEFAULT_TIMEOUT_MS: Long = 30_000L
+
+        /** Deadline for handlers that wait on the user (a system dialog, the
+         * photo picker, the camera). Matches the worklet's media timeout. */
+        const val INTERACTIVE_TIMEOUT_MS: Long = 5 * 60_000L
+    }
+
     data class Key(val pluginId: String, val event: String)
 
     fun interface Handler {
@@ -27,10 +37,26 @@ class HostPluginRegistry {
     // is weakly consistent (never throws ConcurrentModificationException) and
     // toCapabilitiesJson snapshots into a private map for a consistent view.
     private val handlers = ConcurrentHashMap<Key, Handler>()
+    private val timeouts = ConcurrentHashMap<Key, Long>()
 
+    /** Registers [handler] with the [DEFAULT_TIMEOUT_MS] host deadline. */
     fun register(pluginId: String, event: String, handler: Handler) {
-        handlers[Key(pluginId, event)] = handler
+        register(pluginId, event, DEFAULT_TIMEOUT_MS, handler)
     }
+
+    /** Registers [handler] with its own host deadline [timeoutMs] (use
+     * [INTERACTIVE_TIMEOUT_MS] for handlers that wait on the user). */
+    fun register(pluginId: String, event: String, timeoutMs: Long, handler: Handler) {
+        require(timeoutMs > 0) { "timeoutMs must be positive" }
+        val key = Key(pluginId, event)
+        timeouts[key] = timeoutMs
+        handlers[key] = handler
+    }
+
+    /** The host deadline for [pluginId]/[event]: its registered timeout, or
+     * [DEFAULT_TIMEOUT_MS] when no handler is registered. */
+    fun timeoutFor(pluginId: String, event: String): Long =
+        timeouts[Key(pluginId, event)] ?: DEFAULT_TIMEOUT_MS
 
     fun toCapabilitiesJson(): JSONArray {
         val snapshot = LinkedHashMap(handlers)

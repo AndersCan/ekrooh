@@ -1,18 +1,16 @@
 name: Test
+# No workflow-level paths filter: these jobs are required checks, and a
+# workflow skipped by `paths-ignore` never reports. Docs-only changes skip the
+# heavy jobs via the `changes` gate instead (a skipped job counts as passing).
 on:
   push:
     branches:
       - main
       - master
-    paths-ignore: &docs_only
-      - '**.md'
-      - 'docs/**'
-      - LICENSE
   pull_request:
     branches:
       - main
       - master
-    paths-ignore: *docs_only
 
 permissions:
   contents: read
@@ -23,11 +21,29 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: diff
+        run: node .github/scripts/changed-code.mjs
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+
   gradle-wrapper:
     name: Gradle wrapper validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
@@ -36,6 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -48,6 +66,9 @@ jobs:
       - name: Build the npm package (dist — check/test resolve via exports)
         run: npm run build:pkg
 
+      - name: Docs gates (the docs build itself runs on main in docs.yml)
+        run: npm run docs:check
+
       - name: Format, lint and type-check
         run: npm run check
 
@@ -56,10 +77,16 @@ jobs:
 
   p2p:
     name: p2p (two-peer replication)
+    needs: changes
+    # Fail-safe: runs unless the diff is known to be docs-only (also when the
+    # `changes` job itself failed).
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -74,6 +101,9 @@ jobs:
         # the job via a non-zero exit from the verify worklet.
         run: npm run smoke:p2p
 
+      - name: Loopback server smoke under `bare` (auth, traversal, ranges, WS origin)
+        run: npm run smoke:loopback
+
   android:
     strategy:
       matrix:
@@ -86,26 +116,42 @@ jobs:
             platform: android
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.host }}-${{ matrix.platform }}
+    needs: changes
+    # A matrix job skipped by a job-level `if` reports under its unexpanded
+    # name, so the required `linux-android` / `darwin-android` checks would
+    # never appear. The job always runs; each step is gated instead
+    # (fail-safe: runs unless the diff is known to be docs-only).
+    if: ${{ !cancelled() }}
+    env:
+      RUN: ${{ needs.changes.outputs.code != 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.RUN == 'true'
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: env.RUN == 'true'
         with:
           node-version: lts/*
           cache: npm
 
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        if: env.RUN == 'true'
         with:
           distribution: temurin
           java-version: 21
 
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        if: env.RUN == 'true'
 
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        if: env.RUN == 'true'
         with:
           packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
 
       - name: Install npm dependencies
+        if: env.RUN == 'true'
         # Same install as release.yml, so a dependency that starts needing its
         # install script fails here before it can fail a release.
         run: |
@@ -113,14 +159,15 @@ jobs:
           npm rebuild esbuild
 
       - name: Fetch Bare Kit prebuilds
+        if: env.RUN == 'true'
         run: npm run prebuilds
-        env:
-          GH_TOKEN: ${{ github.token }}
 
       - name: Build JS and web assets for Android
+        if: env.RUN == 'true'
         run: npm run build
 
       - name: Gradle build (includes host JUnit tests)
+        if: env.RUN == 'true'
         run: ./gradlew build
 
       - name: Assert the published POM carries the api dependencies
@@ -128,7 +175,7 @@ jobs:
         # published with no <dependencies> at all (consumers failed to compile
         # on WebViewCompat/appcompat). Fail the build if the generated POM
         # drops the androidx deps again.
-        if: matrix.host == 'linux'
+        if: env.RUN == 'true' && matrix.host == 'linux'
         run: |
           ./gradlew :bare-host:generatePomFileForMavenAarPublication
           POM=android/build/publications/mavenAar/pom-default.xml
@@ -139,7 +186,7 @@ jobs:
       - name: Assert 64-bit native libs in the AAR are 16 KB aligned
         # Google Play requires LOAD segments aligned to 0x4000 on arm64-v8a
         # and x86_64. libnativehelper.so shipped 0x1000 in 0.5.0-0.6.1.
-        if: matrix.host == 'linux'
+        if: env.RUN == 'true' && matrix.host == 'linux'
         run: |
           scripts/check-aar-page-size.test.sh
           ./gradlew :bare-host:assembleRelease
@@ -153,10 +200,16 @@ jobs:
   # run here with a retry matrix: read the log, fix the cause.
   android-emulator:
     name: android-emulator (p2p verify)
+    needs: changes
+    # Fail-safe: runs unless the diff is known to be docs-only (also when the
+    # `changes` job itself failed).
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -179,8 +232,6 @@ jobs:
 
       - name: Fetch Bare Kit prebuilds
         run: npm run prebuilds
-        env:
-          GH_TOKEN: ${{ github.token }}
 
       - name: Build JS and web assets for Android
         run: npm run build
@@ -196,7 +247,7 @@ jobs:
         # (self-contained corestore/hyperdrive smoke): proves the p2p native
         # addons load and self-read on Android bare-kit. The full peer-drive
         # replication gate runs in the `p2p` job and on the iOS simulator.
-        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 35
           arch: x86_64
@@ -225,8 +276,14 @@ jobs:
   ios:
     runs-on: macos-latest
     name: ios
+    needs: changes
+    # Fail-safe: runs unless the diff is known to be docs-only (also when the
+    # `changes` job itself failed).
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -241,8 +298,11 @@ jobs:
 
       - name: Fetch Bare Kit prebuilds
         run: npm run prebuilds
-        env:
-          GH_TOKEN: ${{ github.token }}
+
+      - name: SwiftPM BareKit binary is the hash-verified prebuild
+        # Package.swift's checksum pins bytes; this pins provenance: the zip's
+        # contents must equal prebuilds/ios from the SHA-256-checked upstream.
+        run: node .github/scripts/verify-spm-binary.mjs
 
       - name: Build iOS app inputs (addons, bundle, web assets, xcodeproj)
         run: npm run build:ios
@@ -252,10 +312,16 @@ jobs:
 
   desktop:
     name: desktop (macOS app smoke)
+    needs: changes
+    # Fail-safe: runs unless the diff is known to be docs-only (also when the
+    # `changes` job itself failed).
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -286,11 +352,17 @@ jobs:
 
   desktop-linux:
     name: desktop (Linux tarball smoke)
+    needs: changes
+    # Fail-safe: runs unless the diff is known to be docs-only (also when the
+    # `changes` job itself failed).
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     # Oldest supported glibc: binaries built here run on newer distros.
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -331,6 +403,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -369,9 +443,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Dependency review
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v4
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           # Block the merge if a new dependency is added at a vulnerable
           # severity or with a disallowed license.

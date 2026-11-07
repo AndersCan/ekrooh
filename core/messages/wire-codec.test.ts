@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { MessageProtocol } from './wire-codec';
+import { FrameContentError, MAX_ID_LENGTH } from './frame-content';
 import { MAX_FRAME_BYTES, MAX_HEADER_BYTES, MessageType } from './constants';
 import type { MessageHeader, RuntimeTarget } from './types';
 
@@ -362,5 +363,74 @@ describe('MessageProtocol encode/decode', () => {
     expect(() =>
       protocol.decode(new Uint8Array([1, 1, 0xff, 0xff, 0, 0, 0])),
     ).toThrow();
+  });
+
+  it('rejects a pluginId, event or requestId over MAX_ID_LENGTH, recovering the short ones (C-3)', () => {
+    const protocol = new MessageProtocol();
+    const long = 'e'.repeat(MAX_ID_LENGTH + 1);
+    for (const field of ['pluginId', 'event', 'requestId'] as const) {
+      const header = {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'app.x',
+        event: 'x.y',
+        requestId: 'r1',
+        [field]: long,
+      } as MessageHeader;
+      const frame = protocol.encode(MessageType.ENVELOPE, header, null);
+      let caught: unknown;
+      try {
+        protocol.decode(frame);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(FrameContentError);
+      const recovered = (caught as FrameContentError).recovered;
+      expect(recovered?.type).toBe('INVOKE_REQUEST');
+      expect(recovered?.[field]).toBeUndefined();
+    }
+    const ok = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'app.x',
+        event: 'e'.repeat(MAX_ID_LENGTH),
+        requestId: 'r1',
+      },
+      null,
+    );
+    expect(() => protocol.decode(ok)).not.toThrow();
+  });
+
+  it('marks content errors (not framing errors) as FrameContentError (C-4)', () => {
+    const protocol = new MessageProtocol();
+    let deep: unknown = 1;
+    for (let i = 0; i < 20; i++) deep = { d: deep };
+    const frame = protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'HOST_INVOKE_RESPONSE',
+        requestId: 'h1',
+        pluginId: 'p.x',
+        event: 'e',
+        result: deep,
+      } as MessageHeader,
+      null,
+    );
+    try {
+      protocol.decode(frame);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(FrameContentError);
+      expect((err as FrameContentError).recovered).toEqual({
+        type: 'HOST_INVOKE_RESPONSE',
+        requestId: 'h1',
+        pluginId: 'p.x',
+        event: 'e',
+      });
+    }
+    const notJson = new Uint8Array([1, 1, 0, 1, 0, 0, 0, 0x7b]);
+    expect(() => protocol.decode(notJson)).toThrow(FrameContentError);
+    const badVersion = new Uint8Array([9, 1, 0, 0, 0, 0, 0]);
+    expect(() => protocol.decode(badVersion)).not.toThrow(FrameContentError);
   });
 });

@@ -13,6 +13,12 @@ fs.writeFileSync(path.join(dir, 'index.html'), '<html>index</html>');
 fs.writeFileSync(path.join(dir, 'app.js'), 'console.log("app")');
 fs.mkdirSync(path.join(dir, 'assets'));
 fs.writeFileSync(path.join(dir, 'assets', 'main.js'), 'export const x = 1');
+// The gated media file lives outside the public root: a gated file inside it
+// is refused through the public mount (R-17), so it must not double as /app.js.
+const mediaDir = fs.mkdtempSync(
+  path.join(os.tmpdir(), 'loopback-smoke-media-'),
+);
+fs.writeFileSync(path.join(mediaDir, 'sample.png'), 'console.log("app")');
 
 let failures = 0;
 function check(name, cond) {
@@ -24,7 +30,7 @@ const server = createLoopbackServer({ auth: true });
 server.mountDir('/', dir, { public: true });
 // Media is a session-scoped file mount: requires auth even with the public
 // web app.
-server.mount('/media/sample.png', path.join(dir, 'app.js'));
+server.mount('/media/sample.png', path.join(mediaDir, 'sample.png'));
 // Echo handler so the WS path round-trips without the plugin router.
 server.onConnection((socket) => {
   socket.on('data', (raw) => socket.write(raw));

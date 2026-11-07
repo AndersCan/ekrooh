@@ -69,8 +69,12 @@ export function createHarnessRegistry<T = unknown>(): HarnessRegistry<T> {
       for (const id of reaped) {
         try {
           await this.destroy(id);
-        } catch {
-          /* teardown failure: instance already removed, batch continues */
+        } catch (err) {
+          // The instance is already removed, so the batch continues; the
+          // failure is logged so a leaking teardown is not invisible.
+          console.error(
+            `[harness] teardown of ${id} failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
       return reaped;

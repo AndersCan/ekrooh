@@ -47,9 +47,14 @@ export default defineConfig({
       { find: 'bare-ws', replacement: bareStub('ws') },
     ],
     coverage: {
-      all: false,
-      include: ['core/**', 'plugins/**', 'web/**'],
+      // Vitest 5 counts every file matching `include`, loaded by a test or
+      // not (there is no `all` option any more), so an untested module shows
+      // up at 0% instead of hiding. TypeScript sources only: readmes and
+      // generated bundles are not code under test.
+      include: ['core/**/*.ts', 'plugins/**/*.ts', 'web/**/*.ts'],
       exclude: [
+        '**/*.test.ts',
+        '**/*.d.ts',
         'core/main.core.ts',
         'core/main.core.gen.js',
         'core/desktop.core.ts',
@@ -63,10 +68,14 @@ export default defineConfig({
         'core/p2p-verify.core.gen.js',
       ],
       reporter: ['text'],
+      // No-regress floor: the measured values (2026-11-07, statements 93.75,
+      // branches 88.83, functions 93.67, lines 95.38) rounded down by about
+      // one point. Raise these when coverage rises.
       thresholds: {
-        statements: 80,
-        functions: 75,
-        lines: 80,
+        statements: 92.5,
+        branches: 87.5,
+        functions: 92.5,
+        lines: 94,
       },
     },
   },

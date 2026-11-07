@@ -76,4 +76,35 @@ final class DefaultHostPluginsTest: XCTestCase {
       permissions?["events"] as? [String]
     )
   }
+
+  /// docs/security.md §4: permission ids are allowlisted. A missing,
+  /// non-string, oversized or unknown id is `unsupported` — never `granted`
+  /// (it used to fall back to `storage`).
+  func testUnknownOrMalformedPermissionIdsFailClosed() {
+    let registry = HostPluginRegistry()
+    registerDefaultHostPlugins(registry)
+
+    let cases: [[String: Any]?] = [
+      nil,
+      [:],
+      ["permission": 42],
+      ["permission": NSNull()],
+      ["permission": "microphone"],
+      ["permission": "Storage"],
+      ["permission": String(repeating: "s", count: 300)],
+    ]
+    for event in ["permissions.status", "permissions.request"] {
+      for args in cases {
+        let outcome = dispatchSync(
+          registry, pluginId: "core.permissions", event: event, args: args)
+        guard case .ok(let value) = outcome else {
+          return XCTFail("expected Ok outcome for \(event) \(String(describing: args))")
+        }
+        XCTAssertEqual(
+          "unsupported", value["status"] as? String,
+          "\(event) \(String(describing: args)) must fail closed")
+        XCTAssertLessThanOrEqual((value["permission"] as? String)?.utf8.count ?? 0, 256)
+      }
+    }
+  }
 }

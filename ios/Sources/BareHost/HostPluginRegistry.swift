@@ -25,9 +25,19 @@ public final class HostPluginRegistry {
   public typealias Handler =
     ([String: Any]?, Data?, @escaping (HostInvokeOutcome) -> Void) -> Void
 
+  /// Deadline for a host invoke whose handler registered no timeout of its
+  /// own. Mirrors `DEFAULT_HOST_INVOKE_TIMEOUT_MS` in `core/messages/host-ipc.ts`.
+  public static let defaultInvokeTimeout: TimeInterval = 30
+
+  /// Deadline for a handler that waits on the user (a picker, a camera, a
+  /// system permission prompt), which can stay on screen for minutes. Matches
+  /// `MEDIA_INVOKE_TIMEOUT_MS` in `plugins/media/events.ts`.
+  public static let userMediatedInvokeTimeout: TimeInterval = 5 * 60
+
   /// `handlers` is mutated from `register` (main/UI thread) and read from
   /// `dispatch` (an IPC Task) — guard with an unfair lock to avoid a data race.
   private var handlers: [Key: Handler] = [:]
+  private var timeouts: [Key: TimeInterval] = [:]
   private var lock = os_unfair_lock()
 
   public init() {}
@@ -37,9 +47,32 @@ public final class HostPluginRegistry {
     event: String,
     handler: @escaping Handler
   ) {
+    register(pluginId: pluginId, event: event, timeout: nil, handler: handler)
+  }
+
+  /// Registers a handler with its own invoke deadline. `timeout == nil` uses
+  /// `defaultInvokeTimeout`; pass `userMediatedInvokeTimeout` for a handler that
+  /// shows UI and waits for the user. When the deadline passes the caller gets
+  /// a `TIMEOUT` error and a later `respond` is ignored.
+  public func register(
+    pluginId: String,
+    event: String,
+    timeout: TimeInterval?,
+    handler: @escaping Handler
+  ) {
+    let key = Key(pluginId: pluginId, event: event)
     os_unfair_lock_lock(&lock)
-    handlers[Key(pluginId: pluginId, event: event)] = handler
+    handlers[key] = handler
+    timeouts[key] = timeout
     os_unfair_lock_unlock(&lock)
+  }
+
+  /// The invoke deadline for `pluginId`/`event`: the handler's own timeout, or
+  /// `defaultInvokeTimeout` (also for events with no handler).
+  public func invokeTimeout(pluginId: String, event: String) -> TimeInterval {
+    os_unfair_lock_lock(&lock)
+    defer { os_unfair_lock_unlock(&lock) }
+    return timeouts[Key(pluginId: pluginId, event: event)] ?? Self.defaultInvokeTimeout
   }
 
   /** Capability rows for `HOST_CAPABILITIES_RESPONSE`, runtimes `["ios"]`. */

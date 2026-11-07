@@ -1,0 +1,25 @@
+# Owner-gated paths (ADR 0001, ADR 0004). The main ruleset requires a
+# code-owner review, so a change here cannot merge on an agent's approval.
+#
+# Default: the owner reviews everything; agents still open the PRs.
+*                               @AndersCan
+
+# Trust boundaries, named explicitly so a future narrowing of the default
+# above cannot silently drop them.
+/.github/                       @AndersCan
+/scripts/fetch-prebuilds.mjs    @AndersCan
+/scripts/prebuilds.lock.json    @AndersCan
+/Package.swift                  @AndersCan
+/security.test.ts               @AndersCan
+/security.*.test.ts             @AndersCan
+/docs/security.md               @AndersCan
+/SECURITY.md                    @AndersCan
+/RELEASING.md                   @AndersCan
+/package.json                   @AndersCan
+/package-lock.json              @AndersCan
+/*.gradle                       @AndersCan
+/android/build.gradle           @AndersCan
+/gradle/                        @AndersCan
+/templates/deploy/              @AndersCan
+/skills-lock.json               @AndersCan
+/.agents/                       @AndersCan

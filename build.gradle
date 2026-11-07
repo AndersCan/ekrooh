@@ -21,3 +21,45 @@ nexusPublishing {
     }
   }
 }
+
+// Resolves every resolvable configuration of every project (leniently: AGP has
+// configurations that only resolve inside a variant). Used to (re)generate
+// gradle/verification-metadata.xml with all artifacts the build, test, lint and
+// publish tasks need, without running the npm-backed app tasks. Regenerate
+// after any dependency or plugin bump (and review the diff):
+//   ./gradlew --write-verification-metadata sha256 resolveAllDependencies build \
+//     :bare-host:javaDocReleaseJar :examples:android-app:assembleDebugAndroidTest \
+//     -x link -x buildWebAssets -x pack -x packApp -x buildBareJs \
+//     -x packP2pVerify -x buildP2pVerifyJs
+tasks.register("resolveAllDependencies") {
+  description = "Resolves every configuration (for dependency verification metadata)."
+  doLast {
+    allprojects.each { p ->
+      p.configurations.findAll { it.canBeResolved }.each { c ->
+        c.incoming.artifactView { lenient = true }.files.files
+      }
+      p.buildscript.configurations.findAll { it.canBeResolved }.each { c ->
+        c.incoming.artifactView { lenient = true }.files.files
+      }
+    }
+    // AGP fetches the aapt2 binary per host OS through a detached
+    // configuration at task time, so the metadata needs every OS variant
+    // (CI runs on Linux and macOS). Its version is the aapt2-proto version on
+    // the plugin classpath.
+    def aapt2Version = null
+    allprojects.each { p ->
+      p.buildscript.configurations.findAll { it.canBeResolved }.each { c ->
+        c.incoming.resolutionResult.allComponents.each { comp ->
+          def id = comp.moduleVersion
+          if (id != null && id.group == "com.android.tools.build" && id.name == "aapt2-proto") aapt2Version = id.version
+        }
+      }
+    }
+    if (aapt2Version == null) throw new GradleException("aapt2-proto not found on the plugin classpath")
+    ["linux", "osx", "windows"].each { os ->
+      configurations.detachedConfiguration(
+        dependencies.create("com.android.tools.build:aapt2:${aapt2Version}:${os}")
+      ).resolve()
+    }
+  }
+}

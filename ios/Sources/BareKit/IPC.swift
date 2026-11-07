@@ -37,11 +37,13 @@ public struct IPC: AsyncSequence {
   }
 }
 
-/// Serializes access to the underlying `BareIPC` so `close()` cannot race an
-/// in-flight `read()`/`write()` (the coordinator's read loop may be suspended
-/// inside `read()` when `terminate()` closes the channel). `close()` runs on
-/// the actor after any suspended call returns, and subsequent calls observe the
-/// `closed` flag instead of touching the torn-down channel.
+/// Guards the underlying `BareIPC` with a `closed` flag so calls made after
+/// `close()` fail with `IPCError.closed` instead of touching a torn-down
+/// channel. Actors are reentrant: while a `read()` or `write()` is suspended
+/// inside `BareIPC`, other calls (including `close()`) can run on this actor.
+/// So this does NOT serialize I/O. `HostIpcCoordinator` has a single reader
+/// and a single writer task, and the host awaits `close()` before terminating
+/// the worklet (see the reference app's `BareRuntime.terminate()`).
 private actor IPCCore {
   private let bareIPC: BareIPC
   private var closed = false

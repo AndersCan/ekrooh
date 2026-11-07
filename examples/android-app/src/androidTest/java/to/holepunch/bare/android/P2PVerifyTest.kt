@@ -3,6 +3,7 @@ package to.holepunch.bare.android
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,7 +37,9 @@ class P2PVerifyTest {
         )
 
         try {
-            context.assets.open("p2p-verify.bundle").use { bundle ->
+            // The bundle ships in the test APK's assets (src/androidTest/assets),
+            // not the app's, so release builds never carry it.
+            InstrumentationRegistry.getInstrumentation().context.assets.open("p2p-verify.bundle").use { bundle ->
                 worklet.start(
                     "/p2p-verify.bundle",
                     bundle,

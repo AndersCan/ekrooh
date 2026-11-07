@@ -19,8 +19,15 @@ import java.nio.ByteBuffer
  * incomplete frame is known the partial buffer is sized to that frame once and
  * filled in place as chunks arrive, rather than re-copying everything buffered
  * on every chunk.
+ *
+ * [onInvalidFrame] is told about each complete frame that is skipped because
+ * it does not parse (an unknown version or message type). It gets the frame's
+ * header text when that is readable, so the caller can answer the request with
+ * an error instead of leaving it to time out.
  */
-class FrameDecoder {
+class FrameDecoder(
+    private val onInvalidFrame: ((header: String?) -> Unit)? = null,
+) {
     private companion object {
         /** Smallest buffer allocated for a partial frame whose length is not yet known. */
         const val MIN_PARTIAL_BYTES = 64
@@ -87,7 +94,14 @@ class FrameDecoder {
 
             val frame = source.copyOfRange(offset, offset + frameLen)
             offset += frameLen
-            BareProtocol.parseMessage(ByteBuffer.wrap(frame))?.let { out.add(it) }
+            val parsed = BareProtocol.parseMessage(ByteBuffer.wrap(frame))
+            if (parsed != null) {
+                out.add(parsed)
+            } else {
+                onInvalidFrame?.invoke(
+                    String(frame, 7, headerLen, Charsets.UTF_8),
+                )
+            }
         }
 
         retain(source, offset, end, pendingFrameLen)

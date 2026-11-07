@@ -1,6 +1,5 @@
 import BareHost
 import BareKit
-import SafariServices
 import WebKit
 
 /// Owns the full host lifecycle: the Bare worklet, the IPC channel, the host
@@ -30,46 +29,26 @@ final class BareRuntime {
   #endif
 
   init() {
-    let documents =
-      FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-    var storageDir = documents.appendingPathComponent("bare", isDirectory: true)
-    try? FileManager.default.createDirectory(
-      at: storageDir, withIntermediateDirectories: true
-    )
-    // The storage dir transiently holds handoff.json (origin + single-use
-    // bootstrap nonce); resolve the handoff path up front so every
-    // early-return path below has all stored properties initialized.
-    self.handoffURL = storageDir.appendingPathComponent("handoff.json")
-
-    // The storage dir holds handoff.json (a bootstrap nonce) and the p2p
-    // corestore; keep the whole dir out of iCloud/iTunes backups. Failing here
-    // is fatal to the security model — a backed-up credential can leave the
-    // device, so abort attach rather than degrade silently.
-    var backupValues = URLResourceValues()
-    backupValues.isExcludedFromBackup = true
+    // Storage in Application Support (excluded from backup; failing that is
+    // fatal to the security model — a backed-up credential can leave the
+    // device), cache in Caches, stale handoff removed. See `BareStorage`.
+    let dirs: BareStorageDirectories
     do {
-      try storageDir.setResourceValues(backupValues)
+      dirs = try BareStorage.prepare()
     } catch {
-      BareHostLogger.log("Failed to exclude storage directory from backups")
+      BareHostLogger.log("Failed to prepare worklet storage (backup exclusion)")
+      self.handoffURL = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("handoff.json")
       self.worklet = nil
       self.ipc = nil
       ready = false
       return
     }
-
-    // Ephemeral cache dir: kept outside the durable storage dir so the worklet
-    // can treat it as disposable (asset cache, photo spool, temp).
-    let bareCacheDir = documents.appendingPathComponent("bare-cache", isDirectory: true)
-    try? FileManager.default.createDirectory(
-      at: bareCacheDir, withIntermediateDirectories: true
-    )
-    // A previous run may have left a handoff file pointing at a dead ephemeral
-    // port; remove it so polling never loads a stale origin.
-    try? FileManager.default.removeItem(at: handoffURL)
+    self.handoffURL = dirs.handoff
 
     // The web app ships in the app bundle (Resources/WebAssets) and is served
     // by the worklet's loopback server; the storage dir transiently holds the
-    // origin/bootstrap handoff file, deleted after the one-time page load.
+    // origin/bootstrap handoff file, deleted as soon as the host reads it.
     guard
       let webAssetsURL = Bundle.main.url(
         forResource: "WebAssets", withExtension: nil
@@ -80,7 +59,7 @@ final class BareRuntime {
 
     let configuration = Worklet.Configuration(
       memoryLimit: 128 << 20,
-      assets: storageDir.appendingPathComponent("asset-cache").path
+      assets: dirs.storage.appendingPathComponent("asset-cache").path
     )
     // The engine may fail to initialize (e.g. out of memory); degrade rather
     // than crash so the app stays alive without the worklet.
@@ -99,7 +78,7 @@ final class BareRuntime {
       // `resolveWorkletConfig()`). All three must be directories; a
       // missing/absent cache falls back to storage with a warning, so pass a
       // real cache dir to keep boots quiet.
-      arguments: [webAssetsURL.path, storageDir.path, bareCacheDir.path]
+      arguments: [webAssetsURL.path, dirs.storage.path, dirs.cache.path]
     )
     self.worklet = worklet
 
@@ -117,14 +96,14 @@ final class BareRuntime {
 
   /// Attaches the web layer once the WKWebView exists. The coordinator handles
   /// host capability queries and invokes; the page itself talks to the worklet
-  /// over the loopback WebSocket socket. Also installs a navigation delegate
-  /// that confines the WebView to the loopback origin.
+  /// over the loopback WebSocket socket. Also installs the library's
+  /// navigation delegate, which confines the WebView to the loopback origin.
   func attach(webView: WKWebView) {
     guard let ipc, attached == false, ready else { return }
     attached = true
 
+    BareWebHost.configure(webView)
     let navDelegate = BareNavigationDelegate()
-    navDelegate.runtime = self
     self.navigationDelegate = navDelegate
     self.webView = webView
     webView.navigationDelegate = navDelegate
@@ -136,81 +115,42 @@ final class BareRuntime {
     coordinator = HostIpcCoordinator(ipc: ipc, hostPlugins: hostPlugins)
     coordinator?.start()
 
-    waitForHandoffAndLoad(webView: webView)
+    waitForHandoffAndLoad(webView: webView, delegate: navDelegate)
   }
 
   /// Polls the worklet's `handoff.json` (written once the loopback server is
-  /// up), injects the one-time bootstrap nonce + shell marker, then loads the
-  /// page. The raw session token is never exposed to page JS — only the
-  /// single-use nonce the page exchanges once via `POST /login`.
-  private func waitForHandoffAndLoad(webView: WKWebView) {
+  /// up), then injects the one-time bootstrap nonce + shell marker and loads
+  /// the page (`BareWebHost.load`). The raw session token is never exposed to
+  /// page JS — only the single-use nonce the page exchanges once via
+  /// `POST /login`. `BareHandoff.consume` deletes the file as it reads it.
+  ///
+  /// Past the timeout a visible message replaces the blank page (UI tests use
+  /// it to name the stalled stage), but polling continues: a slow cold boot
+  /// still loads the app instead of leaving it dead with an unredeemed nonce
+  /// on disk.
+  private func waitForHandoffAndLoad(webView: WKWebView, delegate: BareNavigationDelegate) {
+    let handoffURL = self.handoffURL
     handoffTask = Task { @MainActor in
       let deadline = Date().addingTimeInterval(Self.handoffTimeout)
-      var credentials: [String: Any]?
-      while Date() < deadline && !Task.isCancelled {
-        if let data = try? Data(contentsOf: handoffURL) {
-          credentials =
-            (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-          if credentials != nil { break }
+      var timedOut = false
+      while !Task.isCancelled {
+        if let handoff = BareHandoff.consume(at: handoffURL) {
+          BareWebHost.load(handoff, in: webView, delegate: delegate)
+          return
         }
-        try? await Task.sleep(nanoseconds: 100_000_000)
-      }
-      guard
-        !Task.isCancelled,
-        let credentials,
-        let origin = credentials["origin"] as? String,
-        let bootstrap = credentials["bootstrap"] as? String,
-        let url = URL(string: "\(origin)/index.html")
-      else {
-        BareHostLogger.log("Timed out waiting for worklet handoff")
-        if !Task.isCancelled {
+        if !timedOut && Date() >= deadline {
+          timedOut = true
+          BareHostLogger.log("Timed out waiting for worklet handoff; still polling")
           webView.loadHTMLString(
             "<p>Worklet handoff timed out after \(Int(Self.handoffTimeout))s</p>",
             baseURL: nil
           )
         }
-        return
+        try? await Task.sleep(nanoseconds: timedOut ? 500_000_000 : 100_000_000)
       }
-      // Confine the WebView to exactly this loopback origin (host + port); any
-      // other main-frame navigation is cancelled (and external URLs bounced to
-      // the system browser by the navigation delegate).
-      if let originURL = URL(string: origin) {
-        navigationDelegate?.allowedHost = originURL.host
-        navigationDelegate?.allowedPort = originURL.port
-      }
-      webView.configuration.userContentController.addUserScript(
-        WKUserScript(
-          source: "window.__ekrooh=\(bridgePayloadJSON(bootstrap));window.BareShell=true;",
-          injectionTime: .atDocumentStart,
-          forMainFrameOnly: true
-        )
-      )
-      webView.load(URLRequest(url: url))
-      // The bootstrap is single-use in core; the handoff file is not needed
-      // after this one load (the page keeps its own HttpOnly session cookie).
-      // Core regenerates it on the next boot, so drop it from disk now.
+      // Cancelled (terminate): do not leave a nonce behind.
       try? FileManager.default.removeItem(at: handoffURL)
     }
-  }
-
-  /// JSON-encodes the bridge payload (`{"bootstrap":"…"}`) so an arbitrary
-  /// bootstrap value cannot break out of the script string literal (quotes,
-  /// backslashes and control chars escaped). The page transport requires
-  /// `bootstrap` to be a *string* — serializing a bare value here would need
-  /// an array wrapper, and `bootstrap:["…"]` silently skips the page login.
-  private func bridgePayloadJSON(_ bootstrap: String) -> String {
-    let data =
-      (try? JSONSerialization.data(withJSONObject: ["bootstrap": bootstrap]))
-      ?? Data()
-    return String(data: data, encoding: .utf8) ?? "{}"
-  }
-
-  /// Removes the injected bootstrap user script so the single-use nonce cannot
-  /// be re-injected into a later navigation. Called once after the first page
-  /// load finishes.
-  fileprivate func consumeBootstrapOnce() {
-    guard let webView else { return }
-    webView.configuration.userContentController.removeAllUserScripts()
   }
 
   /// Suspends the worklet when the app is backgrounded.
@@ -229,68 +169,20 @@ final class BareRuntime {
     handoffTask?.cancel()
     handoffTask = nil
     coordinator = nil
-    // `close()` is asynchronous on the IPC actor; capture the reference so the
-    // in-flight read loop observes the close instead of a torn-down channel.
+    // Close the IPC channel first, then terminate the worklet, so the read
+    // loop observes the close instead of a torn-down worklet. `close()` is
+    // async on the IPC actor; the worklet is terminated after it returns.
     let ipcToClose = ipc
-    Task { await ipcToClose?.close() }
+    let workletToTerminate = worklet
     ipc = nil
-    worklet?.terminate()
     worklet = nil
+    Task {
+      await ipcToClose?.close()
+      workletToTerminate?.terminate()
+    }
   }
 
   deinit {
     terminate()
-  }
-}
-
-/// Restricts the WebView to the loopback origin handed off by the worklet.
-/// Mirrors Android's `allowedOriginRules`: any main-frame navigation to a host
-/// or port other than the loopback server is cancelled, and external http(s)
-/// URLs are opened in the system browser instead of inside the trusted view.
-final class BareNavigationDelegate: NSObject, WKNavigationDelegate {
-  weak var runtime: BareRuntime?
-  var allowedHost: String?
-  var allowedPort: Int?
-
-  func webView(
-    _ webView: WKWebView,
-    decidePolicyFor navigationAction: WKNavigationAction,
-    decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
-  ) {
-    // Sub-frame / non-main navigations are permitted (e.g. assets, sockets).
-    guard navigationAction.targetFrame?.isMainFrame == true else {
-      decisionHandler(.allow)
-      return
-    }
-    guard let url = navigationAction.request.url else {
-      decisionHandler(.cancel)
-      return
-    }
-    // The handoff-timeout message is loaded via loadHTMLString (about:blank).
-    if url.absoluteString == "about:blank" {
-      decisionHandler(.allow)
-      return
-    }
-    let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-    let host = components?.host ?? ""
-    let port = components?.port ?? (url.scheme == "https" ? 443 : 80)
-    if host == allowedHost && port == allowedPort {
-      decisionHandler(.allow)
-      return
-    }
-    // Off-loopback navigation: bounce external URLs to the system browser
-    // rather than rendering them inside the trusted WebView.
-    if url.scheme == "http" || url.scheme == "https" {
-      decisionHandler(.cancel)
-      if UIApplication.shared.canOpenURL(url) {
-        UIApplication.shared.open(url)
-      }
-      return
-    }
-    decisionHandler(.cancel)
-  }
-
-  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-    runtime?.consumeBootstrapOnce()
   }
 }

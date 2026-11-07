@@ -1,10 +1,13 @@
-import { MessageType } from './constants';
+import { ErrorCode, MessageType } from './constants';
+import { isCanonicalErrorCode } from './error-codes';
+import { CoreError } from './types';
 import { MessageProtocol } from './wire-codec';
 import { createRequestId } from './request-id';
 import type { Platform } from './platform';
 import { toBytes, toIpcChunk } from './bytes';
 import type {
   CapabilityDescriptor,
+  CoreErrorWire,
   HostCapabilitiesResponseHeader,
   HostInvokeResponseHeader,
   MessageHeader,
@@ -28,6 +31,37 @@ const MAX_CONCURRENT_HOST_CALLS = 1024;
  * call pin a slot indefinitely, so we default to 30s instead. */
 const DEFAULT_HOST_INVOKE_TIMEOUT_MS = 30000;
 
+/** App-scoped error code a host handler may return (`app.photos/not-found`). */
+const APP_ERROR_CODE = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+\/[A-Za-z0-9._-]+$/;
+const MAX_HOST_ERROR_CODE_LENGTH = 64;
+const MAX_HOST_ERROR_MESSAGE_LENGTH = 512;
+
+/** The host's error as the page may see it: a canonical code or an app-scoped
+ * one passes, anything else becomes `HOST_ERROR`; the message is bounded. */
+function sanitizeHostError(
+  error: CoreErrorWire | undefined,
+): CoreErrorWire | undefined {
+  if (!error) return undefined;
+  const code =
+    isCanonicalErrorCode(error.code) ||
+    (error.code.length <= MAX_HOST_ERROR_CODE_LENGTH &&
+      APP_ERROR_CODE.test(error.code))
+      ? error.code
+      : ErrorCode.HOST_ERROR;
+  return {
+    code,
+    message: error.message.slice(0, MAX_HOST_ERROR_MESSAGE_LENGTH),
+  };
+}
+
+function validTimeout(timeoutMs: number | undefined, fallback: number) {
+  return typeof timeoutMs === 'number' &&
+    Number.isFinite(timeoutMs) &&
+    timeoutMs > 0
+    ? timeoutMs
+    : fallback;
+}
+
 export type BareIpcLike = {
   write(data: Uint8Array | string): boolean;
 };
@@ -40,6 +74,8 @@ export function createHostIpcBridge(config: {
 }) {
   const { ipc, protocol, platform } = config;
   const pending = new Map<string, Pending>();
+  /** Set by `close()`: every later call rejects at once with this reason. */
+  let closedReason: string | null = null;
 
   function track(requestId: string, slot: Pending) {
     if (pending.size >= MAX_CONCURRENT_HOST_CALLS) {
@@ -78,10 +114,15 @@ export function createHostIpcBridge(config: {
     timeoutMs: number,
   ): Promise<T> {
     return new Promise((resolve, reject) => {
+      if (closedReason !== null) {
+        reject(new Error(closedReason));
+        return;
+      }
       const timer = setTimeout(() => {
         pending.delete(requestId);
         reject(
-          new Error(
+          new CoreError(
+            ErrorCode.TIMEOUT,
             `Host IPC timeout waiting for ${String(expectedType)} (${requestId})`,
           ),
         );
@@ -129,6 +170,19 @@ export function createHostIpcBridge(config: {
   }
 
   return {
+    /** Stops the bridge (the runtime is closing): clears every pending timer,
+     * rejects every pending call with `reason`, and makes later calls reject
+     * at once instead of writing to a dead channel. */
+    close(reason = 'host bridge closed'): void {
+      closedReason = reason;
+      const slots = [...pending.values()];
+      pending.clear();
+      for (const slot of slots) {
+        clearTimeout(slot.timer);
+        slot.reject(new Error(reason));
+      }
+    },
+
     tryConsumeDownstream: consumeDownstream,
 
     tryConsumeDownstreamFromHost(raw: Uint8Array | ArrayBuffer): boolean {
@@ -144,6 +198,7 @@ export function createHostIpcBridge(config: {
     },
 
     async queryCapabilities(timeoutMs = 5000): Promise<CapabilityDescriptor[]> {
+      if (closedReason !== null) throw new Error(closedReason);
       // CSPRNG-backed (not Math.random): unguessable request ids for host IPC.
       const requestId = createRequestId(platform);
       const promise = waitFor<HostCapabilitiesResponseHeader>(
@@ -159,11 +214,15 @@ export function createHostIpcBridge(config: {
       return response.capabilities ?? [];
     },
 
+    /** Runs `header` on the host. `timeoutMs` bounds the wait (default
+     * 30 s); a user-mediated call (picker, camera, permission prompt) passes
+     * its own, longer deadline. */
     async invokeOnHost(
       header: PluginInvokeRequestHeader,
       payload: Uint8Array,
-      timeoutMs = DEFAULT_HOST_INVOKE_TIMEOUT_MS,
+      timeoutMs?: number,
     ): Promise<PluginInvokeResponseHeader | null> {
+      if (closedReason !== null) throw new Error(closedReason);
       if (!header.requestId) return null;
       // The caller's id comes from the page, so it is never reused on the host
       // channel: a page could otherwise supersede or answer-swap other pending
@@ -173,7 +232,7 @@ export function createHostIpcBridge(config: {
       const promise = waitFor<HostInvokeResponseHeader>(
         requestId,
         'HOST_INVOKE_RESPONSE',
-        timeoutMs,
+        validTimeout(timeoutMs, DEFAULT_HOST_INVOKE_TIMEOUT_MS),
       );
       const hostHeader = {
         type: 'HOST_INVOKE_REQUEST' as const,
@@ -186,13 +245,15 @@ export function createHostIpcBridge(config: {
         toIpcChunk(protocol.encode(MessageType.ENVELOPE, hostHeader, payload)),
       );
       const hostResp = await promise;
+      // Routing fields come from the request this answers, not the host's
+      // echo; the host's error code is checked before it reaches the page.
       const out: PluginInvokeResponseHeader = {
         type: 'INVOKE_RESPONSE',
-        pluginId: hostResp.pluginId,
-        event: hostResp.event,
+        pluginId: header.pluginId,
+        event: header.event,
         requestId: header.requestId,
         result: hostResp.result,
-        error: hostResp.error,
+        error: sanitizeHostError(hostResp.error),
       };
       return out;
     },

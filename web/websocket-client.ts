@@ -36,6 +36,18 @@ const LOGIN_TIMEOUT_MS = 2000;
 /** Wait before the single retry after a 409 (`bootstrap` nonce already
  * spent): long enough for the sibling document's `Set-Cookie` to land. */
 const SPENT_NONCE_RETRY_MS = 250;
+/** Requests held while connecting before new ones fail fast. */
+const DEFAULT_MAX_QUEUED = 256;
+/** Sent invokes tracked per socket so a lost socket can fail them. Past this,
+ * the oldest entry is forgotten (its caller still has its own timeout). */
+const MAX_TRACKED_INFLIGHT = 1024;
+/** WebSocket close code the loopback server uses when another document took
+ * over the session (the replaced protocol socket). */
+export const REPLACED_CLOSE_CODE = 4001;
+const SOCKET_LOST_MESSAGE = 'WebSocket closed before the response arrived';
+const REPLACED_MESSAGE =
+  'WebSocket replaced by another document holding the session (reconnects when this page returns to the foreground)';
+const CLOSED_MESSAGE = 'WebSocket transport was closed';
 
 /** Same-origin default: on-device the page is served by the loopback server,
  * so `ws://<location.host>` is the protocol socket with no mixed content and
@@ -66,6 +78,20 @@ export interface CreateWebSocketTransportOptions {
   /** How long to wait for `/login` before treating it as failed. Default
    * 2000ms. Exposed so tests can exercise the timeout without waiting. */
   loginTimeoutMs?: number;
+  /** A client that never connected gives up only after this long (ms), so
+   * unlucky jitter cannot exhaust the retries in a few milliseconds. Default
+   * 10s. */
+  minBootWindowMs?: number;
+  /** How long (ms) a socket may stay connecting before it is dropped and
+   * retried. Default 10s. */
+  openTimeoutMs?: number;
+  /** Requests held while connecting; past it, new requests fail fast with
+   * `TRANSPORT_ERROR`. Default 256. */
+  maxQueued?: number;
+  /** Fold the server's recent `[loopback]` upgrade-rejection log lines into
+   * the give-up error text. Off by default: log lines are diagnostics, not
+   * error messages a UI should show. Turn it on in a diagnostic harness. */
+  diagnostics?: boolean;
 }
 
 /**
@@ -134,6 +160,11 @@ export interface MessageTransport {
     payload?: Uint8Array | ArrayBuffer | string | null,
   ): void;
   subscribe(handler: (message: WireMessage) => void): () => void;
+  /** Closes the transport for good: drops the socket, stops reconnecting,
+   * removes its listeners and fails every pending request with
+   * `TRANSPORT_ERROR`. Later sends fail the same way. Optional so existing
+   * custom transports still satisfy the interface. */
+  close?(): void;
 }
 
 export function createWebSocketTransport(
@@ -145,6 +176,8 @@ export function createWebSocketTransport(
   const maxRetries = options.maxRetries ?? DEFAULT_RETRIES;
   const initialBackoff = options.backoffMs ?? DEFAULT_BACKOFF_MS;
   const loginTimeoutMs = options.loginTimeoutMs ?? LOGIN_TIMEOUT_MS;
+  const maxQueued = options.maxQueued ?? DEFAULT_MAX_QUEUED;
+  const diagnostics = options.diagnostics === true;
   // The one-time bootstrap nonce is exchanged for the HttpOnly cookie; it is
   // never placed in a URL.
   const bridge = typeof window !== 'undefined' ? window.__ekrooh : undefined;
@@ -157,6 +190,14 @@ export function createWebSocketTransport(
   const listeners = new Set<(message: WireMessage) => void>();
   const queued: QueuedMessage[] = [];
   let socket: WebSocket | null = null;
+  /** Invokes sent on the current socket and not yet answered, by requestId.
+   * A socket's responses can only come back on that socket, so losing it
+   * fails them at once instead of leaving callers on their timeouts. */
+  const inflight = new Map<string, MessageHeader>();
+  /** Set once `/login` succeeded: the HttpOnly cookie outlives a give-up. */
+  let loggedIn = false;
+  let started = false;
+  let closed = false;
   /** Human-readable reason when the give-up was caused by the `/login`
    * exchange. The surfaced transport error is the only telemetry CI gets
    * from an on-device WebView, so it must say which path fired instead of
@@ -176,6 +217,8 @@ export function createWebSocketTransport(
     maxRetries,
     initialBackoffMs: initialBackoff,
     maxBackoffMs: MAX_BACKOFF_MS,
+    minBootWindowMs: options.minBootWindowMs,
+    openTimeoutMs: options.openTimeoutMs,
   });
 
   const reconnectingMessage = `${WS_DISCONNECTED_MESSAGE} (reconnecting)`;
@@ -209,12 +252,51 @@ export function createWebSocketTransport(
     queued.length = 0;
   };
 
-  const flushQueued = () => {
-    for (const queuedMessage of queued) {
-      socket?.send(toSendable(queuedMessage.bytes));
+  /** Sends on the open socket, tracking invokes until they are answered. */
+  const sendNow = (
+    target: WebSocket,
+    bytes: Uint8Array,
+    header: MessageHeader,
+  ) => {
+    if (
+      header.type === 'INVOKE_REQUEST' &&
+      typeof header.requestId === 'string'
+    ) {
+      if (inflight.size >= MAX_TRACKED_INFLIGHT) {
+        const oldest = inflight.keys().next().value;
+        if (oldest !== undefined) inflight.delete(oldest);
+      }
+      inflight.set(header.requestId, header);
     }
-    queued.length = 0;
+    target.send(toSendable(bytes));
   };
+
+  const flushQueued = () => {
+    const target = socket;
+    if (!target) return;
+    const pending = queued.splice(0);
+    for (const queuedMessage of pending) {
+      sendNow(target, queuedMessage.bytes, queuedMessage.header);
+    }
+  };
+
+  /** Forgets the current socket: fails the invokes sent on it (their answers
+   * can only arrive on that socket) and closes it if it is still around.
+   * Late events from it are ignored (`socket !== current`). */
+  function dropSocket(message: string) {
+    const lost = socket;
+    socket = null;
+    const pending = [...inflight.values()];
+    inflight.clear();
+    for (const header of pending) emitTransportError(header, message);
+    if (lost && lost.readyState !== WebSocket.CLOSED) {
+      try {
+        lost.close();
+      } catch {
+        // Already closing; nothing to release.
+      }
+    }
+  }
 
   /** Opens a WebSocket for the machine's current URL and wires it to the
    * machine's lifecycle events. */
@@ -245,16 +327,25 @@ export function createWebSocketTransport(
       }
       try {
         const message = protocol.decode(event.data as ArrayBuffer);
+        if (
+          message.header.type === 'INVOKE_RESPONSE' &&
+          typeof message.header.requestId === 'string'
+        ) {
+          inflight.delete(message.header.requestId);
+        }
         for (const listener of listeners) listener(message);
       } catch (err) {
         console.error('Failed to parse WS message:', err);
       }
     };
 
-    current.onclose = () => {
+    current.onclose = (event?: { code?: number }) => {
       if (socket !== current) return;
+      const replaced = event?.code === REPLACED_CLOSE_CODE;
+      dropSocket(replaced ? REPLACED_MESSAGE : SOCKET_LOST_MESSAGE);
       // No `opened` flag: the machine derives it from its own state.
-      machine.sendClose();
+      if (replaced) machine.sendReplaced();
+      else machine.sendClose();
     };
 
     current.onerror = () => {
@@ -265,10 +356,23 @@ export function createWebSocketTransport(
   // The machine drives the shell: entering `opening` means a socket should
   // exist (first connect, or a retry after backoff); `gaveUp` fails the queue.
   machine.onChange((state) => {
+    // Leaving `opening`/`connected` without the socket's own close (open
+    // timeout, a stale socket on foreground, close()) still loses it.
+    if (state !== 'opening' && state !== 'connected' && socket) {
+      dropSocket(state === 'closed' ? CLOSED_MESSAGE : SOCKET_LOST_MESSAGE);
+    }
     if (state === 'opening') {
       openSocket();
     } else if (state === 'gaveUp') {
       void failWithServerDetail();
+    } else if (state === 'closed') {
+      failQueuedMessages(CLOSED_MESSAGE);
+    } else if (state === 'idle' && started) {
+      // WAKE after a give-up: start over (login again if it never succeeded).
+      void bootstrap();
+    } else if (state === 'backoff' && machine.isReplaced()) {
+      // Another document holds the session: do not hold requests for it.
+      failQueuedMessages(REPLACED_MESSAGE);
     } else if (state === 'backoff' && machine.isDegraded()) {
       // The outage outlived the quick-retry window: stop holding requests for a
       // reconnect that may be far off. Retrying continues in the background.
@@ -285,14 +389,19 @@ export function createWebSocketTransport(
       socket &&
       socket.readyState !== WebSocket.OPEN
     ) {
+      dropSocket(SOCKET_LOST_MESSAGE);
       machine.sendClose();
     }
     machine.sendWake();
   }
-  if (typeof document !== 'undefined' && document.addEventListener) {
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') onForeground();
-    });
+  const onVisibilityChange = () => {
+    if (document.visibilityState === 'visible') onForeground();
+  };
+  const hasDocument =
+    typeof document !== 'undefined' &&
+    typeof document.addEventListener === 'function';
+  if (hasDocument) {
+    document.addEventListener('visibilitychange', onVisibilityChange);
   }
 
   /** Terminal give-up: when we have no better name for the failure, fold the
@@ -301,7 +410,7 @@ export function createWebSocketTransport(
    * terminally lost, so a short delay changes nothing semantically. */
   async function failWithServerDetail(): Promise<void> {
     let message = gaveUpMessage();
-    if (loginFailureDetail === null) {
+    if (diagnostics && loginFailureDetail === null) {
       const tail = await serverRejectionTail(url);
       if (tail !== null) message = `${message}; server: ${tail}`;
     }
@@ -312,8 +421,9 @@ export function createWebSocketTransport(
    * the server recognized our nonce as already consumed by a sibling
    * document whose session cookie is on its way — worth exactly one retry. */
   function postLogin(): Promise<'ok' | 'spent' | 'rejected' | 'timeout'> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const loginTimeout = new Promise<'timeout'>((resolve) => {
-      setTimeout(() => resolve('timeout'), loginTimeoutMs);
+      timer = setTimeout(() => resolve('timeout'), loginTimeoutMs);
     });
     const attempt = fetch('/login', {
       method: 'POST',
@@ -322,11 +432,14 @@ export function createWebSocketTransport(
       if (response.ok) return 'ok';
       return response.status === 409 ? 'spent' : 'rejected';
     });
-    return Promise.race([attempt, loginTimeout]);
+    return Promise.race([attempt, loginTimeout]).finally(() =>
+      clearTimeout(timer),
+    );
   }
 
   async function bootstrap() {
-    if (shouldLogin) {
+    if (shouldLogin && !loggedIn) {
+      loginFailureDetail = null;
       try {
         let outcome = await postLogin();
         if (outcome === 'spent') {
@@ -339,6 +452,7 @@ export function createWebSocketTransport(
           outcome = await postLogin();
         }
         if (outcome === 'ok') {
+          loggedIn = true;
           machine.sendLoginOk();
         } else {
           // Login rejected or timed out; the machine may retry the socket, but
@@ -359,29 +473,57 @@ export function createWebSocketTransport(
     }
   }
 
+  started = true;
   void bootstrap();
 
   return {
     send(type, header, payload) {
+      if (closed) {
+        emitTransportError(header, CLOSED_MESSAGE);
+        return;
+      }
       const encoded = protocol.encode(type, header, payload);
       if (
         machine.isConnected() &&
         socket &&
         socket.readyState === WebSocket.OPEN
       ) {
-        socket.send(toSendable(encoded));
+        sendNow(socket, encoded, header);
         return;
       }
       if (machine.isGaveUp()) {
         emitTransportError(header, gaveUpMessage());
         return;
       }
+      if (machine.isReplaced()) {
+        emitTransportError(header, REPLACED_MESSAGE);
+        return;
+      }
       if (machine.state() === 'backoff' && machine.isDegraded()) {
         emitTransportError(header, reconnectingMessage);
         return;
       }
+      if (queued.length >= maxQueued) {
+        emitTransportError(
+          header,
+          `${WS_DISCONNECTED_MESSAGE} (${maxQueued} requests already waiting for the connection)`,
+        );
+        return;
+      }
       // Queue while connecting (first open, backoff, login).
       queued.push({ bytes: encoded, header });
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      if (hasDocument) {
+        document.removeEventListener?.('visibilitychange', onVisibilityChange);
+      }
+      machine.sendStop();
+      // A transport closed before its machine left `idle` (login pending)
+      // still owes its callers an answer.
+      dropSocket(CLOSED_MESSAGE);
+      failQueuedMessages(CLOSED_MESSAGE);
     },
     subscribe(handler) {
       listeners.add(handler);

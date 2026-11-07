@@ -1,4 +1,5 @@
-plugins {  id "com.android.library"
+plugins {
+  id "com.android.library"
   id "maven-publish"
   id "signing"
 }
@@ -36,6 +37,12 @@ android {
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
+  }
+
+  // android.util.Log and friends return defaults in JVM unit tests instead of
+  // throwing, so debug-only logging in error paths can be exercised.
+  testOptions {
+    unitTests.returnDefaultValues = true
   }
 
   // Generate BuildConfig so host logging can be gated on BuildConfig.DEBUG.
@@ -80,6 +87,93 @@ kotlin {
 // The Bare Kit runtime is shipped in the published AAR: AGP packages the local
 // `api fileTree` jar into the AAR's libs/ and the native libs (jniLibs) into
 // jni/, so published consumers need no separate prebuilds download.
+
+// --- Public API dump (stability contract, vision.md) -------------------------
+// The Kotlin host public API is a stability boundary: removing or changing a
+// public signature is a major-version event. `apiDump` writes the public and
+// protected JVM signatures of the release compile jar (what consumers link
+// against) to api/bare-host.api, which is committed. `apiCheck` (part of
+// `check`, so `./gradlew build` runs it) fails when the compiled API no longer
+// matches the dump: an intended additive change is accepted by re-running
+// `./gradlew :bare-host:apiDump` and committing the diff, which makes every API
+// change visible in review.
+//
+// This uses javap rather than the Kotlin binary-compatibility-validator because
+// BCV does not recognise AGP 9's built-in Kotlin, and KGP's own abiValidation
+// is not available for Android libraries yet.
+def apiCompileJar = layout.buildDirectory.file(
+  "intermediates/compile_library_classes_jar/release/bundleLibCompileToJarRelease/classes.jar")
+def apiGenerated = layout.buildDirectory.file("api/bare-host.api")
+def apiCommitted = file("api/bare-host.api")
+
+tasks.register("apiBuild") {
+  description = "Writes the public JVM API of the release compile jar to build/api/bare-host.api."
+  dependsOn "bundleLibCompileToJarRelease"
+  inputs.file(apiCompileJar)
+  outputs.file(apiGenerated)
+  doLast {
+    def jar = apiCompileJar.get().asFile
+    def classes = project.zipTree(jar).matching { include "**/*.class" }.files.collect { f ->
+      def path = f.path.replace(File.separatorChar, '/' as char)
+      path.substring(path.indexOf("to/holepunch/")).replace(".class", "").replace('/', '.')
+    }.findAll { name ->
+      def simple = name.substring(name.lastIndexOf('.') + 1)
+      !(simple == "R" || simple.startsWith('R$'))
+    }.sort()
+    def javap = new File(System.getProperty("java.home"), "bin/javap").absolutePath
+    def out = new ByteArrayOutputStream()
+    project.providers.exec {
+      commandLine([javap, "-protected", "-cp", jar.absolutePath] + classes)
+    }.standardOutput.asText.get().eachLine { out.write((it + "\n").getBytes("UTF-8")) }
+    // One block per class; keep only public/protected classes and drop
+    // compiler-generated accessors.
+    def blocks = []
+    def current = null
+    out.toString("UTF-8").eachLine { line ->
+      if (line.startsWith("Compiled from")) {
+        current = []
+        blocks << current
+      } else if (current != null && !line.contains('access$')) {
+        current << line
+      }
+    }
+    def kept = blocks.findAll { b -> !b.isEmpty() && (b[0].startsWith("public ") || b[0].startsWith("protected ")) }
+    def text = kept.collect { it.join("\n") }.sort().join("\n\n") + "\n"
+    def target = apiGenerated.get().asFile
+    target.parentFile.mkdirs()
+    target.setText(text, "UTF-8")
+  }
+}
+
+tasks.register("apiDump") {
+  description = "Updates the committed public API dump (api/bare-host.api)."
+  dependsOn "apiBuild"
+  doLast {
+    apiCommitted.parentFile.mkdirs()
+    apiCommitted.setText(apiGenerated.get().asFile.getText("UTF-8"), "UTF-8")
+  }
+}
+
+tasks.register("apiCheck") {
+  description = "Fails when the public API differs from api/bare-host.api."
+  group = "verification"
+  dependsOn "apiBuild"
+  inputs.file(apiGenerated)
+  inputs.file(apiCommitted)
+  doLast {
+    def expected = apiCommitted.exists() ? apiCommitted.getText("UTF-8") : ""
+    def actual = apiGenerated.get().asFile.getText("UTF-8")
+    if (expected != actual) {
+      throw new GradleException(
+        "The :bare-host public API changed (stability contract, vision.md). " +
+        "Compare build/api/bare-host.api with api/bare-host.api. If the change " +
+        "is intended and additive, run ./gradlew :bare-host:apiDump and commit it; " +
+        "removing or changing a public signature is a major-version event.")
+    }
+  }
+}
+
+tasks.named("check") { dependsOn "apiCheck" }
 
 // Single source of truth for the version is the root package.json (RELEASING.md).
 rootProject.ext.jsonVersion = {

@@ -227,4 +227,14 @@ class FrameDecoderTest {
         assertEquals(1, good.size)
         assertTrue(decoder.error == null)
     }
+
+    @Test
+    fun `reports a skipped frame with its header`() {
+        val reported = mutableListOf<String?>()
+        val decoder = FrameDecoder { reported += it }
+        val bad = frame(null).also { it[1] = 42 }
+        val decoded = decoder.push(bad + frame(null))
+        assertEquals(1, decoded.size)
+        assertEquals(listOf(header), reported)
+    }
 }

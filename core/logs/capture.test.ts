@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
-import { installConsoleCapture } from './capture';
+import { installConsoleCapture, MAX_CAPTURED_MESSAGE_CHARS } from './capture';
 import { createLogRingBuffer } from './store';
 
 describe('installConsoleCapture', () => {
@@ -104,5 +104,21 @@ describe('installConsoleCapture', () => {
     const capture = installConsoleCapture(store, 'web');
     capture.restore();
     expect(console.log).toBe(originals.log);
+  });
+
+  it('caps a captured backend message so the ring stays bounded (B-7)', () => {
+    console.log = () => {};
+    const store = createLogRingBuffer(4);
+    const capture = installConsoleCapture(store);
+    try {
+      console.log('x'.repeat(MAX_CAPTURED_MESSAGE_CHARS * 4), 'tail');
+      const [entry] = store.view();
+      expect(entry.message).toHaveLength(MAX_CAPTURED_MESSAGE_CHARS + 1);
+      expect(entry.message.endsWith('…')).toBe(true);
+      console.log('short');
+      expect(store.view().at(-1)?.message).toBe('short');
+    } finally {
+      capture.restore();
+    }
   });
 });

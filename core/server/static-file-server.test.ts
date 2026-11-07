@@ -20,6 +20,7 @@ import {
   cachePolicyFor,
   collectRequestBody,
   createLoopbackServer,
+  createRejectionLogger,
   etagFor,
   etagMatches,
   isLoopbackHost,
@@ -108,6 +109,14 @@ vi.mock('bare-ws', async () => {
           this.socket?.destroy();
           this.emit('close');
         }
+        /** The real socket sends a close frame; the eviction path
+         * (`close(4001, 'replaced')`) must not need the destroy fallback. */
+        close(code?: number, reason?: string) {
+          this.closed = { code, reason };
+          this.socket?.destroy();
+          this.emit('close');
+        }
+        closed: { code?: number; reason?: string } | null = null;
         write(data: unknown) {
           // Forward to the underlying TCP socket so a server `push` reaches the
           // test client (the real ws.Socket writes through to the TCP socket).
@@ -672,11 +681,14 @@ describe('loopback server HTTP', () => {
   it('sandboxes HTML and SVG from a gated directory mount', async () => {
     // A gated mount holds content (e.g. a peer-synced folder), not app code:
     // a hostile document in it must not run script in the app origin.
+    // A gated root may not overlap the public one, so it lives elsewhere.
+    const shared = fs.mkdtempSync(path.join(os.tmpdir(), 'loopback-shared-'));
+    fs.writeFileSync(path.join(shared, 'index.html'), '<html>peer</html>');
     fs.writeFileSync(
-      path.join(dir, 'evil.svg'),
+      path.join(shared, 'evil.svg'),
       '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>',
     );
-    server!.mountDir('/shared', dir);
+    server!.mountDir('/shared', shared);
     try {
       for (const file of ['index.html', 'evil.svg']) {
         const r = await request(`/shared/${file}`, { headers: { cookie } });
@@ -691,7 +703,7 @@ describe('loopback server HTTP', () => {
         "script-src 'self'",
       );
     } finally {
-      fs.rmSync(path.join(dir, 'evil.svg'));
+      fs.rmSync(shared, { recursive: true, force: true });
     }
   });
 
@@ -855,17 +867,22 @@ describe('static caching', () => {
     expect(firstHeader(r.headers, 'etag')).toBeNull();
   });
 
-  it('stats a directory-mounted file once per request', async () => {
-    // The server serves a file by its real path (a tmpdir may be a symlink).
+  it('opens a directory-mounted file once and never stats it by path', async () => {
+    // The server serves a file by its real path (a tmpdir may be a symlink),
+    // from the descriptor it verified: one open, one fstat, one lstat.
     const target = fs.realpathSync(path.join(dir, 'app.js'));
-    const spy = vi.spyOn(fs, 'statSync');
+    const stat = vi.spyOn(fs, 'statSync');
+    const open = vi.spyOn(fs, 'openSync');
     try {
       const r = await request('/app.js');
       expect(r.status).toBe(200);
-      const hits = spy.mock.calls.filter(([p]) => String(p) === target);
-      expect(hits).toHaveLength(1);
+      const forTarget = (calls: unknown[][]) =>
+        calls.filter(([p]) => String(p) === target);
+      expect(forTarget(stat.mock.calls)).toHaveLength(0);
+      expect(forTarget(open.mock.calls)).toHaveLength(1);
     } finally {
-      spy.mockRestore();
+      stat.mockRestore();
+      open.mockRestore();
     }
   });
 
@@ -1720,5 +1737,475 @@ describe('collectRequestBody (/login body decoding)', () => {
       req.emit('data', new Uint8Array(1024).fill(120));
     }
     await expect(pending).rejects.toThrow('too large');
+  });
+});
+
+/** GET/POST against any server, with a client-side timeout so a request the
+ * server never answers fails the test instead of hanging it. */
+function fetchAt(
+  base: string,
+  urlPath: string,
+  opts: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  } = {},
+): Promise<{
+  status: number;
+  headers: http.IncomingHttpHeaders;
+  body: string;
+}> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      `${base}${urlPath}`,
+      { method: opts.method ?? 'GET', headers: opts.headers, agent: false },
+      (res) => {
+        let body = '';
+        res.on('data', (c) => (body += c));
+        res.on('end', () =>
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, body }),
+        );
+      },
+    );
+    req.setTimeout(2000, () => req.destroy(new Error('no response')));
+    req.on('error', reject);
+    req.end(opts.body);
+  });
+}
+
+function closeServer(s: ReturnType<typeof createLoopbackServer>) {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 2000);
+    s.close(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+describe('mount layout: public and gated roots never overlap (B-1)', () => {
+  it('refuses a gated directory mount inside, around or case-aliasing the public root', () => {
+    const base = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'loopback-overlap-')),
+    );
+    fs.mkdirSync(path.join(base, 'www', 'shared'), { recursive: true });
+    try {
+      const s1 = createLoopbackServer({ auth: true, token: TOKEN });
+      s1.mountDir('/', path.join(base, 'www'), { public: true });
+      expect(() =>
+        s1.mountDir('/shared', path.join(base, 'www', 'shared')),
+      ).toThrow(/overlaps the public mount/);
+      // A case variant names the same folder on APFS; it is refused too.
+      expect(() =>
+        s1.mountDir('/shared', path.join(base, 'WWW', 'Shared')),
+      ).toThrow(/overlaps/);
+      // A gated root above the public one would also expose it.
+      expect(() => s1.mountDir('/all', base)).toThrow(/overlaps/);
+
+      // Order does not matter: gated first, then a public root around it.
+      const s2 = createLoopbackServer({ auth: true, token: TOKEN });
+      s2.mountDir('/shared', path.join(base, 'www', 'shared'));
+      expect(() =>
+        s2.mountDir('/', path.join(base, 'www'), { public: true }),
+      ).toThrow(/overlaps the gated mount/);
+
+      // Disjoint roots are fine, and so is re-mounting the same prefix.
+      const s3 = createLoopbackServer({ auth: true, token: TOKEN });
+      s3.mountDir('/', path.join(base, 'www', 'shared'), { public: true });
+      s3.mountDir('/', path.join(base, 'www', 'shared'), { public: true });
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('never serves a gated root through the public mount, even when it becomes reachable after mounting', async () => {
+    const base = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'loopback-alias-')),
+    );
+    const www = path.join(base, 'www');
+    fs.mkdirSync(path.join(www, 'peer'), { recursive: true });
+    fs.writeFileSync(path.join(www, 'index.html'), '<html>app</html>');
+    fs.writeFileSync(path.join(www, 'peer', 'photo.txt'), 'PEER-BYTES');
+    fs.mkdirSync(path.join(base, 'links'));
+    const s = createLoopbackServer({ auth: true, token: TOKEN });
+    s.mountDir('/', www, { public: true });
+    // The gated root does not exist yet, so the layout check cannot see that
+    // it will point into the web app.
+    const link = path.join(base, 'links', 'shared');
+    s.mountDir('/shared', link);
+    fs.symlinkSync(path.join(www, 'peer'), link);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { origin: o } = await s.credentials();
+      const viaPublic = await fetchAt(o, '/peer/photo.txt');
+      expect(viaPublic.status).toBe(404);
+      expect(viaPublic.body).not.toContain('PEER-BYTES');
+      const viaGated = await fetchAt(o, '/shared/photo.txt', {
+        headers: { 'X-Bare-Token': TOKEN },
+      });
+      expect(viaGated.status).toBe(200);
+      expect(viaGated.body).toBe('PEER-BYTES');
+    } finally {
+      warn.mockRestore();
+      await closeServer(s);
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('symlink swap between the check and the open (B-2)', () => {
+  it('refuses a file whose path is swapped for a symlink after realpath', async () => {
+    const base = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'loopback-toctou-')),
+    );
+    const shared = path.join(base, 'shared');
+    const outside = path.join(base, 'outside');
+    fs.mkdirSync(shared);
+    fs.mkdirSync(outside);
+    const target = path.join(shared, 'swap.txt');
+    fs.writeFileSync(target, 'innocent-bytes!!');
+    fs.writeFileSync(path.join(outside, 'secret.txt'), 'OUTSIDE-SECRET!!');
+    const s = createLoopbackServer({ auth: true, token: TOKEN });
+    s.mountDir('/shared', shared);
+    const realpath = fs.realpathSync;
+    let armed = true;
+    // The attacker flips the entry right after the containment check.
+    const spy = vi.spyOn(fs, 'realpathSync').mockImplementation(((
+      p: fs.PathLike,
+      o?: unknown,
+    ) => {
+      const out = (realpath as (p: fs.PathLike, o?: unknown) => string)(p, o);
+      if (armed && out === target) {
+        armed = false;
+        fs.rmSync(target);
+        fs.symlinkSync(path.join(outside, 'secret.txt'), target);
+      }
+      return out;
+    }) as typeof fs.realpathSync);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { origin: o } = await s.credentials();
+      const r = await fetchAt(o, '/shared/swap.txt', {
+        headers: { 'X-Bare-Token': TOKEN },
+      });
+      expect(armed).toBe(false);
+      expect(r.body).not.toContain('OUTSIDE-SECRET');
+      expect(r.status).toBe(404);
+    } finally {
+      spy.mockRestore();
+      warn.mockRestore();
+      await closeServer(s);
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('registered routes', () => {
+  it('answers an async route that rejects with a bare 500, never an unhandled rejection (B-3)', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(e);
+    process.on('unhandledRejection', onUnhandled);
+    server!.registerRoute('GET', '/async-boom', async () => {
+      await Promise.resolve();
+      throw new Error('/private/path/async-detail');
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const r = await request('/async-boom', { headers: { cookie } });
+      expect(r.status).toBe(500);
+      expect(r.body).toBe('Internal Server Error');
+      expect(r.body).not.toContain('async-detail');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      error.mockRestore();
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('normalizes a route path like a mount path (B-6)', async () => {
+    server!.registerRoute('GET', '/api/', (_req, res) => res.end('api'));
+    server!.registerRoute('get', '/a%20b', (_req, res) => res.end('spaced'));
+    for (const p of ['/api', '/api/']) {
+      const r = await request(p, { headers: { cookie, accept: 'text/html' } });
+      expect(r.body).toBe('api');
+    }
+    const spaced = await request('/a%20b', { headers: { cookie } });
+    expect(spaced.body).toBe('spaced');
+    expect(() =>
+      server!.registerRoute('GET', '/../x', (_req, res) => res.end()),
+    ).toThrow(/invalid mount path/);
+  });
+});
+
+describe('response headers on every status (B-5, B-10)', () => {
+  it('sends Referrer-Policy and nosniff on every framework response and route', async () => {
+    server!.registerRoute('GET', '/created', (_req, res) => {
+      // The documented consumer shape: no security headers of its own.
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end('{}');
+    });
+    server!.registerRoute('GET', '/throws', () => {
+      throw new Error('nope');
+    });
+    const etag = firstHeader((await request('/')).headers, 'etag')!;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const cases: Array<{
+      name: string;
+      status: number;
+      run: () => Promise<{ status: number; headers: http.IncomingHttpHeaders }>;
+      gated: boolean;
+    }> = [
+      {
+        name: 'public file',
+        status: 200,
+        gated: false,
+        run: () => request('/app.js'),
+      },
+      {
+        name: 'gated file',
+        status: 200,
+        gated: true,
+        run: () => request('/media/sample.png', { headers: { cookie } }),
+      },
+      {
+        name: 'range',
+        status: 206,
+        gated: true,
+        run: () =>
+          request('/media/sample.png', {
+            headers: { cookie, range: 'bytes=0-1' },
+          }),
+      },
+      {
+        name: 'not modified',
+        status: 304,
+        gated: false,
+        run: () => request('/', { headers: { 'If-None-Match': etag } }),
+      },
+      {
+        name: 'bad request',
+        status: 400,
+        gated: true,
+        run: () =>
+          // Options form: the client sends the path as written instead of
+          // resolving the dot segments first.
+          new Promise((resolve, reject) => {
+            const req = http.request(
+              {
+                host: '127.0.0.1',
+                port,
+                path: '/%2e%2e/etc/passwd',
+                agent: false,
+              },
+              (res) => {
+                res.resume();
+                res.on('end', () =>
+                  resolve({
+                    status: res.statusCode ?? 0,
+                    headers: res.headers,
+                  }),
+                );
+              },
+            );
+            req.on('error', reject);
+            req.end();
+          }),
+      },
+      {
+        name: 'unauthorized',
+        status: 401,
+        gated: true,
+        run: () => request('/media/sample.png'),
+      },
+      {
+        name: 'forbidden',
+        status: 403,
+        gated: true,
+        run: () =>
+          request('/media/sample.png', {
+            headers: { cookie, origin: 'http://evil.example' },
+          }),
+      },
+      {
+        name: 'not found',
+        status: 404,
+        gated: true,
+        run: () => request('/assets/missing.js'),
+      },
+      {
+        name: 'too large',
+        status: 413,
+        gated: true,
+        run: () =>
+          request('/login', { method: 'POST', body: 'x'.repeat(5000) }),
+      },
+      {
+        name: 'internal error',
+        status: 500,
+        gated: true,
+        run: () => request('/throws', { headers: { cookie } }),
+      },
+      {
+        name: 'consumer route',
+        status: 201,
+        gated: true,
+        run: () => request('/created', { headers: { cookie } }),
+      },
+    ];
+    try {
+      for (const c of cases) {
+        const r = await c.run();
+        expect([c.name, r.status]).toEqual([c.name, c.status]);
+        expect([c.name, r.headers['referrer-policy']]).toEqual([
+          c.name,
+          'no-referrer',
+        ]);
+        expect([c.name, r.headers['x-content-type-options']]).toEqual([
+          c.name,
+          'nosniff',
+        ]);
+        if (c.gated) {
+          expect([c.name, r.headers['cross-origin-resource-policy']]).toEqual([
+            c.name,
+            'same-origin',
+          ]);
+        }
+      }
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('leaves Cross-Origin-Resource-Policy off public app files and dev servers with extra origins', async () => {
+    const app = await request('/app.js');
+    expect(app.headers['cross-origin-resource-policy']).toBeUndefined();
+    devServer!.mount('/media/dev.png', path.join(dir, 'app.js'));
+    try {
+      const devOrigin = await devServer!.origin();
+      const media = await fetchAt(devOrigin, '/media/dev.png');
+      expect(media.status).toBe(200);
+      expect(media.headers['cross-origin-resource-policy']).toBeUndefined();
+    } finally {
+      devServer!.unmount('/media/dev.png');
+    }
+  });
+
+  it('drops the connection after refusing an oversized /login body (B-10)', async () => {
+    const outcome = await new Promise<{ status: string; closed: boolean }>(
+      (resolve) => {
+        const socket = net.connect({ host: '127.0.0.1', port });
+        let data = '';
+        let closed = false;
+        const timer = setTimeout(() => {
+          socket.destroy();
+          resolve({ status: data.split('\r\n')[0], closed });
+        }, 1500);
+        socket.on('connect', () => {
+          // Announce a large body, send past the 4 KiB cap, then stall.
+          socket.write(
+            `POST /login HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
+              'Content-Type: text/plain\r\nContent-Length: 1000000\r\n\r\n' +
+              'x'.repeat(8192),
+          );
+        });
+        socket.on('data', (d) => (data += String(d)));
+        socket.on('error', () => {});
+        socket.on('close', () => {
+          closed = true;
+          clearTimeout(timer);
+          resolve({ status: data.split('\r\n')[0], closed });
+        });
+      },
+    );
+    expect(outcome.status).toContain('413');
+    expect(outcome.closed).toBe(true);
+  });
+});
+
+describe('upgrade rejection logging (B-4)', () => {
+  it('rate limits per window and reports what it suppressed', () => {
+    const lines: string[] = [];
+    let t = 0;
+    const log = createRejectionLogger((l) => lines.push(l), {
+      limit: 3,
+      windowMs: 1000,
+      now: () => t,
+    });
+    for (let i = 0; i < 10; i++) log(`origin mismatch ${i}`);
+    expect(lines).toHaveLength(3);
+    t = 1000;
+    log('next window');
+    expect(lines.slice(3)).toEqual([
+      '[loopback] upgrade rejected: 7 more rejections suppressed',
+      '[loopback] upgrade rejected: next window',
+    ]);
+  });
+
+  it('truncates an echoed Origin and stops a website flooding the log ring', async () => {
+    const s = createLoopbackServer({ auth: true, token: TOKEN });
+    const { port: p } = await s.credentials();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const upgrade = (originValue: string) =>
+      new Promise<void>((resolve) => {
+        const socket = net.connect({ host: '127.0.0.1', port: p }, () =>
+          socket.write(
+            [
+              'GET /ws HTTP/1.1',
+              `Host: 127.0.0.1:${p}`,
+              'Upgrade: websocket',
+              'Connection: Upgrade',
+              'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+              'Sec-WebSocket-Version: 13',
+              `Origin: ${originValue}`,
+              '\r\n',
+            ].join('\r\n'),
+          ),
+        );
+        socket.on('data', () => socket.destroy());
+        socket.on('close', () => resolve());
+        socket.on('error', () => resolve());
+      });
+    try {
+      await upgrade(`https://${'a'.repeat(4000)}.example`);
+      const first = String(error.mock.calls[0]?.[0]);
+      expect(first).toContain('[loopback] upgrade rejected:');
+      expect(first.length).toBeLessThan(300);
+      for (let i = 0; i < 40; i++) await upgrade(`https://evil${i}.example`);
+      const rejections = error.mock.calls.filter(([l]) =>
+        String(l).includes('upgrade rejected'),
+      );
+      expect(rejections.length).toBeLessThanOrEqual(10);
+    } finally {
+      error.mockRestore();
+      await closeServer(s);
+    }
+  });
+});
+
+describe('IPv6 bind (A-4)', () => {
+  it('brackets an IPv6 literal in the origin', async (ctx) => {
+    for (const host of ['::1', '[::1]']) {
+      const s = createLoopbackServer({ auth: true, token: TOKEN, host });
+      let o: string;
+      try {
+        o = await s.origin();
+      } catch {
+        await closeServer(s);
+        ctx.skip(); // no IPv6 loopback on this machine
+        return;
+      }
+      try {
+        expect(o).toMatch(/^http:\/\/\[::1\]:\d+$/);
+        const creds = await s.credentials();
+        expect(creds.port).toBe(Number(new URL(o).port));
+        const r = await fetchAt(o, '/nothing', {
+          headers: { 'X-Bare-Token': TOKEN },
+        });
+        expect(r.status).toBe(404);
+      } finally {
+        await closeServer(s);
+      }
+    }
   });
 });

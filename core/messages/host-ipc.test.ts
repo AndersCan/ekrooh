@@ -4,7 +4,11 @@ import { createFrameDecoder } from './framing';
 import { MessageProtocol } from './wire-codec';
 import { barePlatform as platform } from '../lib/bare-platform';
 import { MessageType } from './constants';
-import type { MessageHeader, RuntimeTarget } from './types';
+import type {
+  MessageHeader,
+  PluginInvokeRequestHeader,
+  RuntimeTarget,
+} from './types';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -375,5 +379,157 @@ describe('createHostIpcBridge', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  function permissionsCall(requestId: string): PluginInvokeRequestHeader {
+    return {
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.permissions',
+      event: 'permissions.request',
+      requestId,
+      args: {},
+    };
+  }
+
+  function hostAnswer(
+    protocol: MessageProtocol,
+    requestId: string,
+    extra: Partial<MessageHeader> = {},
+  ) {
+    return protocol.encode(
+      MessageType.ENVELOPE,
+      {
+        type: 'HOST_INVOKE_RESPONSE',
+        requestId,
+        pluginId: 'core.permissions',
+        event: 'permissions.request',
+        ...extra,
+      } as MessageHeader,
+      null,
+    );
+  }
+
+  it('honours a per-call timeout so a user-mediated host call can outlive 30 s (C-1)', async () => {
+    vi.useFakeTimers();
+    const ipc = new FakeIpc();
+    const protocol = new MessageProtocol();
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
+    const promise = bridge.invokeOnHost(
+      permissionsCall('slow-user'),
+      new Uint8Array(0),
+      300_000,
+    );
+    vi.advanceTimersByTime(60_000);
+    bridge.tryConsumeDownstreamFromHost(
+      hostAnswer(protocol, sentRequestId(protocol, ipc, 0), {
+        result: { status: 'granted' },
+      } as Partial<MessageHeader>),
+    );
+    await expect(promise).resolves.toMatchObject({
+      requestId: 'slow-user',
+      result: { status: 'granted' },
+    });
+  });
+
+  it('rejects a host timeout with a TIMEOUT CoreError', async () => {
+    vi.useFakeTimers();
+    const bridge = createHostIpcBridge({
+      ipc: new FakeIpc(),
+      protocol: new MessageProtocol(),
+      platform,
+    });
+    const promise = bridge.invokeOnHost(
+      permissionsCall('t'),
+      new Uint8Array(0),
+    );
+    const assertion = expect(promise).rejects.toMatchObject({
+      code: 'TIMEOUT',
+    });
+    vi.advanceTimersByTime(30_001);
+    await assertion;
+  });
+
+  it('evicts the oldest pending host call past the 1024 cap (C-6)', async () => {
+    vi.useFakeTimers();
+    const ipc = new FakeIpc();
+    const protocol = new MessageProtocol();
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
+    const calls = Array.from({ length: 1025 }, (_, i) =>
+      bridge.invokeOnHost(permissionsCall(`c${i}`), new Uint8Array(0)),
+    );
+    const oldestId = sentRequestId(protocol, ipc, 0);
+    await expect(calls[0]).rejects.toThrow(
+      new RegExp(`too many concurrent host calls \\(${oldestId}\\)`),
+    );
+    // The evicted id no longer resolves anything; the newest still does.
+    expect(
+      bridge.tryConsumeDownstreamFromHost(hostAnswer(protocol, oldestId)),
+    ).toBe(false);
+    expect(
+      bridge.tryConsumeDownstreamFromHost(
+        hostAnswer(protocol, sentRequestId(protocol, ipc, 1024)),
+      ),
+    ).toBe(true);
+    await expect(calls[1024]).resolves.toMatchObject({ requestId: 'c1024' });
+    vi.advanceTimersByTime(30_001);
+    await Promise.allSettled(calls);
+  });
+
+  it('passes canonical and app-scoped host error codes only, and keeps the request routing (D-6)', async () => {
+    const ipc = new FakeIpc();
+    const protocol = new MessageProtocol();
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
+    const cases: Array<[string, string]> = [
+      ['TIMEOUT', 'TIMEOUT'],
+      ['app.photos/not-found', 'app.photos/not-found'],
+      ['toString', 'HOST_ERROR'],
+      ['<script>', 'HOST_ERROR'],
+    ];
+    for (const [i, [code, expected]] of cases.entries()) {
+      const promise = bridge.invokeOnHost(
+        permissionsCall(`e${i}`),
+        new Uint8Array(0),
+      );
+      bridge.tryConsumeDownstreamFromHost(
+        hostAnswer(protocol, sentRequestId(protocol, ipc, i), {
+          pluginId: 'spoofed.plugin',
+          event: 'spoofed',
+          error: { code, message: 'm'.repeat(2000) },
+        } as Partial<MessageHeader>),
+      );
+      const out = await promise;
+      expect(out?.error?.code).toBe(expected);
+      expect(out?.error?.message.length).toBe(512);
+      expect(out?.pluginId).toBe('core.permissions');
+      expect(out?.event).toBe('permissions.request');
+    }
+  });
+
+  it('close() rejects every pending call, clears its timer, and refuses later calls', async () => {
+    vi.useFakeTimers();
+    const ipc = new FakeIpc();
+    const protocol = new MessageProtocol();
+    const bridge = createHostIpcBridge({ ipc, protocol, platform });
+    const a = bridge.invokeOnHost(permissionsCall('a'), new Uint8Array(0));
+    const caps = bridge.queryCapabilities();
+    const settledA = expect(a).rejects.toThrow('runtime closing');
+    const settledCaps = expect(caps).rejects.toThrow('runtime closing');
+    bridge.close('runtime closing');
+    await settledA;
+    await settledCaps;
+    expect(vi.getTimerCount()).toBe(0);
+    // A late answer for a closed call is not consumed.
+    expect(
+      bridge.tryConsumeDownstreamFromHost(
+        hostAnswer(protocol, sentRequestId(protocol, ipc, 0)),
+      ),
+    ).toBe(false);
+    const writes = ipc.writes.length;
+    await expect(
+      bridge.invokeOnHost(permissionsCall('late'), new Uint8Array(0)),
+    ).rejects.toThrow('runtime closing');
+    await expect(bridge.queryCapabilities()).rejects.toThrow('runtime closing');
+    expect(ipc.writes.length).toBe(writes);
+    bridge.close();
   });
 });

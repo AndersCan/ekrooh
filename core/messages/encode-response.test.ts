@@ -37,4 +37,21 @@ describe('encodeResponse', () => {
     expect(header.requestId).toBe('r1');
     expect(header.error?.code).toBe('INVALID_RESPONSE');
   });
+
+  it('never throws or echoes when the routing ids alone overflow the header (C-3)', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const long = 'e'.repeat(40_000);
+    const frame = encodeResponse(protocol, {
+      type: 'INVOKE_RESPONSE',
+      pluginId: 'app.big',
+      event: long,
+      requestId: long,
+      error: { code: 'UNSUPPORTED_EVENT', message: long },
+    });
+    const header = protocol.decode(frame).header as PluginInvokeResponseHeader;
+    expect(header.error?.code).toBe('FRAME_TOO_LARGE');
+    expect(header.event).toBe('');
+    expect(header.requestId).toBeUndefined();
+    expect(header.error?.message).not.toContain('eeee');
+  });
 });

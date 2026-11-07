@@ -1,11 +1,22 @@
 import { ErrorCode, MessageType } from './constants';
+import { MAX_ID_LENGTH } from './frame-content';
 import type { MessageProtocol } from './wire-codec';
 import type { PluginInvokeResponseHeader } from './types';
+
+/** Echoes a routing id only when it is a short string; anything else could push
+ * the fallback response itself past the header cap. */
+function shortId(value: unknown): string {
+  return typeof value === 'string' && value.length <= MAX_ID_LENGTH
+    ? value
+    : '';
+}
 
 /** Encodes a routed response. A response that cannot be encoded (a result over
  * the 64 KB header limit, or one that does not serialize) is replaced by an
  * error response for the same request, so the caller fails fast instead of
- * waiting for a timeout that never explains why. */
+ * waiting for a timeout that never explains why. The fallback carries a fixed
+ * message and only short routing ids, so it always fits: this function never
+ * throws. */
 export function encodeResponse(
   protocol: MessageProtocol,
   response: PluginInvokeResponseHeader,
@@ -15,21 +26,30 @@ export function encodeResponse(
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     const tooLarge = /too large/i.test(reason);
-    console.error(
-      `Response for ${response.pluginId}.${response.event} dropped: ${reason}`,
-    );
+    const pluginId = shortId(response.pluginId);
+    const event = shortId(response.event);
+    try {
+      console.error(
+        `Response for ${pluginId}.${event} dropped: ${reason.slice(0, 200)}`,
+      );
+    } catch {
+      // Logging must never stop the fallback answer.
+    }
+    const requestId = shortId(response.requestId);
     return protocol.encode(
       MessageType.ENVELOPE,
       {
         type: 'INVOKE_RESPONSE',
-        pluginId: response.pluginId,
-        event: response.event,
-        requestId: response.requestId,
+        pluginId,
+        event,
+        requestId: requestId === '' ? undefined : requestId,
         error: {
           code: tooLarge
             ? ErrorCode.FRAME_TOO_LARGE
             : ErrorCode.INVALID_RESPONSE,
-          message: `Response for ${response.pluginId}.${response.event} could not be sent: ${reason}`,
+          message: tooLarge
+            ? 'Response could not be sent: it exceeds the frame size limit'
+            : 'Response could not be sent: it could not be encoded',
         },
       },
       null,

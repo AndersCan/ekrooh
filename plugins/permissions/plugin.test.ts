@@ -12,4 +12,10 @@ describe('createPermissionsPluginStub', () => {
     expect(plugin.capabilities).toContain('permissions');
     expect(plugin.runtimes.bare).toBeUndefined();
   });
+
+  it('gives the user-mediated request prompt a long host deadline (R-04)', () => {
+    const plugin = createPermissionsPluginStub();
+    expect(plugin.hostTimeoutsMs?.['permissions.request']).toBe(5 * 60 * 1000);
+    expect(plugin.hostTimeoutsMs?.['permissions.status']).toBeUndefined();
+  });
 });

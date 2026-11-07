@@ -2,8 +2,15 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- core.permissions `camera` shows a real dialog only for a declared
+         permission (an undeclared one is denied without asking). Declaring it
+         also makes ACTION_IMAGE_CAPTURE require the grant, which
+         media.capture requests first. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
+        android:name="to.holepunch.bare.android.BareApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -14,7 +21,13 @@
 
         <activity
             android:name="to.holepunch.bare.android.MainActivity"
-            android:exported="true">
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <!-- singleTask: another app starting this Activity reaches the
+                 existing instance. The worklet is process-wide
+                 (BareApplication), so even a second instance attaches to it
+                 instead of starting another backend. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

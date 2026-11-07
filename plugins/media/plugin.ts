@@ -8,16 +8,21 @@ import {
   PluginInvokeResponseHeader,
   PluginManifest,
 } from '../../core/messages';
+import { isCanonicalErrorCode } from '../../core/messages/error-codes';
 import type { LoopbackServer } from '../../core/server/static-file-server';
 import { mediaSpecs, MediaKind } from './events';
+import { isMediaKind, MEDIA_HOST_TIMEOUT_MS } from './kinds';
 
 export type MediaPluginDeps = {
   /** Worklet-side loopback server exposing picked files to the web layer. */
   staticServer: LoopbackServer;
-  /** Delegates the native pick/capture to the host (`HOST_INVOKE_REQUEST`). */
+  /** Delegates the native pick/capture to the host (`HOST_INVOKE_REQUEST`).
+   * `timeoutMs` is how long to wait for the host; the media plugin passes a
+   * deadline just under the page's 5-minute invoke timeout. */
   invokeOnHost: (
     header: PluginInvokeRequestHeader,
     payload: Uint8Array,
+    timeoutMs?: number,
   ) => Promise<PluginInvokeResponseHeader | null>;
 };
 
@@ -26,10 +31,8 @@ export type MediaPluginDeps = {
  * do not accumulate on the loopback server for the whole session. */
 const MEDIA_MOUNT_CAP = 4;
 
-const MEDIA_KINDS: readonly unknown[] = [
-  'image',
-  'video',
-] satisfies MediaKind[];
+/** Cap on a host error message passed on to the page. */
+const MAX_HOST_ERROR_MESSAGE_CHARS = 500;
 
 function newRequestId(): string {
   // CSPRNG-backed mount id (not Math.random): a local client that can observe
@@ -73,7 +76,7 @@ export function createMediaPlugin(deps: MediaPluginDeps): PluginManifest {
     // Event specs are types only; the page can send any value. `kind` reaches
     // the native picker and the mount path, so only the known values pass.
     const kind = args?.kind;
-    if (kind !== undefined && !MEDIA_KINDS.includes(kind)) {
+    if (kind !== undefined && !isMediaKind(kind)) {
       return err(ErrorCode.PLUGIN_ERROR, `Unknown media kind for ${event}`);
     }
     const host = await deps.invokeOnHost(
@@ -85,15 +88,22 @@ export function createMediaPlugin(deps: MediaPluginDeps): PluginManifest {
         args: kind === undefined ? {} : { kind },
       },
       new Uint8Array(0),
+      MEDIA_HOST_TIMEOUT_MS,
     );
     if (!host) {
       return err(ErrorCode.HOST_ERROR, `Host did not answer ${event}`);
     }
     if (host.error) {
-      return err(
-        (host.error.code as ErrorCode) || ErrorCode.HOST_ERROR,
-        host.error.message ?? `Host failed ${event}`,
-      );
+      // Only canonical codes pass through; anything else the host sends is a
+      // host failure, not a code the page should branch on.
+      const code = isCanonicalErrorCode(host.error.code)
+        ? host.error.code
+        : ErrorCode.HOST_ERROR;
+      const message =
+        typeof host.error.message === 'string' && host.error.message.length > 0
+          ? host.error.message.slice(0, MAX_HOST_ERROR_MESSAGE_CHARS)
+          : `Host failed ${event}`;
+      return err(code, message);
     }
     const path = (host.result as { path?: string } | undefined)?.path;
     if (!path) {

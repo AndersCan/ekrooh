@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { coerceErrorCode, err, ok } from './errors';
+import { isCanonicalErrorCode } from './error-codes';
 import { CoreError } from './types';
 import { ErrorCode } from './constants';
 
@@ -35,5 +36,18 @@ describe('Either result helpers', () => {
   it('coerceErrorCode maps unknown or missing codes to PLUGIN_ERROR', () => {
     expect(coerceErrorCode('NOPE')).toBe('PLUGIN_ERROR');
     expect(coerceErrorCode(undefined)).toBe('PLUGIN_ERROR');
+  });
+
+  it('coerceErrorCode ignores inherited properties (C-5)', () => {
+    for (const code of [
+      'toString',
+      '__proto__',
+      'constructor',
+      'hasOwnProperty',
+    ]) {
+      expect(coerceErrorCode(code)).toBe(ErrorCode.PLUGIN_ERROR);
+      expect(isCanonicalErrorCode(code)).toBe(false);
+    }
+    expect(coerceErrorCode('TIMEOUT')).toBe(ErrorCode.TIMEOUT);
   });
 });

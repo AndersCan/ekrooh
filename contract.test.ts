@@ -4,6 +4,12 @@ import path from 'node:path';
 import type { HashOptions } from 'node:crypto';
 import pkg from './package.json';
 import { VERSION } from './core/messages';
+import {
+  SNAPSHOT_PATH,
+  UPDATE_COMMAND,
+  buildApiSnapshot,
+  normalizeDeclaration,
+} from './scripts/api-snapshot.mjs';
 
 // The `./runtime` public surface is a worklet module that imports bare-*;
 // map them to Node equivalents so the export-names snapshot can load it.
@@ -43,12 +49,18 @@ vi.mock('bare-ws', async () => ({
   },
 }));
 
+/** Framework-core source: every `.ts` module under these roots (a root may be
+ * a single file) ships a co-located `*.test.ts`. Entry points and generated
+ * bundles (`core/*.core.ts`, `*.gen.js`) are outside the roots on purpose. */
 const FRAMEWORK_CORE_ROOTS = [
   'core/messages',
   'core/lib',
   'core/server',
+  'core/logs',
+  'core/harness',
+  'core/runtime.ts',
   'plugins',
-  'web/transports',
+  'web',
 ];
 
 const EXEMPT: Record<string, string> = {
@@ -58,10 +70,30 @@ const EXEMPT: Record<string, string> = {
     'wire constants; exercised via wire-codec tests',
   'core/messages/types.ts':
     'type definitions and CoreError; exercised indirectly',
+  'core/logs/index.ts': 'barrel re-export',
+  'core/logs/types.ts': 'type definitions only',
   'web/transports/index.ts': 'barrel re-export',
 };
 
+/** The frozen `package.json` `exports` keys. Adding, removing or renaming a
+ * subpath is a stability-boundary change (charter rule 6): update this list,
+ * `PUBLIC_SURFACES` and the API snapshot in the same reviewed change. */
+const EXPORT_KEYS = [
+  '.',
+  './core',
+  './runtime',
+  './plugins',
+  './plugins/health/events',
+  './plugins/discovery/events',
+  './plugins/permissions/events',
+  './plugins/media/events',
+  './plugins/logs/events',
+  './transports',
+  './package.json',
+];
+
 function listSourceFiles(dir: string): string[] {
+  if (fs.statSync(dir).isFile()) return [dir];
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
@@ -162,6 +194,22 @@ describe('presence manifest', () => {
 });
 
 describe('export-surface integrity', () => {
+  it('the package.json exports keys are frozen', () => {
+    // A new subpath is a new stability boundary, not a silent addition.
+    expect(Object.keys(pkg.exports)).toEqual(EXPORT_KEYS);
+  });
+
+  it('every code subpath is pinned by the public API snapshot', () => {
+    const pinned = new Set([
+      ...Object.keys(PUBLIC_SURFACES).map((k) => `./${k}`),
+      // `.` is an alias of `./core` (asserted below).
+      '.',
+      './package.json',
+    ]);
+    expect(EXPORT_KEYS.filter((k) => !pinned.has(k))).toEqual([]);
+    expect(pkg.exports['.']).toBe(pkg.exports['./core']);
+  });
+
   it('every package.json exports entry resolves to a real path', () => {
     const missing: string[] = [];
     for (const [key, rel] of Object.entries(pkg.exports)) {
@@ -191,6 +239,44 @@ describe('public API snapshot', () => {
       expect(actual).toEqual([...exports].sort());
     });
   }
+
+  it('the built type surface (dist/*.d.mts) matches the committed snapshot', () => {
+    // Value names above cannot see types or signatures; this pins them. A
+    // diff here is a stability-boundary change: review it, then regenerate.
+    const committed = fs.existsSync(SNAPSHOT_PATH)
+      ? fs.readFileSync(SNAPSHOT_PATH, 'utf8')
+      : null;
+    expect(
+      committed,
+      `api/public-api.d.mts.snap is missing. Run: ${UPDATE_COMMAND}`,
+    ).not.toBeNull();
+    expect(
+      buildApiSnapshot(path.resolve('dist')),
+      `the public type surface changed. Review the diff as a stability-boundary change, then run: ${UPDATE_COMMAND}`,
+    ).toBe(committed);
+  });
+
+  it('the snapshot normalizer ignores comments and chunk aliases, not types', () => {
+    const a = normalizeDeclaration(
+      [
+        'import { $ as Foo } from "./index-Do-kTNXw.mjs";',
+        "/** docs */ export declare function f(a: Foo, s?: '//x'): void;",
+      ].join('\n'),
+    );
+    const b = normalizeDeclaration(
+      [
+        'import { Q as Foo } from "./index-AbCdEf12.mjs";',
+        '// other docs',
+        "export declare function f(a: Foo, s?: '//x'): void;",
+      ].join('\n'),
+    );
+    expect(a).toBe(b);
+    expect(a).toContain("'//x'");
+    const changed = normalizeDeclaration(
+      "export declare function f(a: Foo, s: '//x'): void;",
+    );
+    expect(changed).not.toBe(a.split('\n')[1]);
+  });
 
   it('wire protocol VERSION is pinned at 1', () => {
     expect(VERSION).toBe(1);

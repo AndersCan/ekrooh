@@ -45,9 +45,125 @@ export function mimeTypeFor(filePath: string): string {
   return MIME_BY_EXTENSION[ext] ?? 'application/octet-stream';
 }
 
-/** A file located on disk plus the `stat` taken while locating it, so the
- * response path does not stat the same file a second time. */
-type ResolvedFile = { filePath: string; stat: ReturnType<typeof fs.statSync> };
+/** A file opened for serving: its real path, an open descriptor and the
+ * `fstat` of that descriptor. The bytes are streamed from `fd`, never by
+ * re-opening `filePath`, so what was checked is what is sent. Whoever takes a
+ * `ResolvedFile` owns `fd` and must stream it or `closeSync` it. */
+type ResolvedFile = {
+  filePath: string;
+  fd: number;
+  stat: ReturnType<typeof fs.fstatSync>;
+};
+
+function closeQuietly(fd: number): void {
+  try {
+    fs.closeSync(fd);
+  } catch {
+    // Already closed or never valid: nothing left to release.
+  }
+}
+
+/** Opens `realPath` (already resolved by `realpathSync` and checked to lie in
+ * its mount) and proves the descriptor is that file. A path component swapped
+ * for a symlink between the check and the open would make the open land
+ * elsewhere, so after opening the real path must still resolve to itself and
+ * its `lstat` must be the opened inode. Returns null (descriptor closed) when
+ * anything moved, or when it is not a regular file. */
+function openVerified(realPath: string): ResolvedFile | null {
+  let fd: number;
+  try {
+    fd = fs.openSync(realPath, 'r');
+  } catch {
+    return null;
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      closeQuietly(fd);
+      return null;
+    }
+    if (fs.realpathSync(realPath) !== realPath) {
+      console.warn(
+        `[static-server] refused a file that moved while it was opened: ${realPath}`,
+      );
+      closeQuietly(fd);
+      return null;
+    }
+    const link = fs.lstatSync(realPath);
+    if (!link.isFile() || link.ino !== stat.ino || link.dev !== stat.dev) {
+      console.warn(
+        `[static-server] refused a file that moved while it was opened: ${realPath}`,
+      );
+      closeQuietly(fd);
+      return null;
+    }
+    return { filePath: realPath, fd, stat };
+  } catch {
+    closeQuietly(fd);
+    return null;
+  }
+}
+
+/** A path in the form mount roots are compared in: its real path when it
+ * exists (a root may be missing at mount time), lowercased and NFC-normalized
+ * because the default APFS volume on macOS and iOS ignores case and
+ * normalization. Folding can only make two roots compare as overlapping more
+ * often, which errs toward refusing a layout, never toward serving. */
+function comparableRoot(dirPath: string): string {
+  let resolved: string;
+  try {
+    resolved = fs.realpathSync(dirPath);
+  } catch {
+    resolved = path.resolve(dirPath);
+  }
+  return resolved.normalize('NFC').toLowerCase();
+}
+
+/** The longest Origin/Host value echoed into a log line. */
+const MAX_LOGGED_REASON_CHARS = 200;
+/** Upgrade rejections logged per window; the rest are counted and reported
+ * once when the window ends. Any website can trigger a rejected upgrade, so
+ * without a limit one could evict every real diagnostic from the log ring. */
+const UPGRADE_REJECTION_LOG_LIMIT = 10;
+const UPGRADE_REJECTION_LOG_WINDOW_MS = 10_000;
+
+/** Rate limiter for upgrade-rejection log lines. Each window logs up to
+ * `limit` lines; the first rejection of a later window first reports how
+ * many were suppressed in the one before it. */
+export function createRejectionLogger(
+  log: (line: string) => void,
+  options: { limit?: number; windowMs?: number; now?: () => number } = {},
+): (reason: string) => void {
+  const limit = options.limit ?? UPGRADE_REJECTION_LOG_LIMIT;
+  const windowMs = options.windowMs ?? UPGRADE_REJECTION_LOG_WINDOW_MS;
+  const now = options.now ?? Date.now;
+  let windowStart = -Infinity;
+  let logged = 0;
+  let suppressed = 0;
+  return (reason) => {
+    const t = now();
+    if (t - windowStart >= windowMs) {
+      if (suppressed > 0) {
+        log(
+          `[loopback] upgrade rejected: ${suppressed} more rejections suppressed`,
+        );
+      }
+      windowStart = t;
+      logged = 0;
+      suppressed = 0;
+    }
+    if (logged >= limit) {
+      suppressed++;
+      return;
+    }
+    logged++;
+    const text =
+      reason.length > MAX_LOGGED_REASON_CHARS
+        ? `${reason.slice(0, MAX_LOGGED_REASON_CHARS)}…`
+        : reason;
+    log(`[loopback] upgrade rejected: ${text}`);
+  };
+}
 
 /** How a response may be cached by the WebView:
  * - `immutable`: content-addressed bundle, safe to keep for a year;
@@ -157,7 +273,10 @@ export function collectRequestBody(
   });
 }
 
-/** Handler for a registered HTTP route on the loopback server. */
+/** Handler for a registered HTTP route on the loopback server. An async
+ * handler that rejects is answered with a bare 500, like a throwing one. The
+ * return type stays `void`: an async function already fits it, while
+ * `void | Promise<void>` would reject the common `(req, res) => res.end()`. */
 export type LoopbackRouteHandler = (
   req: HTTPIncomingMessage,
   res: HTTPServerResponse,
@@ -197,6 +316,9 @@ export interface LoopbackServerOptions {
    * this (to 8x) and then the socket is closed rather than lose one. Defaults to
    * 2 MiB. */
   wsMaxQueuedBytes?: number;
+  /** How long the bootstrap nonce stays redeemable after binding, in ms.
+   * Defaults to the gate's `BOOTSTRAP_TTL_MS`. */
+  bootstrapTtlMs?: number;
 }
 
 export interface LoopbackServer {
@@ -228,14 +350,19 @@ export interface LoopbackServer {
    * `{ public: true }` to mark a mount as world-readable bootstrap content
    * served before auth; a non-public directory mount gates every request
    * behind the session. A request never resolves outside `dirPath`, symlinks
-   * included. */
+   * included. Throws when a public and a gated mount's directories contain
+   * one another. */
   mountDir(prefix: string, dirPath: string, opts?: { public?: boolean }): void;
   /** Registers a handler for authenticated, handshaken WebSocket connections
    * (the protocol socket). */
   onConnection(handler: LoopbackConnectionHandler): void;
   /** Registers an HTTP route. `handler` runs before mount resolution, after
-   * the auth gate (device mode requires the session cookie/token). The route
-   * body is read with `collectRequestBody`. */
+   * the auth gate (device mode requires the session cookie/token). `path` is
+   * normalized like a mount path (decoded, trailing slash dropped). The
+   * response starts with `Referrer-Policy`, `X-Content-Type-Options` (and
+   * `Cross-Origin-Resource-Policy` in device mode) already set; a handler that
+   * throws or rejects is answered with a bare 500. Read the body with
+   * `collectRequestBody`, passing a byte cap. */
   registerRoute(
     method: string,
     path: string,
@@ -325,10 +452,15 @@ export function createLoopbackServer(
       `refusing to bind '${host}' with auth off: only a loopback address may serve without a credential`,
     );
   }
+  // An IPv6 literal is bracketed in a URL (`http://[::1]:port`) but not when
+  // binding.
+  const bindHost = host.replace(/^\[(.*)\]$/, '$1');
+  const originHost = bindHost.includes(':') ? `[${bindHost}]` : bindHost;
   const gate = createLoopbackGate({
     auth,
     token: options.token,
     allowedOrigins: options.allowedOrigins,
+    bootstrapTtlMs: options.bootstrapTtlMs,
   });
   const slot = createProtocolSocketSlot({
     idleTimeoutMs: options.wsIdleTimeoutMs ?? 60_000,
@@ -342,11 +474,30 @@ export function createLoopbackServer(
   const publicDirMounts = new Set<string>();
   const routeHandlers = new Map<string, LoopbackRouteHandler>();
   let originPromise: Promise<string> | null = null;
+  const logUpgradeRejection = createRejectionLogger((line) =>
+    console.error(line),
+  );
+
+  /** `Cross-Origin-Resource-Policy: same-origin` stops another site embedding
+   * a response (`<img>`, `<script>`) even if a credential rode along. It is
+   * left off when extra page origins are allowed: the Vite dev page lives on
+   * another origin and loads backend media cross-site. */
+  const resourcePolicy: Record<string, string> =
+    (options.allowedOrigins ?? []).length === 0
+      ? { 'Cross-Origin-Resource-Policy': 'same-origin' }
+      : {};
+
+  /** Headers every framework-built response carries. */
+  const BASE_HEADERS: Record<string, string> = {
+    'Referrer-Policy': 'no-referrer',
+    'X-Content-Type-Options': 'nosniff',
+  };
 
   function writeError(
     res: HTTPServerResponse,
     status: HTTPStatusCode,
     message: string,
+    extra: Record<string, string> = {},
   ) {
     if (res.headersSent) {
       res.destroy();
@@ -354,7 +505,9 @@ export function createLoopbackServer(
     }
     res.writeHead(status, {
       'Content-Type': 'text/plain',
-      'Referrer-Policy': 'no-referrer',
+      ...BASE_HEADERS,
+      ...resourcePolicy,
+      ...extra,
     });
     res.end(message);
   }
@@ -386,13 +539,21 @@ export function createLoopbackServer(
           const headers: Record<string, string> = {
             'Content-Type': 'text/plain',
             'Cache-Control': 'no-store',
-            'Referrer-Policy': 'no-referrer',
+            ...BASE_HEADERS,
+            ...resourcePolicy,
           };
           if (verdict.cookie !== null) headers['Set-Cookie'] = verdict.cookie;
           res.writeHead(200, headers);
           res.end('ok');
         },
-        () => writeError(res, 413, 'Request Entity Too Large'),
+        () => {
+          // Answer, then drop the connection: the rest of an oversized
+          // pre-auth body is never read off the socket.
+          res.on('finish', () => req.destroy());
+          writeError(res, 413, 'Request Entity Too Large', {
+            Connection: 'close',
+          });
+        },
       )
       .catch((err: unknown) => writeInternalError(res, 'POST /login', err));
   }
@@ -445,14 +606,23 @@ export function createLoopbackServer(
       );
       return null;
     }
-    const served = (file: ResolvedFile | null) =>
-      file && {
+    const served = (file: ResolvedFile | null) => {
+      if (file === null) return null;
+      if (mount.public && insideGatedMount(file.filePath)) {
+        console.warn(
+          `[static-server] refused a gated file through the public mount: ${file.filePath}`,
+        );
+        closeQuietly(file.fd);
+        return null;
+      }
+      return {
         ...file,
         rel: path.relative(root, file.filePath).split(path.sep).join('/'),
       };
+    };
     if (mount.rel.length > 0) {
-      const found = fileWithin(root, path.join(root, ...mount.rel));
-      if (found) return served(found);
+      const found = served(fileWithin(root, path.join(root, ...mount.rel)));
+      if (found) return found;
       // SPA fallback is scoped to the bootstrap (public) mount and to
       // navigations (browsers send `Accept: text/html` on top-level GETs).
       if (!mount.public) return null;
@@ -464,9 +634,23 @@ export function createLoopbackServer(
     return served(fileWithin(root, path.join(root, 'index.html')));
   }
 
-  /** `candidate` as a served file when it exists, is a regular file, and its
-   * real path stays inside `root`. A missing file is routine (every SPA route,
-   * every missing asset), so it is not logged. */
+  /** Whether a real path lies in a gated directory mount's root. The public
+   * mount refuses such a file even if the layout
+   * check in `mountDir` was sidestepped (a root that became a symlink into
+   * the web app after it was mounted, a case alias on a case-insensitive
+   * volume). */
+  function insideGatedMount(realPath: string): boolean {
+    const candidate = realPath.normalize('NFC').toLowerCase();
+    for (const [key, dirPath] of dirMounts) {
+      if (publicDirMounts.has(key)) continue;
+      if (isWithin(comparableRoot(dirPath), candidate)) return true;
+    }
+    return false;
+  }
+
+  /** `candidate` opened for serving when it exists, is a regular file, and
+   * its real path stays inside `root`. A missing file is routine (every SPA
+   * route, every missing asset), so it is not logged. */
   function fileWithin(root: string, candidate: string): ResolvedFile | null {
     let real: string;
     try {
@@ -480,12 +664,7 @@ export function createLoopbackServer(
       );
       return null;
     }
-    try {
-      const stat = fs.statSync(real);
-      return stat.isFile() ? { filePath: real, stat } : null;
-    } catch {
-      return null;
-    }
+    return openVerified(real);
   }
 
   /** Strict Content-Security-Policy for HTML documents served by the loopback
@@ -507,34 +686,16 @@ export function createLoopbackServer(
   function serveFile(
     req: HTTPIncomingMessage,
     res: HTTPServerResponse,
-    filePath: string,
-    knownStat?: ResolvedFile['stat'],
+    file: ResolvedFile,
     cache: CachePolicy = 'no-store',
     sandboxed = false,
   ) {
-    let stat: ReturnType<typeof fs.statSync>;
-    if (knownStat) {
-      stat = knownStat;
-    } else {
-      try {
-        stat = fs.statSync(filePath);
-      } catch {
-        console.debug(
-          `[static-server] serveFile: stat failed for ${filePath} — 404`,
-        );
-        writeError(res, 404, 'Not found');
-        return;
-      }
-    }
-    if (!stat.isFile()) {
-      writeError(res, 404, 'Not found');
-      return;
-    }
+    const { filePath, fd, stat } = file;
     const contentType = mimeTypeFor(filePath);
-    const cspHeader: Record<string, string> = {
-      'X-Content-Type-Options': 'nosniff',
+    const policyHeaders: Record<string, string> = {
+      ...BASE_HEADERS,
       ...(sandboxed
-        ? { 'Content-Security-Policy': MOUNTED_FILE_CSP }
+        ? { 'Content-Security-Policy': MOUNTED_FILE_CSP, ...resourcePolicy }
         : contentType === 'text/html'
           ? {
               'Content-Security-Policy': cspFor(gate.socketSource(req.headers)),
@@ -548,14 +709,13 @@ export function createLoopbackServer(
         'Content-Range': `bytes ${range.start}-${range.end}/${stat.size}`,
         'Content-Length': range.end - range.start + 1,
         'Accept-Ranges': 'bytes',
-        ...cspHeader,
-        'Referrer-Policy': 'no-referrer',
+        ...policyHeaders,
         'Cache-Control': 'no-store',
       });
       // Flush the headers immediately so bare-http1 does not append its own
       // (zero) Content-Length when the piped stream ends.
       res.flushHeaders();
-      pipeFile(res, filePath, range);
+      pipeFile(res, file, range);
       return;
     }
     const cacheHeaders: Record<string, string> =
@@ -572,9 +732,10 @@ export function createLoopbackServer(
       cache !== 'no-store' &&
       etagMatches(req.headers['if-none-match'], cacheHeaders.ETag)
     ) {
+      closeQuietly(fd);
       res.writeHead(304, {
         ...cacheHeaders,
-        'Referrer-Policy': 'no-referrer',
+        ...BASE_HEADERS,
       });
       res.end();
       return;
@@ -583,31 +744,29 @@ export function createLoopbackServer(
       'Content-Type': contentType,
       'Content-Length': stat.size,
       'Accept-Ranges': 'bytes',
-      ...cspHeader,
-      'Referrer-Policy': 'no-referrer',
+      ...policyHeaders,
       ...cacheHeaders,
     });
     res.flushHeaders();
-    pipeFile(res, filePath);
+    pipeFile(res, file);
   }
 
-  /** Pipes a file's bytes to the response with an error handler. bare-fs opens
-   * its fd asynchronously, so a file evicted between `statSync` and the open
-   * (e.g. the spool LRU eviction in #8) emits `'error'` with no listeners —
-   * an unhandled error would crash the whole worklet. Headers are flushed
+  /** Streams an opened file's bytes to the response from its descriptor (the
+   * stream closes it), with an error handler: a read error must never become
+   * an unhandled `'error'` that crashes the whole worklet. Headers are flushed
    * before piping, so a mid-stream error aborts the response rather than
    * writing a late status. */
   function pipeFile(
     res: HTTPServerResponse,
-    filePath: string,
+    file: ResolvedFile,
     range?: { start: number; end: number },
   ) {
-    const stream = range
-      ? fs.createReadStream(filePath, {
-          start: range.start,
-          end: range.end,
-        })
-      : fs.createReadStream(filePath);
+    const stream = fs.createReadStream(
+      file.filePath,
+      range
+        ? { fd: file.fd, start: range.start, end: range.end }
+        : { fd: file.fd },
+    );
     stream.on('error', (err) => {
       if (!res.headersSent) {
         const status =
@@ -618,6 +777,54 @@ export function createLoopbackServer(
       res.destroy();
     });
     stream.pipe(res);
+  }
+
+  /** Opens a file mount's target. The host chose the path, so it is not
+   * confined to a root, but it is still served from a verified descriptor so a
+   * file evicted (or swapped) after the lookup is a 404, not a crash. */
+  function openFileMount(filePath: string): ResolvedFile | null {
+    let real: string;
+    try {
+      real = fs.realpathSync(filePath);
+    } catch {
+      return null;
+    }
+    return openVerified(real);
+  }
+
+  function runRoute(
+    route: LoopbackRouteHandler,
+    req: HTTPIncomingMessage,
+    res: HTTPServerResponse,
+    label: string,
+  ) {
+    // Set before the handler runs so a consumer route carries them unless it
+    // overrides them on purpose.
+    for (const [name, value] of Object.entries({
+      ...BASE_HEADERS,
+      ...resourcePolicy,
+    })) {
+      res.setHeader(name, value);
+    }
+    let result: unknown;
+    try {
+      result = route(req, res);
+    } catch (err) {
+      writeInternalError(res, label, err);
+      return;
+    }
+    // An async handler that rejects would otherwise be an unhandled
+    // rejection, which aborts the Bare process, and leave the client hanging.
+    if (
+      result instanceof Promise ||
+      (typeof result === 'object' &&
+        result !== null &&
+        typeof (result as PromiseLike<unknown>).then === 'function')
+    ) {
+      (result as PromiseLike<unknown>).then(undefined, (err: unknown) =>
+        writeInternalError(res, label, err),
+      );
+    }
   }
 
   function handleRequest(req: HTTPIncomingMessage, res: HTTPServerResponse) {
@@ -652,11 +859,7 @@ export function createLoopbackServer(
         );
         return;
       }
-      try {
-        route(req, res);
-      } catch (err) {
-        writeInternalError(res, `route ${req.method} ${cleanPath}`, err);
-      }
+      runRoute(route, req, res, `route ${req.method} ${cleanPath}`);
       return;
     }
 
@@ -683,9 +886,17 @@ export function createLoopbackServer(
       return;
     }
     if (mount.kind === 'file') {
+      const file = openFileMount(mount.filePath);
+      if (file === null) {
+        console.debug(
+          `[static-server] file mount target ${mount.filePath} is unreadable — 404`,
+        );
+        writeError(res, 404, 'Not found');
+        return;
+      }
       // Mounted files (e.g. media) can be replaced under the same URL and
       // are session-gated: never cacheable.
-      serveFile(req, res, mount.filePath, undefined, 'no-store', true);
+      serveFile(req, res, file, 'no-store', true);
       return;
     }
     const resolved = resolveDirFile(mount, headers);
@@ -701,8 +912,7 @@ export function createLoopbackServer(
     serveFile(
       req,
       res,
-      resolved.filePath,
-      resolved.stat,
+      resolved,
       cachePolicyFor(resolved.rel, mount.public),
       !mount.public,
     );
@@ -720,9 +930,9 @@ export function createLoopbackServer(
     if (!originPromise) {
       originPromise = new Promise<string>((resolve, reject) => {
         server.on('error', reject);
-        server.listen(port, host, () => {
+        server.listen(port, bindHost, () => {
           const address = server.address();
-          const bound = `http://${host}:${address?.port}`;
+          const bound = `http://${originHost}:${address?.port}`;
           gate.bind(bound);
           resolve(bound);
         });
@@ -736,10 +946,11 @@ export function createLoopbackServer(
   // `[loopback] upgrade rejected:` prefix, and answered with its HTTP status
   // where there is one — a silent `socket.destroy()` is indistinguishable on
   // the client from "server unreachable". These lines are captured by the
-  // `core.logs` ring buffer.
+  // `core.logs` ring buffer, so they are rate limited and the echoed header
+  // values truncated (`createRejectionLogger`): any website can trigger one.
   server.on('upgrade', (req, socket, head) => {
     const reject = (reason: string, status?: 401 | 403 | 429) => {
-      console.error(`[loopback] upgrade rejected: ${reason}`);
+      logUpgradeRejection(reason);
       if (status === undefined) {
         socket.destroy();
         return;
@@ -787,13 +998,31 @@ export function createLoopbackServer(
     },
     mountDir(prefix, dirPath, opts) {
       const key = mountKey(prefix);
+      const isPublic = opts?.public === true;
+      // A public root that contains a gated one (or sits inside it) would
+      // serve the gated files before login, as app code, under another URL
+      // (`/peer/x` for a `/shared` mount at `<web>/peer`, or `/Shared/x` on a
+      // case-insensitive volume). Refuse the layout outright.
+      const root = comparableRoot(dirPath);
+      for (const [otherKey, otherPath] of dirMounts) {
+        if (otherKey === key) continue;
+        if (publicDirMounts.has(otherKey) === isPublic) continue;
+        const other = comparableRoot(otherPath);
+        if (isWithin(root, other) || isWithin(other, root)) {
+          throw new Error(
+            `mountDir('${prefix}'): '${dirPath}' overlaps the ${isPublic ? 'gated' : 'public'} mount '${otherKey}' at '${otherPath}'; a public and a gated directory mount must not contain each other`,
+          );
+        }
+      }
       dirMounts.set(key, dirPath);
-      if (opts?.public) publicDirMounts.add(key);
+      if (isPublic) publicDirMounts.add(key);
       else publicDirMounts.delete(key);
     },
     onConnection: (handler) => slot.onConnection(handler),
     registerRoute(method, path, handler) {
-      routeHandlers.set(`${method.toUpperCase()} ${path}`, handler);
+      // Keyed in the same decoded, normalized form a request path is matched
+      // in, so `/api/` and `/a%20b` are reachable.
+      routeHandlers.set(`${method.toUpperCase()} ${mountKey(path)}`, handler);
     },
     push: (frame) => slot.push(frame),
     close(cb) {

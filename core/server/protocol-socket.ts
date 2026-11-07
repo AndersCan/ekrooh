@@ -33,6 +33,12 @@ export type LoopbackConnectionHandler = (
   request: LoopbackRequest,
 ) => void;
 
+/** WebSocket close code sent to a protocol socket evicted by a newer one: the
+ * page reads it as "another document took over" and does not fast-reconnect
+ * (which would evict the newer socket in turn). */
+export const REPLACED_CLOSE_CODE = 4001;
+export const REPLACED_CLOSE_REASON = 'replaced';
+
 export interface ProtocolSocketOptions {
   /** Idle timeout (ms) on the underlying TCP socket. */
   idleTimeoutMs: number;
@@ -74,7 +80,11 @@ export function createProtocolSocketSlot(
   options: ProtocolSocketOptions,
 ): ProtocolSocketSlot {
   const handlers: LoopbackConnectionHandler[] = [];
-  let active: { client: WebSocketLike; writer: BoundedWriter } | null = null;
+  let active: {
+    client: WebSocketLike;
+    writer: BoundedWriter;
+    evict(): void;
+  } | null = null;
   let activeSince = 0;
   /** The upgrade waiting out the replacement interval. At most one waits: a
    * newer one supersedes it, since it would have evicted it on arrival. */
@@ -145,20 +155,41 @@ export function createProtocolSocketSlot(
           raw.destroy();
         },
       });
+      /** Set once a newer socket took the slot: the close handshake can take
+       * a moment, and no frame read during it may still reach a plugin. */
+      let evicted = false;
       const client: WebSocketLike = {
         on: (event: string, listener: (...args: never[]) => void) =>
-          raw.on(event as 'close', listener as () => void),
+          event === 'data'
+            ? raw.on('data', (chunk: unknown) => {
+                if (!evicted) (listener as (c: unknown) => void)(chunk);
+              })
+            : raw.on(event as 'close', listener as () => void),
         write: (data) => writer.write(data),
         destroy: () => raw.destroy(),
         pause: () => raw.pause(),
         resume: () => raw.resume(),
       };
       const previous = active;
-      active = { client, writer };
+      active = {
+        client,
+        writer,
+        evict() {
+          evicted = true;
+          writer.clear();
+          // A close frame with a known code, not a bare TCP reset: bare-ws
+          // waits a bounded time for the peer's answer, then destroys.
+          try {
+            raw.close(REPLACED_CLOSE_CODE, REPLACED_CLOSE_REASON);
+          } catch {
+            raw.destroy();
+          }
+        },
+      };
       activeSince = Date.now();
       if (previous) {
         console.warn('[loopback] replaced the existing protocol socket');
-        previous.client.destroy();
+        previous.evict();
       }
       raw.on('close', () => {
         writer.clear();

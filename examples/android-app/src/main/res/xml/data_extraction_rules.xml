@@ -1,20 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 12+ data extraction rules: nothing in the app sandbox is eligible
-     for device-to-device migration (see backup_rules.xml for the same policy).
-     The worklet's dirs are session/device-scoped and must not be restored.
-     Excludes every sandboxed domain in both cloud backup and device transfer
-     (`allowBackup="false"` makes this defense-in-depth). -->
+<!-- Android 12+: nothing in the app sandbox is eligible for cloud backup or
+     device-to-device transfer. For apps targeting 12+, `allowBackup="false"`
+     disables cloud backup but NOT device transfer, so these excludes are what
+     keep app data (including `root`: app_webview cookies, Local Storage and
+     IndexedDB, and the device-protected `device_*` domains) on this device. -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="root" path="." />
         <exclude domain="file" path="." />
         <exclude domain="database" path="." />
         <exclude domain="sharedpref" path="." />
         <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="root" path="." />
         <exclude domain="file" path="." />
         <exclude domain="database" path="." />
         <exclude domain="sharedpref" path="." />
         <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
     </device-transfer>
 </data-extraction-rules>
