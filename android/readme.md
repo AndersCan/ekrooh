@@ -17,6 +17,6 @@ The public Kotlin API is dumped to `api/bare-host.api`; `./gradlew check` runs `
 ./gradlew :bare-host:testDebugUnitTest   # JUnit tests in src/test/
 ```
 
-Reference consumer: `examples/android-app` (`BareApplication.kt`, `ReferenceHost.kt`, `MainActivity.kt`). The Bare Kit prebuilt (`prebuilds/android/bare-kit/`, gitignored, from `npm run prebuilds`) is packaged into the AAR.
+Reference consumer: `examples/android-app` (`BareApplication.kt`, `ReferenceHost.kt`, `MainActivity.kt`). The Bare Kit prebuilt (`prebuilds/android/bare-kit/`, gitignored, from `npm run prebuilds`) is packaged by `bare-kit-runtime/` (`:bare-kit-runtime`) as `io.github.anderscan.ekrooh:bare-kit-runtime`, which `:bare-host` depends on. It is published separately, only when bare-kit is bumped (ADR 0007).
 
-Publishing: `io.github.anderscan.ekrooh:bare-host` to Maven Central (`:bare-host:publishToSonatype closeAndReleaseSonatypeStagingRepository`), with GitHub Packages as a fallback (`:bare-host:publishMavenAarPublicationToGitHubPackagesRepository`); the `publish-maven` job of `.github/workflows/release.yml` runs them on tags (see `RELEASING.md`).
+Publishing: `io.github.anderscan.ekrooh:bare-host` to Maven Central (`:bare-host:publishToSonatype closeAndReleaseSonatypeStagingRepository`), with GitHub Packages as a fallback (`:bare-host:publishMavenAarPublicationToGitHubPackagesRepository`); the `publish-maven` job of `.github/workflows/release.yml` runs them on `v*` tags. `io.github.anderscan.ekrooh:bare-kit-runtime` is published by `.github/workflows/release-bare-kit-runtime.yml` on `bare-kit-v*` tags. See `RELEASING.md`.

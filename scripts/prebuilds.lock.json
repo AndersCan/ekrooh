@@ -8,6 +8,9 @@
       "extract": ["android/*", "ios/*"]
     }
   },
+  "maven": {
+    "bare-kit-runtime": "2.5.5"
+  },
   "spm": {
     "BareKit.xcframework.zip": {
       "url": "https://github.com/AndersCan/ekrooh/releases/download/v0.6.0/BareKit.xcframework.zip",

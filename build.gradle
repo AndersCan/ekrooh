@@ -63,3 +63,28 @@ tasks.register("resolveAllDependencies") {
     }
   }
 }
+
+// Shared POM metadata for every published artifact (Maven Central requires
+// license, developer and SCM). Call inside a `pom { }` block.
+ext.ekroohPom = { pom ->
+  pom.url = "https://github.com/AndersCan/ekrooh"
+  pom.licenses {
+    license {
+      name = "Apache-2.0"
+      url = "https://www.apache.org/licenses/LICENSE-2.0"
+      distribution = "repo"
+    }
+  }
+  pom.developers {
+    developer {
+      id = "AndersCan"
+      name = "Anders Can"
+      email = "anders.can1@gmail.com"
+    }
+  }
+  pom.scm {
+    connection = "scm:git:https://github.com/AndersCan/ekrooh.git"
+    developerConnection = "scm:git:git@github.com:AndersCan/ekrooh.git"
+    url = "https://github.com/AndersCan/ekrooh"
+  }
+}

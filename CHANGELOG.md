@@ -135,6 +135,13 @@ the old behaviour**; read them before upgrading.
 
 ### Changed
 
+- **The Bare Kit runtime is a separate Android artifact** ([ADR 0007](docs/adr/0007-separate-bare-kit-runtime-artifact.md)):
+  `bare-host` no longer bundles `libbare-kit.so` and the Bare Kit `classes.jar`.
+  It depends on `io.github.anderscan.ekrooh:bare-kit-runtime:2.5.5` instead,
+  which Gradle resolves from Maven Central automatically. The `bare-host` AAR
+  goes from about 69 MB to about 40 KB. The runtime is published only when
+  bare-kit is bumped, because Maven Central limits monthly release size. No
+  consumer changes are needed.
 - **Can break — host timeouts**: a host call that misses its deadline is
   `TIMEOUT` (was `HOST_ERROR`). Event deadlines now reach the host bridge: `vendor.media`
   waits 4 min 55 s and `permissions.request` 5 min (was a fixed 30 s, which
@@ -209,6 +216,13 @@ the old behaviour**; read them before upgrading.
 - `security.android.test.ts`, `security.apple.test.ts` and
   `error-codes-parity.test.ts`; `docs:check` type-checks every docs snippet
   against `dist/` and rejects known retired APIs.
+
+### Fixed
+
+- **npm license metadata**: `package.json` declared `MIT`, but the `LICENSE`
+  file shipped in every tarball, the Maven POMs and upstream Bare / Bare Kit
+  are all Apache-2.0. The field now says `Apache-2.0`. The license itself is
+  unchanged.
 
 ### Removed
 

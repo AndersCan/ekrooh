@@ -338,6 +338,14 @@ All hosts: `ErrorCodes` in Kotlin and Swift match `core/messages`
   (docs-only PRs skip the heavy jobs but still report).
 - The deploy templates (`templates/deploy/`) keep every secret in a GitHub
   environment limited to the default branch; production needs reviewers.
+- `release-bare-kit-runtime.yml` (`bare-kit-v*` tags) uses the same protected
+  `release` environment and the same signing and Sonatype secrets, with only
+  `contents: read` and a checkout that drops its token. It runs no npm install: it fetches the hash-checked
+  prebuild with Node built-ins, refuses a tag that differs from the lockfile's
+  `maven` pin, and publishes only `:bare-kit-runtime`, an unmodified repackage
+  of that prebuild ([ADR 0007](adr/0007-separate-bare-kit-runtime-artifact.md)).
+  Like `publish-maven`, its Gradle build runs next to the secrets; dependency
+  verification covers `:bare-kit-runtime` too.
 - Dev tooling is not exempt: the harness supervisor (`core/harness/`) hands out
   instance credentials, so it binds only a loopback host (throws otherwise),
   refuses any request with an `Origin` or a foreign `Host`, sends no CORS
