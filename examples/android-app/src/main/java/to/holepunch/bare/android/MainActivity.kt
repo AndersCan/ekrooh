@@ -1,11 +1,11 @@
 package to.holepunch.bare.android
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
+import android.view.ViewGroup
 import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
@@ -13,126 +13,89 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.FileProvider
+import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
-import org.json.JSONObject
+import androidx.webkit.WebViewFeature
 import to.holepunch.bare.android.app.R
-import to.holepunch.bare.kit.IPC
-import to.holepunch.bare.kit.Worklet
-import java.io.File
-import java.util.UUID
 
-class MainActivity : AppCompatActivity() {
-    private lateinit var worklet: Worklet
-    private lateinit var ipc: IPC
+/**
+ * The reference shell's only screen: a WebView on the worklet's loopback page.
+ * The worklet and host plugins live in [ReferenceHost] (process-wide); this
+ * Activity attaches to it and is the UI the host plugins launch from.
+ */
+class MainActivity : AppCompatActivity(), ReferenceHost.Ui {
+    private lateinit var host: ReferenceHost
     private lateinit var webView: WebView
-    private val webViewClient = BareWebViewClient()
-    private val hostPlugins = HostPluginRegistry()
-    private lateinit var storageDir: File
-    private lateinit var webappDir: File
-    private lateinit var bareCacheDir: File
-    private lateinit var capturesDir: File
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private var bootstrapScript: ScriptHandler? = null
+    private var webViewReleased = false
 
-    // vendor.media: native picker/camera launchers. The host handlers run on the
-    // IPC thread and launch on the main thread; the result routes back through
-    // [pendingMedia] to the worklet as the HOST_INVOKE_RESPONSE.
+    // Activity Result launchers, registered in onCreate (before the Activity
+    // is started) per the Activity Result API contract. Results route back to
+    // the host, so a call survives this Activity being recreated.
+    private lateinit var permissionLauncher: ActivityResultLauncher<String>
+    private lateinit var cameraPermissionLauncher: ActivityResultLauncher<String>
     private lateinit var pickLauncher: ActivityResultLauncher<PickVisualMediaRequest>
     private lateinit var imageCaptureLauncher: ActivityResultLauncher<Uri>
     private lateinit var videoCaptureLauncher: ActivityResultLauncher<Uri>
-    @Volatile
-    private var pendingMedia: ((HostPluginRegistry.HostInvokeOutcome) -> Unit)? = null
-    @Volatile
-    private var pendingCaptureFile: File? = null
 
-    // core.permissions: real runtime permission dialog. The same Activity
-    // Result pattern as vendor.media — launch on the main thread, route the
-    // system outcome back through [pendingPermissionRespond].
-    private lateinit var permissionLauncher: ActivityResultLauncher<String>
-    @Volatile
-    private var pendingPermission: String? = null
-    @Volatile
-    private var pendingPermissionRespond: ((HostPluginRegistry.HostInvokeOutcome) -> Unit)? = null
+    private val webViewClient = object : BareWebViewClient() {
+        override fun onPageFinished(view: WebView?, url: String?) {
+            super.onPageFinished(view, url)
+            // The bootstrap script is for the first document only: once it ran
+            // (and the page exchanged the nonce for the session cookie), later
+            // documents in this WebView (a reload, an in-app navigation, a
+            // mounted file opened as a page) do not get the nonce. A reload
+            // logs in with the surviving session cookie. Only the app page
+            // counts: a late error page finishing must not remove it early.
+            val origin = allowedOrigin ?: return
+            if (url == null || !BareWebViewClient.isAllowedNavigation(url, origin)) return
+            val script = bootstrapScript ?: return
+            script.remove()
+            bootstrapScript = null
+            host.markBootstrapDelivered()
+            // Drop an earlier error page from history so Back leaves the app.
+            view?.clearHistory()
+        }
+    }
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        host = (application as BareApplication).host
 
-        // bare-fs cannot read APK assets by path, so copy the built web app out
-        // of assets/ into the cache dir for the worklet to serve over loopback.
-        // Always re-copy: cacheDir survives `adb install -r`, so an existing
-        // copy would otherwise go stale across rebuilds.
-        storageDir = File(cacheDir, "bare").apply { mkdirs() }
-        webappDir = File(cacheDir, "webapp")
-        bareCacheDir = File(cacheDir, "bare-cache").apply { mkdirs() }
-        // Camera/picker outputs live in a dedicated subdir so the FileProvider
-        // path (res/xml/file_paths.xml) never exposes the whole cacheDir
-        // (handoff.json, web assets, etc.).
-        capturesDir = File(cacheDir, "captures").apply { mkdirs() }
-        copyWebAssets(webappDir)
-
-        // A previous run may have left a handoff file pointing at a dead
-        // ephemeral port; remove it so polling never loads a stale origin.
-        File(storageDir, "handoff.json").delete()
-
-        // Fail fast on unsupported 32-bit-only runtimes: the worklet's native
-        // thread bootstrap is unreliable there (ekrooh#46), so surface a clear
-        // error instead of a native SIGSEGV.
-        BareHostAbi.requireSupportedAbi()
-
-        worklet = Worklet(
-            Worklet.Options()
-                .memoryLimit(128 * 1024 * 1024)
-                .assets(File(storageDir, "asset-cache").absolutePath),
-        )
-
-        try {
-            assets.open("main.core.bundle").use { bundleStream ->
-                worklet.start(
-                    "/main.core.bundle",
-                    bundleStream,
-                    // On-device argv contract: [webAssets, storage, cache] (see
-                    // `resolveWorkletConfig()`). All three must be directories;
-                    // a missing/absent cache falls back to storage with a
-                    // warning, so pass a real cache dir to keep boots quiet.
-                    arrayOf(
-                        webappDir.absolutePath,
-                        storageDir.absolutePath,
-                        bareCacheDir.absolutePath,
-                    ),
-                )
+        permissionLauncher =
+            registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                host.onPermissionResult(granted)
             }
-            ipc = IPC(worklet)
-            registerDefaultHostPlugins(hostPlugins, this)
-            registerPermissionHostPlugins(hostPlugins)
-            registerMediaHostPlugins(hostPlugins)
-            HostIpcCoordinator(ipc, hostPlugins).start()
-        } catch (e: Exception) {
-            Log.e("BARE_KOTLIN", "Failed to start worklet", e)
-        }
+        cameraPermissionLauncher =
+            registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                host.onCameraPermissionResult(granted)
+            }
+        pickLauncher =
+            registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+                host.onPickResult(uri)
+            }
+        imageCaptureLauncher =
+            registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+                host.onCaptureResult(ok)
+            }
+        // CaptureVideo reports success as a Boolean. (TakeVideo's thumbnail is
+        // null on most camera apps when EXTRA_OUTPUT is set, even on success.)
+        videoCaptureLauncher =
+            registerForActivityResult(ActivityResultContracts.CaptureVideo()) { ok ->
+                host.onCaptureResult(ok)
+            }
 
         webView = findViewById(R.id.webview)
-        webView.settings.javaScriptEnabled = true
-        webView.settings.domStorageEnabled = true
-        webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-        // The page is served over loopback HTTP; it never needs file:// or
-        // content:// access, so a hostile document cannot reach them either.
-        webView.settings.allowFileAccess = false
-        webView.settings.allowContentAccess = false
-        webView.webViewClient = webViewClient
+        configureWebView(webView)
 
-        waitForHandoffAndLoad()
+        host.attach(this)
+        host.whenReady(this) { handoff -> if (handoff != null) load(handoff) else showError(HANDOFF_FAILED) }
 
         onBackPressedDispatcher.addCallback(
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
-                    if (!::webView.isInitialized) {
-                        isEnabled = false
-                        onBackPressedDispatcher.onBackPressed()
-                        return
-                    }
                     if (webView.canGoBack()) {
                         webView.goBack()
                     } else {
@@ -145,280 +108,95 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    /** Polls the worklet's `handoff.json` (written once the loopback server is
-     * up), injects the one-time bootstrap nonce + shell marker, then loads the
-     * page. The raw session token is never exposed to page JS — only the
-     * single-use nonce the page exchanges once via `POST /login`. */
-    private fun waitForHandoffAndLoad() {
-        val handoff = File(storageDir, "handoff.json")
-        val deadline = System.currentTimeMillis() + 15_000
-        fun poll() {
-            val text = if (handoff.exists()) handoff.readText() else null
-            if (text != null) {
-                try {
-                    val json = JSONObject(text)
-                    val origin = json.getString("origin")
-                    val port = json.getInt("port")
-                    val bootstrap = json.getString("bootstrap")
-                    WebViewCompat.addDocumentStartJavaScript(
-                        webView,
-                        "window.__ekrooh={bootstrap:${JSONObject.quote(bootstrap)}};" +
-                            "window.BareShell=true;",
-                        // allowedOriginRules cannot wildcard the port; the
-                        // handoff already knows the exact ephemeral port.
-                        setOf("http://127.0.0.1:$port"),
-                    )
-                    // Confine the WebView to this origin before the first load.
-                    webViewClient.allowedOrigin = "http://127.0.0.1:$port"
-                    webView.loadUrl("$origin/index.html")
-                    // The bootstrap nonce is single-use and the page exchanges
-                    // it for the HttpOnly session cookie immediately. Delete
-                    // the handoff now that it is spent.
-                    handoff.delete()
-                    return
-                } catch (e: Exception) {
-                    Log.e("BARE_KOTLIN", "Handoff malformed", e)
-                }
-            }
-            if (System.currentTimeMillis() < deadline) {
-                mainHandler.postDelayed({ poll() }, 100)
-            } else {
-                Log.e("BARE_KOTLIN", "Timed out waiting for worklet handoff file")
-            }
-        }
-        poll()
-    }
-
-    /** Copies `index.html` and the `assets/` directory out of the APK so the
-     * worklet can serve them from the filesystem. */
-    private fun copyWebAssets(destDir: File) {
-        destDir.deleteRecursively()
-        destDir.mkdirs()
-        try {
-            assets.open("index.html").use { input ->
-                File(destDir, "index.html").outputStream().use { input.copyTo(it) }
-            }
-            copyAssetTree("assets", destDir)
-        } catch (e: Exception) {
-            Log.e("BARE_KOTLIN", "Failed to copy web assets", e)
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun configureWebView(view: WebView) {
+        view.settings.javaScriptEnabled = true
+        view.settings.domStorageEnabled = true
+        view.settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        // The page is served over loopback HTTP; it never needs file:// or
+        // content:// access, so a hostile document cannot reach them either.
+        view.settings.allowFileAccess = false
+        view.settings.allowContentAccess = false
+        view.webViewClient = webViewClient
+        webViewClient.onRenderProcessGone = { _ ->
+            // The renderer died (OOM, crash): the WebView is unusable. Drop it
+            // and recreate the Activity; the worklet keeps running and the new
+            // page logs in again with the session cookie.
+            releaseWebView()
+            recreate()
         }
     }
 
-    private fun copyAssetTree(prefix: String, destDir: File) {
-        val names = assets.list(prefix) ?: return
-        for (name in names) {
-            val assetPath = if (prefix.isEmpty()) name else "$prefix/$name"
-            val dest = File(destDir, assetPath)
-            val children = assets.list(assetPath)
-            if (children != null && children.isNotEmpty()) {
-                // Directory with children — recurse.
-                dest.mkdirs()
-                copyAssetTree(assetPath, destDir)
-            } else {
-                try {
-                    assets.open(assetPath).use { input ->
-                        dest.parentFile?.mkdirs()
-                        dest.outputStream().use { input.copyTo(it) }
-                    }
-                } catch (e: java.io.FileNotFoundException) {
-                    // Empty directory (list() returns [] for both files and
-                    // empty dirs on some Android versions).
-                    dest.mkdirs()
-                }
-            }
+    /** Injects the bootstrap nonce for the loopback origin only, confines the
+     * WebView to that origin, then loads the page. The raw session token is
+     * never exposed to page JS, only the single-use nonce. */
+    private fun load(handoff: BareHandoff) {
+        if (webViewReleased) return
+        if (host.bootstrapDelivered) {
+            // The nonce is spent and the session cookie is set: a WebView
+            // created later (recreation, a second Activity) gets no nonce and
+            // the page connects on the cookie.
+        } else if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            bootstrapScript = WebViewCompat.addDocumentStartJavaScript(
+                webView,
+                handoff.bootstrapScript,
+                // allowedOriginRules cannot wildcard the port; the handoff origin
+                // carries the exact ephemeral port.
+                setOf(handoff.origin),
+            )
+        } else {
+            // Without document-start injection the nonce cannot reach the page
+            // before its scripts run. Say so instead of polling forever.
+            Log.e("BARE_KOTLIN", "This WebView does not support DOCUMENT_START_SCRIPT; update Android System WebView")
+            showError(WEBVIEW_TOO_OLD)
+            return
         }
+        // Confine the WebView to the same origin before the first load.
+        webViewClient.allowedOrigin = handoff.origin
+        webView.loadUrl(handoff.indexUrl)
+    }
+
+    private fun showError(message: String) {
+        if (webViewReleased) return
+        webView.loadDataWithBaseURL(null, "<p style=\"font-family:sans-serif;padding:16px\">$message</p>", "text/html", "utf-8", null)
     }
 
     override fun onDestroy() {
+        host.detach(this, isFinishing && !isChangingConfigurations)
+        releaseWebView()
         super.onDestroy()
-        mainHandler.removeCallbacksAndMessages(null)
-        if (::ipc.isInitialized) ipc.close()
-        if (::worklet.isInitialized) worklet.terminate()
     }
 
-    /**
-     * Reference host handler for `core.permissions`: `permissions.request`
-     * shows the system runtime-permission dialog for ids backed by a real
-     * Android runtime permission (camera) and returns the real outcome. Ids
-     * needing no runtime grant (storage → system picker) or unknown ids are
-     * reported via [resolvePermissionStatus] without a dialog — never a
-     * fabricated grant.
-     */
-    private fun registerPermissionHostPlugins(registry: HostPluginRegistry) {
-        permissionLauncher =
-            registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-                val id = pendingPermission ?: return@registerForActivityResult
-                val respond = pendingPermissionRespond ?: return@registerForActivityResult
-                pendingPermission = null
-                pendingPermissionRespond = null
-                respond(
-                    HostPluginRegistry.HostInvokeOutcome.Ok(
-                        JSONObject().put("permission", id).put(
-                            "status",
-                            if (granted) "granted" else "denied",
-                        ),
-                    ),
-                )
-            }
-
-        registry.register("core.permissions", "permissions.request") { args, _, respond ->
-            // Single-slot pending callback: reject overlapping requests so one
-            // invoke cannot clobber another's response routing.
-            if (pendingPermissionRespond != null) {
-                respond(
-                    HostPluginRegistry.HostInvokeOutcome.Fail(
-                        ErrorCodes.HOST_ERROR,
-                        "Concurrent permission invocation not supported",
-                    ),
-                )
-                return@register
-            }
-            // Missing id fails closed (unsupported) rather than resolving to a
-            // granted capability.
-            val id = args?.optString("permission") ?: ""
-            val androidPermission = androidPermissionFor(id)
-            if (androidPermission == null) {
-                // No runtime dialog (scoped storage or unknown id) — reflect the
-                // real status instead of guessing.
-                respond(
-                    HostPluginRegistry.HostInvokeOutcome.Ok(
-                        JSONObject().put("permission", id).put(
-                            "status",
-                            resolvePermissionStatus(id, this),
-                        ),
-                    ),
-                )
-                return@register
-            }
-            pendingPermission = id
-            pendingPermissionRespond = respond
-            mainHandler.post { permissionLauncher.launch(androidPermission) }
-        }
+    private fun releaseWebView() {
+        if (webViewReleased) return
+        webViewReleased = true
+        bootstrapScript = null
+        (webView.parent as? ViewGroup)?.removeView(webView)
+        webView.destroy()
     }
 
-    /**
-     * Reference host handlers for `vendor.media`: the worklet serves the
-     * returned path over its loopback HTTP server, so no bytes cross the wire.
-     * `media.pick` opens the system photo/video picker; `media.capture` opens
-     * the camera. Both copy the result into the app cache and return a
-     * filesystem path the worklet can serve.
-     */
-    private fun registerMediaHostPlugins(registry: HostPluginRegistry) {
-        // Registered in onCreate (before the activity is started), per the
-        // Activity Result API contract.
-        pickLauncher = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-            val respond = pendingMedia ?: return@registerForActivityResult
-            pendingMedia = null
-            if (uri == null) {
-                respond(
-                    HostPluginRegistry.HostInvokeOutcome.Fail(
-                        ErrorCodes.HOST_ERROR,
-                        "Media pick cancelled",
-                    ),
-                )
-                return@registerForActivityResult
-            }
-            val path = copyUriToCache(uri)
-            if (path == null) {
-                respond(
-                    HostPluginRegistry.HostInvokeOutcome.Fail(
-                        ErrorCodes.HOST_ERROR,
-                        "Failed to copy picked media",
-                    ),
-                )
+    // --- ReferenceHost.Ui ---------------------------------------------------
+
+    override fun launchPermission(permission: String) = permissionLauncher.launch(permission)
+
+    override fun launchCameraPermission() = cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+
+    override fun launchPick(video: Boolean) {
+        val selector =
+            if (video) {
+                ActivityResultContracts.PickVisualMedia.VideoOnly
             } else {
-                respond(HostPluginRegistry.HostInvokeOutcome.Ok(JSONObject().put("path", path)))
+                ActivityResultContracts.PickVisualMedia.ImageOnly
             }
-        }
-        imageCaptureLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-            finishCapture(ok)
-        }
-        videoCaptureLauncher =
-            registerForActivityResult(ActivityResultContracts.TakeVideo()) { thumbnail ->
-                // TakeVideo's result is a thumbnail Bitmap (null when cancelled).
-                finishCapture(thumbnail != null)
-            }
-
-        registry.register("vendor.media", "media.pick") { args, _, respond ->
-            if (pendingMedia != null) {
-                respond(
-                    HostPluginRegistry.HostInvokeOutcome.Fail(
-                        ErrorCodes.HOST_ERROR,
-                        "Concurrent media invocation not supported",
-                    ),
-                )
-                return@register
-            }
-            val kind = args?.optString("kind") ?: "image"
-            pendingMedia = respond
-            val selector =
-                if (kind == "video") {
-                    ActivityResultContracts.PickVisualMedia.VideoOnly
-                } else {
-                    ActivityResultContracts.PickVisualMedia.ImageOnly
-                }
-            mainHandler.post { pickLauncher.launch(PickVisualMediaRequest(selector)) }
-        }
-        registry.register("vendor.media", "media.capture") { args, _, respond ->
-            if (pendingMedia != null || pendingCaptureFile != null) {
-                respond(
-                    HostPluginRegistry.HostInvokeOutcome.Fail(
-                        ErrorCodes.HOST_ERROR,
-                        "Concurrent media invocation not supported",
-                    ),
-                )
-                return@register
-            }
-            val kind = args?.optString("kind") ?: "image"
-            pendingMedia = respond
-            val ext = if (kind == "video") ".mp4" else ".jpg"
-            val file = File(capturesDir, "${UUID.randomUUID()}$ext")
-            pendingCaptureFile = file
-            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-            mainHandler.post {
-                if (kind == "video") videoCaptureLauncher.launch(uri) else imageCaptureLauncher.launch(uri)
-            }
-        }
+        pickLauncher.launch(PickVisualMediaRequest(selector))
     }
 
-    private fun finishCapture(success: Boolean) {
-        val respond = pendingMedia ?: return
-        pendingMedia = null
-        val file = pendingCaptureFile ?: return
-        pendingCaptureFile = null
-        if (success && file.exists() && file.length() > 0L) {
-            respond(HostPluginRegistry.HostInvokeOutcome.Ok(JSONObject().put("path", file.absolutePath)))
-        } else {
-            respond(
-                HostPluginRegistry.HostInvokeOutcome.Fail(
-                    ErrorCodes.HOST_ERROR,
-                    "Capture cancelled or failed",
-                ),
-            )
-        }
+    override fun launchCapture(uri: Uri, video: Boolean) {
+        if (video) videoCaptureLauncher.launch(uri) else imageCaptureLauncher.launch(uri)
     }
 
-    /** Copies a picker content:// URI into the app cache so the worklet can
-     * serve it from the filesystem. */
-    private fun copyUriToCache(uri: Uri): String? {
-        return try {
-            val ext =
-                contentResolver.getType(uri)?.let { mime ->
-                    when {
-                        mime.startsWith("image/") -> ".jpg"
-                        mime.startsWith("video/") -> ".mp4"
-                        else -> ".bin"
-                    }
-                } ?: ".bin"
-            val dest = File(capturesDir, "media-${UUID.randomUUID()}$ext")
-            val copied =
-                contentResolver.openInputStream(uri)?.use { input ->
-                    dest.outputStream().use { output -> input.copyTo(output) }
-                }
-            if (copied == null) null else dest.absolutePath
-        } catch (e: Exception) {
-            Log.e("BARE_KOTLIN", "Failed to copy picked media", e)
-            null
-        }
+    private companion object {
+        const val HANDOFF_FAILED = "The app backend has not started yet. Still waiting; restart the app if this stays."
+        const val WEBVIEW_TOO_OLD = "This device's WebView is too old. Update Android System WebView and restart the app."
     }
 }

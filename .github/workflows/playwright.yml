@@ -1,14 +1,13 @@
 name: Playwright Tests
+# No workflow-level paths filter: `test` is a required check, and a workflow
+# skipped by `paths-ignore` never reports. Docs-only changes skip the job via
+# the `changes` gate instead (a skipped job counts as passing).
 on:
   push:
     branches: [main, master]
-    paths-ignore: &docs_only
-      - '**.md'
-      - 'docs/**'
-      - LICENSE
   pull_request:
     branches: [main, master]
-    paths-ignore: *docs_only
+  merge_group: # required check `test` must report in a merge queue
 
 permissions:
   contents: read
@@ -18,11 +17,37 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test:
-    timeout-minutes: 60
+  changes:
+    name: changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        run: node .github/scripts/changed-code.mjs
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+
+  test:
+    needs: changes
+    # Fail-safe: runs unless the diff is known to be docs-only, including
+    # when the `changes` job itself failed.
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*

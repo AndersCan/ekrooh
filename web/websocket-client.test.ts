@@ -6,9 +6,9 @@ import {
   it,
   vi,
 } from 'vite-plus/test';
-import { MessageProtocol, MessageType } from '../../core/messages';
-import type { PluginInvokeResponseHeader } from '../../core/messages';
-import { createWebSocketTransport } from '../websocket-client';
+import { MessageProtocol, MessageType } from '../core/messages';
+import type { PluginInvokeResponseHeader } from '../core/messages';
+import { createWebSocketTransport } from './websocket-client';
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
@@ -338,6 +338,7 @@ describe('createWebSocketTransport messaging', () => {
     const transport = createWebSocketTransport({
       url: 'ws://test',
       maxRetries: 0,
+      minBootWindowMs: 0,
     });
     await nextTick();
     const socket = lastSocket();
@@ -382,6 +383,8 @@ describe('createWebSocketTransport messaging', () => {
     const transport = createWebSocketTransport({
       url: 'ws://test',
       maxRetries: 0,
+      minBootWindowMs: 0,
+      diagnostics: true,
     });
     await nextTick();
     const socket = lastSocket();
@@ -419,6 +422,8 @@ describe('createWebSocketTransport messaging', () => {
     const transport = createWebSocketTransport({
       url: 'ws://test',
       maxRetries: 0,
+      minBootWindowMs: 0,
+      diagnostics: true,
     });
     await nextTick();
     const socket = lastSocket();
@@ -540,6 +545,7 @@ describe('createWebSocketTransport reconnect', () => {
       url: 'ws://test',
       maxRetries: 0,
       backoffMs: 5,
+      minBootWindowMs: 0,
     });
     await nextTick();
     const headers: unknown[] = [];
@@ -573,6 +579,7 @@ describe('createWebSocketTransport reconnect', () => {
       url: 'ws://test',
       maxRetries: 1,
       backoffMs: 5,
+      minBootWindowMs: 0,
     });
     await nextTick();
     const headers: unknown[] = [];
@@ -751,5 +758,290 @@ describe('createWebSocketTransport after a successful connect', () => {
       fresh.open();
       expect(fresh.readyState).toBe(FakeWebSocket.OPEN);
     });
+  });
+});
+
+describe('createWebSocketTransport security-review fixes', () => {
+  const invoke = (requestId: string, event = 'health.ping') =>
+    [
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event,
+        requestId,
+      },
+      null,
+    ] as const;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('fails invokes already sent on a socket when it closes (D-1)', async () => {
+    const transport = createWebSocketTransport({ url: 'ws://test' });
+    await vi.advanceTimersByTimeAsync(0);
+    const headers: PluginInvokeResponseHeader[] = [];
+    transport.subscribe((m) => headers.push(m.header as never));
+    lastSocket().open();
+    transport.send(...invoke('answered'));
+    transport.send(...invoke('lost'));
+    lastSocket().message(
+      protocol.encode(
+        MessageType.ENVELOPE,
+        {
+          type: 'INVOKE_RESPONSE',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          requestId: 'answered',
+          result: { message: 'pong', ts: 1 },
+        },
+        null,
+      ),
+    );
+    expect(headers.map((h) => h.requestId)).toEqual(['answered']);
+    lastSocket().close();
+    expect(headers.map((h) => h.requestId)).toEqual(['answered', 'lost']);
+    expect(headers[1].error?.code).toBe('TRANSPORT_ERROR');
+    expect(headers[1].error?.message).toContain('closed before the response');
+  });
+
+  it('fails in-flight invokes when the foreground check finds the socket dead (D-1)', async () => {
+    const handlers: Record<string, () => void> = {};
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      addEventListener: vi.fn((type: string, fn: () => void) => {
+        handlers[type] = fn;
+      }),
+    });
+    const transport = createWebSocketTransport({ url: 'ws://test' });
+    await vi.advanceTimersByTimeAsync(0);
+    const headers: PluginInvokeResponseHeader[] = [];
+    transport.subscribe((m) => headers.push(m.header as never));
+    lastSocket().open();
+    transport.send(...invoke('stale'));
+    lastSocket().readyState = FakeWebSocket.CLOSED;
+    handlers['visibilitychange']();
+    expect(headers.map((h) => h.requestId)).toEqual(['stale']);
+  });
+
+  it('a 4001 "replaced" close waits instead of reconnecting at once, and fails fast meanwhile (D-2)', async () => {
+    const transport = createWebSocketTransport({ url: 'ws://test' });
+    await vi.advanceTimersByTimeAsync(0);
+    const headers: PluginInvokeResponseHeader[] = [];
+    transport.subscribe((m) => headers.push(m.header as never));
+    const first = lastSocket();
+    first.open();
+    first.readyState = FakeWebSocket.CLOSED;
+    (first.onclose as unknown as (e: { code: number }) => void)({
+      code: 4001,
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    transport.send(...invoke('while-replaced'));
+    expect(headers.map((h) => h.requestId)).toEqual(['while-replaced']);
+    expect(headers[0].error?.message).toContain('replaced');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it('does not fold server log lines into errors unless diagnostics is on (D-13)', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => '[loopback] upgrade rejected: something',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+      minBootWindowMs: 0,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const headers: PluginInvokeResponseHeader[] = [];
+    transport.subscribe((m) => headers.push(m.header as never));
+    transport.send(...invoke('q'));
+    lastSocket().close();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(headers).toHaveLength(1);
+    expect(headers[0].error?.message).not.toContain('[loopback]');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('gives up only after the boot window, and wake starts over (D-3)', async () => {
+    const handlers: Record<string, () => void> = {};
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      addEventListener: vi.fn((type: string, fn: () => void) => {
+        handlers[type] = fn;
+      }),
+    });
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+      backoffMs: 5,
+      minBootWindowMs: 1000,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const headers: PluginInvokeResponseHeader[] = [];
+    transport.subscribe((m) => headers.push(m.header as never));
+    transport.send(...invoke('boot'));
+    // A failure inside the window backs off instead of giving up, even
+    // with no retries left.
+    lastSocket().close();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(headers).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    lastSocket().close();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(headers.map((h) => h.requestId)).toEqual(['boot']);
+    const before = FakeWebSocket.instances.length;
+    handlers['visibilitychange']();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(FakeWebSocket.instances.length).toBe(before + 1);
+    lastSocket().open();
+    transport.send(...invoke('after-wake'));
+    expect(lastSocket().sent).toHaveLength(1);
+  });
+
+  it('drops a socket stuck connecting past openTimeoutMs and retries', async () => {
+    createWebSocketTransport({
+      url: 'ws://test',
+      backoffMs: 5,
+      openTimeoutMs: 1000,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const hung = lastSocket();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(hung.readyState).toBe(FakeWebSocket.CLOSED);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(lastSocket()).not.toBe(hung);
+  });
+
+  it('caps the connect queue and fails the overflow fast (D-14)', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'nonce' } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => {})),
+    );
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxQueued: 2,
+    });
+    const headers: PluginInvokeResponseHeader[] = [];
+    transport.subscribe((m) => headers.push(m.header as never));
+    transport.send(...invoke('a'));
+    transport.send(...invoke('b'));
+    transport.send(...invoke('c'));
+    expect(headers.map((h) => h.requestId)).toEqual(['c']);
+  });
+
+  it('clears the login timer once /login answers (D-14)', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'nonce' } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true })),
+    );
+    createWebSocketTransport({ url: 'ws://test' });
+    await vi.advanceTimersByTimeAsync(0);
+    lastSocket().open();
+    // Only the connected-state stable timer may remain, not the 2s login one.
+    expect(vi.getTimerCount()).toBeLessThanOrEqual(1);
+  });
+
+  it('close() fails pending work, stops reconnecting and removes its listener (D-14)', async () => {
+    const removeEventListener = vi.fn();
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      addEventListener: vi.fn(),
+      removeEventListener,
+    });
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      backoffMs: 5,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const headers: PluginInvokeResponseHeader[] = [];
+    transport.subscribe((m) => headers.push(m.header as never));
+    const socket = lastSocket();
+    socket.open();
+    transport.send(...invoke('inflight'));
+    transport.close?.();
+    expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(removeEventListener).toHaveBeenCalledWith(
+      'visibilitychange',
+      expect.any(Function),
+    );
+    transport.send(...invoke('after'));
+    expect(headers.map((h) => h.requestId)).toEqual(['inflight', 'after']);
+    expect(headers.every((h) => h.error?.code === 'TRANSPORT_ERROR')).toBe(
+      true,
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+});
+
+describe('createWebSocketTransport stale-socket guards (adv-E-3)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('a socket that timed out and opens late sends nothing and delivers nothing', async () => {
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      backoffMs: 5,
+      openTimeoutMs: 1000,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const delivered: unknown[] = [];
+    transport.subscribe((m) => delivered.push(m.header));
+    const hung = lastSocket();
+    transport.send(
+      MessageType.ENVELOPE,
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        requestId: 'queued',
+      },
+      null,
+    );
+    await vi.advanceTimersByTimeAsync(1000); // open timeout drops `hung`
+    await vi.advanceTimersByTimeAsync(10); // backoff → a fresh socket
+    const fresh = lastSocket();
+    expect(fresh).not.toBe(hung);
+
+    // The old socket opens late: it must not flush the queue (onopen guard)
+    // nor mark the transport connected.
+    hung.open();
+    expect(hung.sent).toHaveLength(0);
+    expect(fresh.sent).toHaveLength(0);
+
+    // A frame arriving on the old socket is not delivered (onmessage guard).
+    hung.message(
+      protocol.encode(
+        MessageType.ENVELOPE,
+        {
+          type: 'INVOKE_RESPONSE',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          requestId: 'queued',
+          result: { message: 'forged', ts: 0 },
+        },
+        null,
+      ),
+    );
+    expect(delivered).toEqual([]);
+
+    // Only the current socket opening flushes the queue, exactly once.
+    fresh.open();
+    expect(fresh.sent).toHaveLength(1);
+    expect(hung.sent).toHaveLength(0);
   });
 });

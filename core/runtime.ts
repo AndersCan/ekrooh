@@ -12,9 +12,10 @@ import type {
   createPluginRegistry,
   createPluginRouter,
 } from './messages/protocol';
-import { installConsoleCapture } from './logs/capture';
+import { installConsoleCapture, type ConsoleCapture } from './logs/capture';
 import { createLogRingBuffer } from './logs/store';
 import { registerLogRoutes } from './logs/routes';
+import type { LogLevel, LogStore } from './logs/types';
 import {
   createLoopbackServer,
   type LoopbackServer,
@@ -37,7 +38,15 @@ export {
 export { getIPC } from './lib/get-ipc';
 
 /** Global provided by the Bare runtime (also present in bare-kit worklets). */
-declare const Bare: { argv?: string[] } | undefined;
+declare const Bare:
+  | {
+      argv?: string[];
+      /** `Bare` is an event emitter (`bare-events`): `suspend`, `wakeup`,
+       * `idle` and `resume` mark the app's suspension lifecycle. */
+      on?(event: string, listener: () => void): unknown;
+      off?(event: string, listener: () => void): unknown;
+    }
+  | undefined;
 
 function readBareArgv(): string[] {
   return typeof Bare !== 'undefined' && Array.isArray(Bare.argv)
@@ -175,7 +184,8 @@ export type WorkletRuntimeOptions = {
    * ephemeral port in device mode, 8080 in dev mode. */
   port?: number;
   /** Require the per-session token/cookie. Defaults to on in device mode and
-   * off in dev mode. The origin check applies either way. */
+   * off in dev mode. The origin check applies either way. `false` is only
+   * accepted together with `deviceMode: false`. */
   auth?: boolean;
   /** Extra page origins allowed to call the loopback server, e.g. the Vite dev
    * server (`http://localhost:5173`). The bound origin and its loopback
@@ -188,7 +198,8 @@ export type WorkletRuntimeOptions = {
   handoffFile?: boolean;
   /** Device mode (the default): auth on, an ephemeral port, and the handoff
    * file when `storage` is set. Pass `false` (or the `mode=dev` CLI token) for
-   * the dev backend: auth off and port 8080 unless set explicitly. */
+   * the dev backend: auth off and port 8080 unless set explicitly. Device mode
+   * cannot run with `auth: false`: that combination throws. */
   deviceMode?: boolean;
   /** Additional plugin manifests to register after the canonical defaults
    * (consumer product plugins, e.g. `app.photos`). */
@@ -211,6 +222,13 @@ export type WorkletRuntimeOptions = {
   /** Global cap on calls routed at once; calls over it fail with a
    * `TRANSPORT_ERROR`. Defaults to 64. */
   maxInflight?: number;
+  /** Cap on calls routed at once from one channel (the page socket, the host
+   * IPC), so one peer cannot take every slot. Defaults to three quarters of
+   * `maxInflight`. */
+  maxInflightPerChannel?: number;
+  /** Cap on calls routed at once to one plugin, so a slow plugin cannot take
+   * every slot. Defaults to `maxInflight` (no per-plugin cap). */
+  maxInflightPerPlugin?: number;
   /** Plugin ids whose calls must run one at a time, in arrival order. All
    * other plugins run concurrently, so one slow call never blocks the rest. */
   serialPlugins?: readonly string[];
@@ -236,19 +254,96 @@ export interface WorkletRuntime {
   hostBridge: ReturnType<typeof createHostIpcBridge> | null;
   config: WorkletRuntimeConfig;
   /** Binds the server, mounts the web app, attaches the protocol socket and
-   * (in device mode) writes the handoff file. Resolves to the credentials. */
+   * (in device mode) writes the handoff file. Resolves to the credentials.
+   * Idempotent: later calls return the same promise. Rejects when the device
+   * handoff file cannot be written (a host would never find the origin) and
+   * after `close()`. */
   start(): Promise<{
     origin: string;
     port: number;
     token: string;
     bootstrap: string;
   }>;
+  /** Closes the server, detaches the host IPC listener, fails pending host
+   * calls and stops feeding this runtime's log store from the console.
+   * Idempotent. */
   close(cb?: (err?: Error | null) => void): void;
 }
 
+const LEVEL_RANK: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+
+type ConsoleSink = { store: LogStore; minRank: number };
+
+/** Process-wide console capture shared by every live runtime. The console is
+ * patched once, when the first runtime is created, and restored when the
+ * last one closes, so N runtimes in one process (the harness) never stack
+ * wrappers and a closed runtime's store stops receiving (and retaining) logs. */
+const consoleSinks = new Set<ConsoleSink>();
+let sharedConsoleCapture: ConsoleCapture | null = null;
+
+const fanOutStore: LogStore = {
+  capacity: 0,
+  append(entry) {
+    const rank = LEVEL_RANK[entry.level];
+    for (const sink of consoleSinks) {
+      if (rank < sink.minRank) continue;
+      try {
+        sink.store.append(entry);
+      } catch {
+        // One broken store must not starve the others or the log call.
+      }
+    }
+  },
+  view: () => [],
+  clear: () => 0,
+};
+
+function attachConsoleSink(store: LogStore, minLevel?: LogLevel): () => void {
+  const sink: ConsoleSink = { store, minRank: LEVEL_RANK[minLevel ?? 'debug'] };
+  consoleSinks.add(sink);
+  if (!sharedConsoleCapture) {
+    sharedConsoleCapture = installConsoleCapture(fanOutStore, 'backend');
+  }
+  return () => {
+    if (!consoleSinks.delete(sink)) return;
+    if (consoleSinks.size === 0 && sharedConsoleCapture) {
+      sharedConsoleCapture.restore();
+      sharedConsoleCapture = null;
+    }
+  };
+}
+
+/** Writes `handoff.json` atomically (temp file + rename), so a host polling
+ * the storage dir never reads a half-written file. Owner-only permissions:
+ * the file carries the bootstrap nonce. */
+function writeHandoffFile(
+  storage: string,
+  handoff: { origin: string; port: number; bootstrap: string },
+): void {
+  const target = path.join(storage, 'handoff.json');
+  const temp = path.join(storage, 'handoff.json.tmp');
+  try {
+    fs.writeFileSync(temp, JSON.stringify(handoff), { mode: 0o600 });
+    fs.renameSync(temp, target);
+  } catch (err) {
+    try {
+      fs.rmSync(temp, { force: true });
+    } catch {
+      // Best effort: the failure below is what matters.
+    }
+    throw err;
+  }
+}
+
 /**
- * Creates one worklet runtime — a per-instance, stateless factory (no
- * module-scope singletons, no hardcoded port) so the dev/test backend can host
+ * Creates one worklet runtime — a per-instance factory (no hardcoded port;
+ * the only process-wide state is the shared console capture, which fans out
+ * to every live runtime's log store) so the dev/test backend can host
  * N of them and a consumer worklet entry can be just "register plugins +
  * wire p2p". Mirrors the reference wiring in `core/main.core.ts`.
  */
@@ -256,6 +351,14 @@ export function createWorkletRuntime(
   options: WorkletRuntimeOptions = {},
 ): WorkletRuntime {
   const deviceMode = options.deviceMode ?? true;
+  if (deviceMode && options.auth === false) {
+    // Device mode is the secure default (ADR 0006); an `auth: false` left in
+    // consumer options must not quietly open an unauthenticated server.
+    throw new Error(
+      'createWorkletRuntime: auth: false requires deviceMode: false (the dev ' +
+        'backend). Device mode always runs with auth on.',
+    );
+  }
   const auth = options.auth ?? deviceMode;
   const port = options.port ?? (deviceMode ? 0 : 8080);
 
@@ -282,9 +385,14 @@ export function createWorkletRuntime(
   let hostBridge: ReturnType<typeof createHostIpcBridge> | null = null;
   const context = createBareRuntimeContext([], {
     maxInflight: options.maxInflight,
+    maxInflightPerChannel: options.maxInflightPerChannel,
+    maxInflightPerPlugin: options.maxInflightPerPlugin,
     serialPlugins: options.serialPlugins,
-    delegateToHost: (header, payload) =>
-      hostBridge?.invokeOnHost(header, payload) ?? Promise.resolve(null),
+    // The event's own host deadline (`timeoutMs`) must reach the bridge, or
+    // every delegated call falls back to the bridge default.
+    delegateToHost: (header, payload, timeoutMs) =>
+      hostBridge?.invokeOnHost(header, payload, timeoutMs) ??
+      Promise.resolve(null),
     getHostCapabilities: () =>
       hostBridge?.queryCapabilities() ?? Promise.resolve([]),
   });
@@ -298,9 +406,6 @@ export function createWorkletRuntime(
   // log routes. Retention is a consumer knob (`logsCapacity`); the rotating file
   // sink is an app decision, kept out of the framework.
   const logStore = createLogRingBuffer(options.logsCapacity ?? 500);
-  installConsoleCapture(logStore, 'backend', {
-    minLevel: options.logsMinLevel,
-  });
   registerLogRoutes(server, logStore);
 
   for (const plugin of createDefaultPlugins({
@@ -308,8 +413,9 @@ export function createWorkletRuntime(
     queryHostCapabilities: () =>
       hostBridge?.queryCapabilities() ?? Promise.resolve([]),
     staticServer: server,
-    invokeOnHost: (header, payload) =>
-      hostBridge?.invokeOnHost(header, payload) ?? Promise.resolve(null),
+    invokeOnHost: (header, payload, timeoutMs) =>
+      hostBridge?.invokeOnHost(header, payload, timeoutMs) ??
+      Promise.resolve(null),
     store: logStore,
   })) {
     pluginRegistry.register(plugin);
@@ -318,6 +424,23 @@ export function createWorkletRuntime(
     pluginRegistry.register(plugin);
   }
 
+  // Patch the console only once nothing above can throw: a factory that fails
+  // (a reserved or duplicate plugin id) returns no runtime to close, so a sink
+  // attached earlier would leak and keep the console patched for good.
+  const detachConsole = attachConsoleSink(logStore, options.logsMinLevel);
+
+  // The bootstrap nonce's lifetime counts running time only: a page
+  // backgrounded between load and `/login` must still log in on resume. Only
+  // `resume` restarts the clock; `wakeup` is a brief pass while still
+  // suspended.
+  const onSuspend = () => server.pauseBootstrapClock?.();
+  const onResume = () => server.resumeBootstrapClock?.();
+  const bareEvents =
+    typeof Bare !== 'undefined' && typeof Bare?.on === 'function' ? Bare : null;
+  bareEvents?.on?.('suspend', onSuspend);
+  bareEvents?.on?.('resume', onResume);
+
+  let onIpcData: ((data: unknown) => void) | null = null;
   if (ipc) {
     const bridge = hostBridge;
     // Host→worklet frames arrive over a stream whose `data` events do not
@@ -335,15 +458,22 @@ export function createWorkletRuntime(
       // that is waiting for them they would stall until timeout.
       intercept: (message) => bridge?.tryConsumeDownstream(message) ?? false,
     });
-    ipc.on('data', (data: unknown) => channel.push(data));
+    onIpcData = (data: unknown) => channel.push(data);
+    ipc.on('data', onIpcData);
   }
 
-  async function start() {
+  let closed = false;
+  let started: ReturnType<WorkletRuntime['start']> | null = null;
+
+  async function startOnce() {
     if (options.storage) {
       // A previous run may have left a handoff file with a dead ephemeral
       // port; remove it so a host polling early never loads a stale origin.
       try {
         fs.rmSync(path.join(options.storage, 'handoff.json'), { force: true });
+        fs.rmSync(path.join(options.storage, 'handoff.json.tmp'), {
+          force: true,
+        });
       } catch {
         console.debug('[runtime] no existing handoff file to remove');
         // Nothing to remove.
@@ -364,13 +494,14 @@ export function createWorkletRuntime(
     if (auth && options.storage && options.handoffFile !== false) {
       const { origin, port, bootstrap } = credentials;
       try {
-        fs.writeFileSync(
-          path.join(options.storage, 'handoff.json'),
-          JSON.stringify({ origin, port, bootstrap }),
-        );
+        writeHandoffFile(options.storage, { origin, port, bootstrap });
       } catch (err) {
+        // A host that cannot find the handoff would poll until it times out
+        // with no reason given: fail start() instead, loudly.
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`Failed to write handoff file: ${message}`);
+        throw new Error(
+          `[runtime] failed to write the handoff file: ${message}`,
+        );
       }
     }
     return credentials;
@@ -388,8 +519,28 @@ export function createWorkletRuntime(
       cache: options.cache,
       deviceMode,
     },
-    start,
+    start() {
+      if (closed) {
+        return Promise.reject(new Error('[runtime] start() after close()'));
+      }
+      started ??= startOnce();
+      return started;
+    },
     close(cb) {
+      if (closed) {
+        cb?.(null);
+        return;
+      }
+      closed = true;
+      bareEvents?.off?.('suspend', onSuspend);
+      bareEvents?.off?.('resume', onResume);
+      detachConsole();
+      if (ipc && onIpcData) ipc.removeListener('data', onIpcData);
+      // Pending host calls would otherwise wait out their timeout (up to
+      // minutes for media) after the runtime is gone.
+      (hostBridge as { close?: (reason?: string) => void } | null)?.close?.(
+        'worklet runtime closed',
+      );
       server.close(cb);
     },
   };

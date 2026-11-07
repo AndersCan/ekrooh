@@ -9,7 +9,8 @@
  *   - the real webview connects and redeems the one-time bootstrap nonce
  *     (replaying it then answers 409, ADR 0003),
  *   - the storage dir is user-only and holds no `handoff.json` (the session
- *     token never touches disk).
+ *     token never touches disk),
+ *   - auth is on: a gated route (`GET /logs`) without the cookie is a 401.
  * Then:
  *   - a second launch on a storage dir already in use is a no-op (exit 0,
  *     no second backend),
@@ -19,7 +20,11 @@
  *     detection).
  *
  * The hosts copy the handoff they receive to a file through the
- * `EKROOH_TEST_HANDOFF_COPY` test hook; nothing else exposes the nonce.
+ * `EKROOH_TEST_HANDOFF_COPY` test hook; nothing else exposes the nonce. The
+ * hook is compiled in only with `zig build -Dtest-hooks=true`, so this script
+ * builds its own host with it (into a temp dir) and runs that against the
+ * built app's resources. It first checks the shipped host does NOT contain the
+ * hook.
  *
  * Usage: node scripts/smoke-desktop.mjs
  */
@@ -45,8 +50,10 @@ const layout =
         host: 'bin',
         res: 'resources',
       };
-const host = path.join(dist, layout.dir, layout.host, 'ekrooh');
-const bare = path.join(dist, layout.dir, layout.res, 'bare');
+const shippedHost = path.join(dist, layout.dir, layout.host, 'ekrooh');
+const resources = path.join(dist, layout.dir, layout.res);
+const bare = path.join(resources, 'bare');
+const hookEnv = 'EKROOH_TEST_HANDOFF_COPY';
 
 /** How long the page gets to log in once the webview has connected. */
 const redeemGraceMs = 5_000;
@@ -103,11 +110,34 @@ const connectedPids = (port) =>
 const instances = [];
 const tmp = mkdtempSync(path.join(tmpdir(), 'ekrooh-desktop-smoke-'));
 
+// The shipped host must not honour the test hook (it would write the live
+// nonce to any path named in the environment).
+if (readFileSync(shippedHost).includes(hookEnv)) {
+  console.error(`FAIL: ${shippedHost} contains the ${hookEnv} test hook`);
+  process.exit(1);
+}
+console.log('ok: the shipped host has no handoff-copy test hook');
+
+// Same source, plus the hook; resources come from the built app.
+console.log('Building a test-hook host for the smoke run...');
+execFileSync(
+  'zig',
+  [
+    'build',
+    '-Doptimize=ReleaseSafe',
+    '-Dtest-hooks=true',
+    '--prefix',
+    path.join(tmp, 'host'),
+  ],
+  { cwd: path.join(root, 'examples/desktop-app'), stdio: 'inherit' },
+);
+const host = path.join(tmp, 'host/bin/ekrooh');
+
 function launch(name, storage = path.join(tmp, name)) {
   const handoffCopy = path.join(tmp, `${name}.handoff.json`);
-  const child = spawn(host, ['--storage', storage], {
+  const child = spawn(host, ['--resources', resources, '--storage', storage], {
     stdio: 'inherit',
-    env: { ...process.env, EKROOH_TEST_HANDOFF_COPY: handoffCopy },
+    env: { ...process.env, [hookEnv]: handoffCopy },
   });
   const exited = new Promise((resolve) =>
     child.on('exit', (code, signal) => resolve({ code, signal })),
@@ -169,6 +199,14 @@ try {
 
     const page = await fetch(`${h.origin}/`);
     if (!page.ok) fail(`${inst.name}: GET / -> ${page.status}`);
+    // core/desktop.core.ts forces auth on: a gated route without the session
+    // cookie is refused (docs/security.md §1).
+    const gated = await fetch(`${h.origin}/logs`);
+    if (gated.status !== 401) {
+      fail(
+        `${inst.name}: GET /logs without a session -> ${gated.status}, not 401`,
+      );
+    }
     console.log(`ok: ${inst.name} serving ${h.origin}, nonce redeemed by page`);
   }
 

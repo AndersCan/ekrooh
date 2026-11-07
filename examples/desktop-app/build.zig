@@ -6,6 +6,12 @@ pub fn build(b: *std.Build) void {
 
     const webview = b.dependency("webview", .{});
 
+    // `-Dtest-hooks=true` compiles in the `EKROOH_TEST_HANDOFF_COPY` hook that
+    // scripts/smoke-desktop.mjs uses to replay the nonce. Off by default, so
+    // the shipped host never writes the nonce anywhere.
+    const options = b.addOptions();
+    options.addOption(bool, "test_hooks", b.option(bool, "test-hooks", "Compile in smoke-test hooks (never for a shipped build)") orelse false);
+
     const exe = b.addExecutable(.{
         .name = "ekrooh",
         .root_module = b.createModule(.{
@@ -19,6 +25,7 @@ pub fn build(b: *std.Build) void {
 
     // webview/webview is C++ behind a C API; compile its single translation
     // unit straight into the host so the result is one static executable.
+    exe.root_module.addOptions("build_options", options);
     exe.root_module.addIncludePath(webview.path("core/include"));
     exe.root_module.addCSourceFile(.{
         .file = webview.path("core/src/webview.cc"),
@@ -38,11 +45,23 @@ pub fn build(b: *std.Build) void {
             }
             exe.root_module.linkFramework("WebKit", .{});
             exe.root_module.linkFramework("AppKit", .{});
+            // Navigation policy + clipboard hardening (src/main.zig `ekrooh_harden`).
+            exe.root_module.addCSourceFile(.{
+                .file = b.path("src/harden_darwin.m"),
+                .flags = &.{"-fobjc-arc"},
+                .language = .objective_c,
+            });
         },
         .linux => {
             // pkg-config names; webview/webview needs the 4.1 (libsoup3) ABI.
             exe.root_module.linkSystemLibrary("gtk+-3.0", .{});
             exe.root_module.linkSystemLibrary("webkit2gtk-4.1", .{});
+            // Navigation policy + clipboard hardening (src/main.zig `ekrooh_harden`).
+            exe.root_module.addCSourceFile(.{
+                .file = b.path("src/harden_gtk.c"),
+                .flags = &.{},
+                .language = .c,
+            });
         },
         else => @panic("desktop host: only macOS and Linux are wired up so far"),
     }

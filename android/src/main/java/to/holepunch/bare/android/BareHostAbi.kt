@@ -1,6 +1,7 @@
 package to.holepunch.bare.android
 
 import android.os.Build
+import android.os.Process
 
 /**
  * Supported-ABI policy for the Bare host (documented in
@@ -22,17 +23,27 @@ object BareHostAbi {
     fun has64BitAbi(abis: List<String>): Boolean =
         abis.any { it in SUPPORTED_64_BIT_ABIS }
 
-    /** True when the device can run at least one supported 64-bit ABI. */
-    fun hasSupportedAbi(): Boolean = has64BitAbi(Build.SUPPORTED_ABIS.toList())
+    /** True when a process with [is64BitProcess] on a device with [abis]
+     * runs the worklet on a supported runtime: the device has a supported
+     * 64-bit ABI **and** this process actually runs as 64-bit. A 64-bit device
+     * can still start an app as 32-bit (e.g. when an APK ships some native
+     * library only for a 32-bit ABI), and that process is unsupported too. */
+    fun isSupportedRuntime(is64BitProcess: Boolean, abis: List<String>): Boolean =
+        is64BitProcess && has64BitAbi(abis)
 
-    /** Throw [IllegalStateException] on a 32-bit-only runtime. */
+    /** True when this process runs on a supported 64-bit runtime. */
+    fun hasSupportedAbi(): Boolean =
+        isSupportedRuntime(Process.is64Bit(), Build.SUPPORTED_ABIS.toList())
+
+    /** Throw [IllegalStateException] on a 32-bit-only runtime or in a 32-bit
+     * process. */
     fun requireSupportedAbi() {
         if (!hasSupportedAbi()) {
             throw IllegalStateException(
-                "Bare host does not support 32-bit-only Android runtimes " +
-                    "(supported ABIs: ${Build.SUPPORTED_ABIS.joinToString()}). " +
-                    "This device is `zygote32`; bare-host requires a 64-bit ABI " +
-                    "(arm64-v8a or x86_64). See ekrooh#46.",
+                "Bare host does not support 32-bit Android runtimes " +
+                    "(supported ABIs: ${Build.SUPPORTED_ABIS.joinToString()}, " +
+                    "64-bit process: ${Process.is64Bit()}). bare-host requires a " +
+                    "64-bit process on a 64-bit ABI (arm64-v8a or x86_64). See ekrooh#46.",
             )
         }
     }

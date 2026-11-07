@@ -19,16 +19,23 @@ import java.nio.ByteBuffer
  * incomplete frame is known the partial buffer is sized to that frame once and
  * filled in place as chunks arrive, rather than re-copying everything buffered
  * on every chunk.
+ *
+ * [onInvalidFrame] is told about each complete frame that is skipped because
+ * it does not parse (an unknown version or message type). It gets the frame's
+ * header text when that is readable, so the caller can answer the request with
+ * an error instead of leaving it to time out.
  */
-class FrameDecoder {
-    private companion object {
-        /** Smallest buffer allocated for a partial frame whose length is not yet known. */
-        const val MIN_PARTIAL_BYTES = 64
+class FrameDecoder(
+    private val onInvalidFrame: ((header: String?) -> Unit)? = null,
+) {
+    // Plain private properties, not companion `const`s: a companion const
+    // compiles to a public static field and would leak into the public API.
 
-        /** A partial buffer larger than this is released once drained. */
-        const val RETAIN_BYTES = 64 * 1024
-    }
+    /** Smallest buffer allocated for a partial frame whose length is not yet known. */
+    private val minPartialBytes = 64
 
+    /** A partial buffer larger than this is released once drained. */
+    private val retainBytes = 64 * 1024
     /** Partial-frame storage: the first [length] bytes are buffered data. */
     private var buffer: ByteArray = ByteArray(0)
     private var length = 0
@@ -87,7 +94,14 @@ class FrameDecoder {
 
             val frame = source.copyOfRange(offset, offset + frameLen)
             offset += frameLen
-            BareProtocol.parseMessage(ByteBuffer.wrap(frame))?.let { out.add(it) }
+            val parsed = BareProtocol.parseMessage(ByteBuffer.wrap(frame))
+            if (parsed != null) {
+                out.add(parsed)
+            } else {
+                onInvalidFrame?.invoke(
+                    String(frame, 7, headerLen, Charsets.UTF_8),
+                )
+            }
         }
 
         retain(source, offset, end, pendingFrameLen)
@@ -113,7 +127,7 @@ class FrameDecoder {
     /** Grows [buffer] to hold at least [bytes], preserving buffered data. */
     private fun reserve(bytes: Int) {
         if (buffer.size >= bytes) return
-        val next = ByteArray(maxOf(bytes, MIN_PARTIAL_BYTES))
+        val next = ByteArray(maxOf(bytes, minPartialBytes))
         buffer.copyInto(next, 0, 0, length)
         buffer = next
     }
@@ -126,7 +140,7 @@ class FrameDecoder {
         val rest = to - from
         if (rest == 0) {
             length = 0
-            if (buffer.size > RETAIN_BYTES) buffer = ByteArray(0)
+            if (buffer.size > retainBytes) buffer = ByteArray(0)
             return
         }
         if (source === buffer) {

@@ -1,6 +1,9 @@
 # Wire format: keep the JSON-header frame for v1, fail oversized results loudly, move results to the body in the next major
 
-Status: proposed. Needs owner approval before it binds (it touches the wire-protocol boundary in `vision.md`).
+Status: accepted and implemented. The v1 parts shipped: the header cap stays,
+an oversized result fails loudly, and the decoder answers content errors with
+`FRAME_INVALID` (see `docs/security.md` §3). Moving results to the body is
+still deferred to the next major.
 
 ## Context
 

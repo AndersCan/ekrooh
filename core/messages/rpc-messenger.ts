@@ -5,6 +5,7 @@ import {
 } from './types';
 import { createRequestId } from './request-id';
 import { resolvePlatform, type Platform } from './platform';
+import { timerMs } from './timers';
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
   ? Omit<T, K>
@@ -46,9 +47,16 @@ export function createProtocolMessenger(
     request: InternalDispatchRequest,
     payload?: Uint8Array | ArrayBuffer | string | null,
   ) => void,
-  options: { platform?: Partial<Platform> } = {},
+  options: {
+    platform?: Partial<Platform>;
+    /** Append a short tail of the loopback server log (`GET /logs`) to an
+     * invoke-timeout rejection. Off by default: log lines are diagnostics for
+     * dev and test builds, not text a shipped UI should show. */
+    diagnostics?: boolean;
+  } = {},
 ): ProtocolMessenger {
   const platform = resolvePlatform(options.platform);
+  const diagnostics = options.diagnostics === true;
   const withRequestId = <T extends object>(
     request: T,
   ): T & { requestId: string } => ({
@@ -80,15 +88,22 @@ export function createProtocolMessenger(
       return new Promise<MessageHeader>((resolvePromise, rejectPromise) => {
         const fail = async (reason: string): Promise<void> => {
           console.error(`[invoke] ${reason}`);
+          if (!diagnostics) {
+            rejectPromise(new Error(reason));
+            return;
+          }
           const tail = await sharedLogTail();
           rejectPromise(
             new Error(tail ? `${reason}; recent logs: ${tail}` : reason),
           );
         };
-        const timer = setTimeout(() => {
-          pending.delete(requestId);
-          void fail(`invoke timeout for ${request.type} (${requestId})`);
-        }, timeoutMs);
+        const timer = setTimeout(
+          () => {
+            pending.delete(requestId);
+            void fail(`invoke timeout for ${request.type} (${requestId})`);
+          },
+          timerMs(timeoutMs, 5000),
+        );
 
         if (pending.size >= MAX_CONCURRENT_INVOKES) {
           const oldest = pending.keys().next().value;
@@ -98,7 +113,7 @@ export function createProtocolMessenger(
               clearTimeout(dropped.timer);
               dropped.reject(
                 new Error(
-                  `invoke dropped: too many concurrent invokes (${requestId})`,
+                  `invoke dropped: too many concurrent invokes (${oldest})`,
                 ),
               );
             }

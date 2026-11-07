@@ -14,6 +14,12 @@ import {
   MessageHeader,
   RuntimeTarget,
 } from './types';
+import {
+  FrameContentError,
+  isShortId,
+  MAX_ID_LENGTH,
+  type RecoveredHeader,
+} from './frame-content';
 
 export type Encoder = (str: string) => Uint8Array;
 export type Decoder = (bytes: Uint8Array) => string;
@@ -189,6 +195,9 @@ export class MessageProtocol {
       );
     }
 
+    // Past this point the frame is correctly delimited: anything wrong is in
+    // its content, so it throws a FrameContentError and a stream decoder can
+    // skip just this frame instead of dropping the stream.
     let headerStr: string;
     try {
       headerStr = this.decodeStr(view.subarray(7, 7 + headerLen));
@@ -198,8 +207,7 @@ export class MessageProtocol {
       } catch {
         // The debug trace must never mask the FRAME_INVALID error.
       }
-      throw new CoreError(
-        ErrorCode.FRAME_INVALID,
+      throw new FrameContentError(
         'FRAME_INVALID: header frame is not valid UTF-8',
       );
     }
@@ -218,12 +226,47 @@ function isKnownMessageType(type: number): type is MessageTypeValue {
   return KNOWN_MESSAGE_TYPES.has(type);
 }
 
+function shortString(value: unknown): string | undefined {
+  return isShortId(value) ? value : undefined;
+}
+
+function recoverHeader(header: Record<string, unknown>): RecoveredHeader {
+  return {
+    type: shortString(header.type),
+    requestId: shortString(header.requestId),
+    pluginId: shortString(header.pluginId),
+    event: shortString(header.event),
+  };
+}
+
 function parseAndValidateHeader(headerJson: string): MessageHeader {
-  const parsed = JSON.parse(headerJson) as unknown;
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error('Invalid header: expected object');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(headerJson);
+  } catch {
+    throw new FrameContentError('FRAME_INVALID: header is not valid JSON');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new FrameContentError('Invalid header: expected object');
   }
   const header = parsed as Record<string, unknown>;
+  try {
+    return validateHeader(header);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new FrameContentError(message, recoverHeader(header));
+  }
+}
+
+function validateHeader(header: Record<string, unknown>): MessageHeader {
+  for (const field of ['requestId', 'pluginId', 'event'] as const) {
+    const value = header[field];
+    if (typeof value === 'string' && !isShortId(value)) {
+      throw new Error(
+        `FRAME_INVALID: ${field} longer than ${MAX_ID_LENGTH} UTF-8 bytes`,
+      );
+    }
+  }
   switch (header.type) {
     case 'DISPATCH':
       if (isValidPluginHeaderFields(header)) {
@@ -273,6 +316,7 @@ function parseAndValidateHeader(headerJson: string): MessageHeader {
           type: 'HOST_CAPABILITIES_RESPONSE',
           requestId: header.requestId,
           capabilities: parseCapabilityDescriptors(header.capabilities),
+          error: parseCoreErrorWire(header.error),
         });
       }
       break;
@@ -308,7 +352,9 @@ function parseAndValidateHeader(headerJson: string): MessageHeader {
       }
       break;
   }
-  throw new Error(`Unsupported header type: ${String(header.type)}`);
+  throw new Error(
+    `Unsupported header type: ${String(header.type).slice(0, 64)}`,
+  );
 }
 
 /** Only allowlisted, schema-known fields are carried forward. Unknown wire

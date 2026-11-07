@@ -13,8 +13,13 @@ description: Unit, type, integration, and native end-to-end tests.
   a management server, asserting per-instance isolation + lifecycle
   (`npm run test:e2e:harness`).
 - **Native end-to-end** — `npm run test:ios` runs the Swift host's XCTest suite
-  plus a UI test on the iOS simulator (discovery summary, Ping / Payload Echo /
-  Roundtrip / Storage permission).
+  plus a UI test on the iOS simulator (discovery list, Ping / Payload Echo /
+  Roundtrip / Storage permission); the Android emulator job runs the
+  `ReferenceJourneyTest` WebView journey.
+- **Host invariants** — `security.android.test.ts` and
+  `security.apple.test.ts` read the host sources and manifests for the
+  `docs/security.md` §5 invariants; `error-codes-parity.test.ts` checks that
+  the Kotlin and Swift `ErrorCodes` match `core/messages`.
 
 ## Real-stack e2e (loopback origin)
 
@@ -35,6 +40,8 @@ device.
    corrupt bytes fails here because `naturalWidth` stays `0`.
 4. **Assert no console errors.** Fail the spec on any `console.error` or
    uncaught exception.
+
+{/* docs-check: skip */}
 
 ```ts
 const errors: string[] = [];
@@ -64,9 +71,14 @@ appear against the real backend.
 
 ## Contract test
 
-`contract.test.ts` freezes the exact exported names of each `@ekrooh/bare`
-subpath, so an accidental break of a stability boundary fails CI as a test, not
-a review note.
+`contract.test.ts` freezes the `package.json` `exports` keys, the exported
+value names of each `@ekrooh/bare` subpath, and the built type surface
+(`dist/*.d.mts`, snapshotted in `api/public-api.d.mts.snap`), so an accidental
+break of a stability boundary fails CI as a test, not a review note. After an
+intended, reviewed change: `npm run build:pkg && npm run api:snapshot`. The
+Kotlin API (`android/api/bare-host.api`, `./gradlew :bare-host:apiDump`) and
+the Swift API (`ios/public-api.swift.snap`, `vp test security.apple.test.ts -u`)
+are pinned the same way.
 
 ## Gates
 
@@ -74,5 +86,6 @@ a review note.
 npm run build:pkg   # compile dist/ — prerequisite
 vp check            # format + lint + type-check
 vp test             # unit tests
+npm run docs:check  # docs links, imports, snippet type-check
 npm run test:e2e:web
 ```

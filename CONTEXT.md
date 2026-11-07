@@ -13,7 +13,7 @@ One of the four public API surfaces gated by the major-version contract: the bin
 _Avoid_: "public API" alone (too broad — includes stable internals)
 
 **Testing contract**:
-The set of gates every change must pass before it ships: the presence manifest, the coverage floor, the public-API snapshot, and export-surface integrity. Enforcement is mechanical — the gates _are_ tests; prose alone has no force with an agent reader.
+The set of gates every change must pass before it ships: the presence manifest, the coverage floor, the public-API snapshot (JS, Kotlin and Swift), and export-surface integrity. Enforcement is mechanical — the gates _are_ tests; prose alone has no force with an agent reader.
 _Avoid_: "test coverage requirement" (ambiguous — includes metrics-only regimes)
 
 **Presence manifest**:
@@ -21,11 +21,11 @@ The structural rule that every framework-core module (`core/messages`, `core/lib
 _Avoid_: "test-per-module rule"
 
 **Coverage floor**:
-The no-regress threshold on statement/line/function coverage over the covered set only (`all: false`, include `core/**`, `plugins/**`, `web/**`), anchored to the day's measured values. Branches are reported but not gated. Never gates over generated bundles or entry points.
+The no-regress threshold on statement/line/function coverage over every TypeScript source matching `core/**/*.ts`, `plugins/**/*.ts` and `web/**/*.ts` (Vitest 5 counts unloaded files too, so an untested module shows as 0%), set to the measured values rounded down by about a point (statements 91, functions 92, lines 93 as of 2026-11) and raised when coverage rises. Branches are reported but not gated. Never gates over tests, generated bundles or entry points.
 _Avoid_: "coverage requirement" alone
 
 **Public API snapshot**:
-The contract test that freezes the exact exported names of each `@ekrooh/bare` subpath, so an accidental break of a stability boundary fails CI as a test, not a review note.
+The contract tests that freeze each stability boundary's surface, so an accidental break fails CI as a test, not a review note: `contract.test.ts` freezes the `exports` keys, the exported value names of each `@ekrooh/bare` subpath, and the built type surface (`api/public-api.d.mts.snap`, with chunk aliases resolved and each entry's export list kept verbatim; regenerate after review with `npm run build:pkg && npm run api:snapshot`). The Kotlin host API is pinned by `android/api/bare-host.api` (`./gradlew :bare-host:apiDump`; `apiCheck` runs in `./gradlew check`) and the Swift API by `ios/public-api.swift.snap` (`vp test security.apple.test.ts -u`).
 _Avoid_: "API test" (too generic)
 
 ## Autonomy

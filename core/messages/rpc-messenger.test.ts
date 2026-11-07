@@ -160,6 +160,31 @@ describe('createProtocolMessenger', () => {
     expect((header as { result?: unknown }).result).toEqual({ ok: true });
   });
 
+  it('keeps server log lines out of the timeout rejection unless diagnostics is on (D-13)', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('window', { location: { host: '127.0.0.1:4321' } });
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => 'backend secret /data/user/0/app/path',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const messenger = createProtocolMessenger(vi.fn());
+    const promise = messenger.invoke(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.health',
+        event: 'health.ping',
+        args: {},
+      },
+      null,
+      1000,
+    );
+    const assertion = expect(promise).rejects.toThrow(/^invoke timeout[^;]*$/);
+    await vi.advanceTimersByTimeAsync(1001);
+    await assertion;
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('folds the server log tail into the invoke-timeout rejection when available', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('window', { location: { host: '127.0.0.1:4321' } });
@@ -173,7 +198,7 @@ describe('createProtocolMessenger', () => {
       })),
     );
     const send = vi.fn();
-    const messenger = createProtocolMessenger(send);
+    const messenger = createProtocolMessenger(send, { diagnostics: true });
     const promise = messenger.invoke(
       {
         type: 'INVOKE_REQUEST',
@@ -202,7 +227,7 @@ describe('createProtocolMessenger', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
     try {
-      const messenger = createProtocolMessenger(vi.fn());
+      const messenger = createProtocolMessenger(vi.fn(), { diagnostics: true });
       const invokeOnce = () =>
         messenger.invoke(
           {
@@ -276,11 +301,40 @@ describe('createProtocolMessenger', () => {
         ),
       );
     }
-    await expect(promises[0]).rejects.toThrow(/too many concurrent/);
+    // The rejection names the call that was dropped, not the new one (C-10).
+    await expect(promises[0]).rejects.toThrow(
+      new RegExp(
+        `too many concurrent invokes \\(${send.mock.calls[0][0].requestId}\\)`,
+      ),
+    );
     for (let i = 1; i < 1025; i++) {
       const req = send.mock.calls[i]?.[0];
       messenger.handleIncoming(response(req.requestId));
     }
     await expect(promises[1024]).resolves.toBeDefined();
+  });
+
+  it('caps a huge invoke timeout at the setTimeout limit (adv-A-7)', async () => {
+    vi.useFakeTimers();
+    const messenger = createProtocolMessenger(vi.fn());
+    let settled = false;
+    void messenger
+      .invoke(
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          args: {},
+        },
+        null,
+        2 ** 31 + 1000,
+      )
+      .catch(() => {})
+      .finally(() => {
+        settled = true;
+      });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(settled).toBe(false);
+    vi.useRealTimers();
   });
 });

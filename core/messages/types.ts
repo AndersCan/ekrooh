@@ -98,6 +98,9 @@ export type HostCapabilitiesResponseHeader = {
   type: 'HOST_CAPABILITIES_RESPONSE';
   requestId: string;
   capabilities: CapabilityDescriptor[];
+  /** Set when the host's answer could not be used (e.g. it failed to decode);
+   * the query then rejects with this error. */
+  error?: CoreErrorWire;
 };
 
 /** Worklet → host: run a host-registered handler (same pluginId/event as frontend invokes). */
@@ -161,5 +164,10 @@ export interface PluginManifest {
   version?: string;
   capabilities?: string[];
   events?: string[];
+  /** Per-event deadline (ms) for an invoke the router delegates to the host,
+   * keyed by event name. A user-mediated host call (a permission prompt, a
+   * picker) needs far longer than the default host timeout. Read as own
+   * properties only. */
+  hostTimeoutsMs?: Readonly<Record<string, number>>;
   runtimes: Partial<Record<RuntimeTarget, PluginRuntimeAdapter>>;
 }

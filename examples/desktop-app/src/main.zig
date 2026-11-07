@@ -2,12 +2,15 @@
 //!
 //! 1. take the single-instance lock in the storage dir (a second launch for
 //!    the same storage is a no-op),
-//! 2. open the window on a local "Starting" page,
+//! 2. open the window on a local "Starting" page, with the navigation policy
+//!    and clipboard hardening installed (`ekrooh_harden`) before any page,
 //! 3. spawn the sidecar `bare` running the packed backend, with a stdin pipe
 //!    and a private handoff pipe,
 //! 4. read the handoff line (origin + one-time bootstrap nonce) and navigate to
 //!    the loopback origin with `window.__ekrooh = { bootstrap }` injected
-//!    (ADR 0003, same as the mobile hosts),
+//!    (ADR 0003, same as the mobile hosts); from then on the window shows only
+//!    that origin (`decideNavigation`), links to other sites open in the
+//!    system browser,
 //! 5. on window close, close the backend's stdin; it exits on EOF.
 //!
 //! A backend that fails to start, or dies under the open window, turns the
@@ -18,6 +21,7 @@
 const std = @import("std");
 const Io = std.Io;
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const posix = std.posix;
 
 // webview/webview C API (core/include/webview/api.h). Declared by hand: the
@@ -34,6 +38,14 @@ extern fn webview_set_size(w: Webview, width: c_int, height: c_int, hints: c_int
 extern fn webview_set_html(w: Webview, html: [*:0]const u8) c_int;
 extern fn webview_init(w: Webview, js: [*:0]const u8) c_int;
 extern fn webview_navigate(w: Webview, url: [*:0]const u8) c_int;
+extern fn webview_get_native_handle(w: Webview, kind: c_int) ?*anyopaque;
+const native_handle_kind_browser_controller: c_int = 2; // WEBVIEW_NATIVE_HANDLE_KIND_BROWSER_CONTROLLER
+
+// src/harden_darwin.m / src/harden_gtk.c: installs the navigation policy
+// (which calls back into `ekrooh_nav_decide`) and turns off clipboard read
+// access, which webview/webview enables for every origin. Returns 0 on
+// success.
+extern fn ekrooh_harden(browser: *anyopaque) c_int;
 
 const handoff_timeout_ms = 20_000;
 const handoff_max_bytes = 4096;
@@ -87,6 +99,10 @@ fn run(init: std.process.Init) !u8 {
 
     const w = webview_create(@intFromBool(opts.debug), null) orelse return error.WebviewCreateFailed;
     defer _ = webview_destroy(w);
+    // Before any page loads: until the handoff names the backend's origin the
+    // policy allows only `about:blank` (the local status pages).
+    const browser = webview_get_native_handle(w, native_handle_kind_browser_controller) orelse return error.WebviewHandleMissing;
+    if (ekrooh_harden(browser) != 0) return error.WebviewHardeningFailed;
     _ = webview_set_title(w, "Ekrooh");
     _ = webview_set_size(w, 1024, 720, 0);
     _ = webview_set_html(w, starting_html);
@@ -94,7 +110,9 @@ fn run(init: std.process.Init) !u8 {
     var app: App = .{
         .webview = w,
         .log_path = try std.fs.path.join(arena, &.{ opts.storage, "backend.log" }),
-        .handoff_copy = init.environ_map.get("EKROOH_TEST_HANDOFF_COPY"),
+        // Compiled in only with `-Dtest-hooks=true` (the smoke test's build);
+        // the shipped host never writes the nonce anywhere.
+        .handoff_copy = if (build_options.test_hooks) init.environ_map.get("EKROOH_TEST_HANDOFF_COPY") else null,
         .arena = .init(std.heap.page_allocator),
     };
     defer app.arena.deinit();
@@ -129,8 +147,9 @@ fn run(init: std.process.Init) !u8 {
 const App = struct {
     webview: Webview,
     log_path: []const u8,
-    /// Test hook (smoke test only): also write the received handoff here, so
-    /// a test can prove the page redeemed the nonce by replaying it.
+    /// Test hook (smoke test only, `-Dtest-hooks=true` builds): also write the
+    /// received handoff here, so a test can prove the page redeemed the nonce
+    /// by replaying it. Always null in a shipped build.
     handoff_copy: ?[]const u8,
     /// Used only by the supervisor thread; freed after it is joined, so it
     /// outlives every callback the thread dispatches.
@@ -206,7 +225,9 @@ fn superviseBackend(io: Io, app: *App, backend: *Backend, handoff_fd: posix.fd_t
             std.log.info("opening {s}", .{handoff.origin});
             _ = webview_dispatch(app.webview, navigateOnUi, nav);
             started = true;
-            if (app.handoff_copy) |path| writeHandoffCopy(io, a, path, handoff);
+            if (build_options.test_hooks) {
+                if (app.handoff_copy) |path| writeHandoffCopy(io, a, path, handoff);
+            }
         } else |err| {
             std.log.err("unusable handoff: {t}", .{err});
             showError(app, "sent an unusable handoff");
@@ -261,8 +282,66 @@ const Navigation = struct {
 
 fn navigateOnUi(w: Webview, arg: ?*anyopaque) callconv(.c) void {
     const nav: *const Navigation = @ptrCast(@alignCast(arg.?));
+    // Confine the window to the backend's origin before going there. Set and
+    // read on the UI thread only (the policy callbacks run there too).
+    allowed_origin = nav.url;
     _ = webview_init(w, nav.script);
     _ = webview_navigate(w, nav.url);
+}
+
+/// The backend's origin (`http://127.0.0.1:<port>`) once the handoff arrived.
+/// UI thread only.
+var allowed_origin: ?[]const u8 = null;
+
+const NavKind = enum(c_int) {
+    main_frame = 0,
+    sub_frame = 1,
+    /// `target=_blank` / `window.open`: there is no second window.
+    new_window = 2,
+    /// The backend cannot tell the frame (WebKitGTK).
+    unknown_frame = 3,
+};
+
+const NavDecision = enum(c_int) { allow = 0, cancel = 1, open_external = 2 };
+
+/// Called by the platform glue for every navigation the webview is about to
+/// make (UI thread).
+export fn ekrooh_nav_decide(url: [*:0]const u8, kind: c_int, user_gesture: c_int) c_int {
+    const k = std.enums.fromInt(NavKind, kind) orelse return @backingInt(NavDecision.cancel);
+    return @backingInt(decideNavigation(std.mem.span(url), allowed_origin, k, user_gesture != 0));
+}
+
+/// The window shows only the backend's origin (docs/security.md §5, as the
+/// mobile hosts do). A link the user activated to another http(s) site opens
+/// in the system browser; any other off-origin navigation (a redirect, a
+/// script, `<meta refresh>`) is cancelled, so foreign pages never render in
+/// the app's chrome-less window.
+fn decideNavigation(url: []const u8, origin: ?[]const u8, kind: NavKind, user_gesture: bool) NavDecision {
+    const is_web = std.mem.startsWith(u8, url, "http://") or std.mem.startsWith(u8, url, "https://");
+    const is_app = if (origin) |o| isAppUrl(url, o) else false;
+    const is_blank = std.mem.eql(u8, url, "about:blank");
+    const is_srcdoc = std.mem.eql(u8, url, "about:srcdoc");
+    switch (kind) {
+        .new_window => return if (is_web and !is_app and user_gesture) .open_external else .cancel,
+        .sub_frame => return if (is_app or is_blank or is_srcdoc) .allow else .cancel,
+        .main_frame, .unknown_frame => {
+            if (is_app or is_blank) return .allow;
+            if (kind == .unknown_frame and is_srcdoc) return .allow;
+            return if (is_web and user_gesture) .open_external else .cancel;
+        },
+    }
+}
+
+/// `url` is on `origin` exactly: the origin, then the end, a path, a query or
+/// a fragment. `http://127.0.0.1:80` must not admit `http://127.0.0.1:8080`,
+/// and user info (`http://x@127.0.0.1:…`) never matches.
+fn isAppUrl(url: []const u8, origin: []const u8) bool {
+    if (!std.mem.startsWith(u8, url, origin)) return false;
+    if (url.len == origin.len) return true;
+    return switch (url[origin.len]) {
+        '/', '?', '#' => true,
+        else => false,
+    };
 }
 
 fn navigation(a: std.mem.Allocator, handoff: Handoff) !*Navigation {
@@ -503,6 +582,47 @@ test "readHandoff times out on a silent backend" {
     defer _ = std.c.close(fds[0]);
     defer _ = std.c.close(fds[1]);
     try std.testing.expectError(error.HandoffTimeout, readHandoff(std.testing.io, arena.allocator(), fds[0], 50));
+}
+
+test "navigation stays on the backend origin" {
+    const o = "http://127.0.0.1:8080";
+    const T = struct {
+        fn d(url: []const u8, origin: ?[]const u8, kind: NavKind, gesture: bool) NavDecision {
+            return decideNavigation(url, origin, kind, gesture);
+        }
+    };
+    // The app itself.
+    try std.testing.expectEqual(NavDecision.allow, T.d("http://127.0.0.1:8080", o, .main_frame, false));
+    try std.testing.expectEqual(NavDecision.allow, T.d("http://127.0.0.1:8080/index.html?x#y", o, .main_frame, false));
+    try std.testing.expectEqual(NavDecision.allow, T.d("http://127.0.0.1:8080/media/a", o, .sub_frame, false));
+    // Status pages (`webview_set_html`) before and after the handoff.
+    try std.testing.expectEqual(NavDecision.allow, T.d("about:blank", null, .main_frame, false));
+    try std.testing.expectEqual(NavDecision.allow, T.d("about:blank", o, .unknown_frame, false));
+    // Before the handoff nothing else loads.
+    try std.testing.expectEqual(NavDecision.cancel, T.d("http://127.0.0.1:8080/", null, .main_frame, false));
+    // Look-alikes of the origin.
+    try std.testing.expectEqual(NavDecision.cancel, T.d("http://127.0.0.1:80801/", o, .main_frame, false));
+    try std.testing.expectEqual(NavDecision.cancel, T.d("http://127.0.0.1:8080.evil.example/", o, .main_frame, false));
+    try std.testing.expectEqual(NavDecision.cancel, T.d("http://x@127.0.0.1:8080/", o, .main_frame, false));
+    try std.testing.expectEqual(NavDecision.cancel, T.d("http://localhost:8080/", o, .main_frame, false));
+    try std.testing.expectEqual(NavDecision.cancel, T.d("https://127.0.0.1:8080/", o, .main_frame, false));
+    // Other schemes never load or open.
+    for ([_][]const u8{ "file:///etc/passwd", "data:text/html,x", "blob:http://127.0.0.1:8080/u", "javascript:alert(1)", "about:srcdoc" }) |u| {
+        try std.testing.expectEqual(NavDecision.cancel, T.d(u, o, .main_frame, true));
+    }
+    // Foreign sites: only a link the user activated, in the system browser.
+    try std.testing.expectEqual(NavDecision.open_external, T.d("https://example.com/", o, .main_frame, true));
+    try std.testing.expectEqual(NavDecision.cancel, T.d("https://example.com/", o, .main_frame, false));
+    try std.testing.expectEqual(NavDecision.open_external, T.d("https://example.com/", o, .unknown_frame, true));
+    try std.testing.expectEqual(NavDecision.open_external, T.d("https://example.com/", o, .new_window, true));
+    try std.testing.expectEqual(NavDecision.cancel, T.d("https://example.com/", o, .new_window, false));
+    try std.testing.expectEqual(NavDecision.cancel, T.d("http://127.0.0.1:8080/", o, .new_window, true));
+    try std.testing.expectEqual(NavDecision.cancel, T.d("https://example.com/", o, .sub_frame, true));
+    try std.testing.expectEqual(NavDecision.allow, T.d("about:srcdoc", o, .sub_frame, false));
+}
+
+test "ekrooh_nav_decide refuses an unknown frame kind" {
+    try std.testing.expectEqual(@as(c_int, 1), ekrooh_nav_decide("about:blank", 99, 0));
 }
 
 test "errorPage escapes the log path" {

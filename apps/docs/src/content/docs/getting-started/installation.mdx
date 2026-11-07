@@ -25,14 +25,17 @@ the `exports` map — no build step on your side, no TypeScript source shipped.
 
 ## Native hosts
 
-- **Android**: `io.ekrooh:bare-host` on GitHub Packages (self-contained AAR —
-  the Bare Kit runtime ships inside it).
-- **iOS**: the host ships as **source** (`ios/`, Swift package `BareHost`) on
-  the same release tag; consumers embed `BareKit.xcframework` from the
-  prebuilds.
+- **Android**: `io.github.anderscan.ekrooh:bare-host` on Maven Central (GitHub
+  Packages as a fallback); a self-contained AAR — the Bare Kit runtime ships
+  inside it.
+- **iOS**: the Swift package `BareHost` from the repo root `Package.swift`, at
+  the same release tag; `BareKit.xcframework` comes with it as a SwiftPM
+  binary target.
 
 ## Versioning
 
 One semver `vX.Y.Z` covers the whole framework — JS package, Android AAR, and
 every artifact. Breaking the wire protocol, plugin contracts, JS exports, or
-the Kotlin host API is a **major-version event**.
+the Kotlin host API is a **major-version event**. The JS type surface, the
+Kotlin API and the Swift API are each pinned by a committed snapshot, so a
+change to them fails CI until it is reviewed.

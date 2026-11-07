@@ -56,6 +56,17 @@ const runtime = createWorkletRuntime({
 const push = createLoopbackPush(runtime.server, runtime.protocol);
 runtime.pluginRegistry.register(createBasicPlugin({ push }));
 
-void runtime.start().then(({ origin }) => {
-  console.log(`[consumer-basic] worklet ready on ${origin}`);
-});
+runtime
+  .start()
+  .then(({ origin }) => {
+    console.log(`[consumer-basic] worklet ready on ${origin}`);
+  })
+  .catch((err: unknown) => {
+    // A failed start (port in use, handoff file not writable) must say why
+    // instead of surfacing as an unhandled rejection; close the runtime so the
+    // worklet does not keep a half-started server (as core/main.core.ts does).
+    console.error(
+      `[consumer-basic] failed to start: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    runtime.close();
+  });

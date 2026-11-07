@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { EventEmitter } from 'node:events';
 import { MAX_FRAME_BYTES } from '../messages/constants';
-import { createProtocolSocketSlot } from './protocol-socket';
+import {
+  createProtocolSocketSlot,
+  REPLACED_CLOSE_CODE,
+  REPLACED_CLOSE_REASON,
+} from './protocol-socket';
 
 const ws = vi.hoisted(() => ({
   handshakeError: null as Error | null,
@@ -9,6 +13,8 @@ const ws = vi.hoisted(() => ({
     opts: Record<string, unknown>;
     written: Uint8Array[];
     destroyed: boolean;
+    closedWith: [number, string] | null;
+    close(code: number, reason: string): void;
     emit(event: string, ...args: unknown[]): boolean;
   }>,
 }));
@@ -30,6 +36,7 @@ vi.mock('bare-ws', async () => {
       Socket: class extends Emitter {
         written: Uint8Array[] = [];
         destroyed = false;
+        closedWith: [number, string] | null = null;
         constructor(public opts: Record<string, unknown>) {
           super();
           ws.sockets.push(this);
@@ -42,6 +49,12 @@ vi.mock('bare-ws', async () => {
           if (this.destroyed) return;
           this.destroyed = true;
           this.emit('close');
+        }
+        /** bare-ws `close(code, reason)`: sends the close frame and tears the
+         * socket down once the peer answers (immediately, here). */
+        close(code: number, reason: string) {
+          this.closedWith = [code, reason];
+          this.destroy();
         }
         pause() {}
         resume() {}
@@ -135,6 +148,29 @@ describe('createProtocolSocketSlot', () => {
     expect(ws.sockets[3].destroyed).toBe(false);
     open.push(new Uint8Array([9]));
     expect(ws.sockets[3].written).toEqual([new Uint8Array([9])]);
+  });
+
+  it('closes an evicted socket with 4001 "replaced" and stops reading it', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect([REPLACED_CLOSE_CODE, REPLACED_CLOSE_REASON]).toEqual([
+      4001,
+      'replaced',
+    ]);
+    const s = slot(0);
+    const received: unknown[] = [];
+    s.onConnection((socket) => socket.on('data', (c) => received.push(c)));
+    accept(s);
+    const old = ws.sockets[0];
+    // Model a peer slow to answer the close frame: data still arrives.
+    old.close = (code, reason) => {
+      old.closedWith = [code, reason];
+    };
+    accept(s);
+    expect(old.closedWith).toEqual([4001, 'replaced']);
+    old.emit('data', new Uint8Array([1]));
+    expect(received).toEqual([]);
+    ws.sockets[1].emit('data', new Uint8Array([2]));
+    expect(received).toEqual([new Uint8Array([2])]);
   });
 
   it('answers a held upgrade superseded by a newer one with 429', () => {

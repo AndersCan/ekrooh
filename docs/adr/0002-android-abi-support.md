@@ -31,6 +31,19 @@ Consequences:
   `ActivityThread.currentApplication()`) is an upstream bare-kit issue, tracked
   against `holepunchto/bare-kit`.
 
+## Status note (2026-11, security review)
+
+- `requireSupportedAbi()` now also throws in a **32-bit process on a 64-bit
+  device** (`Process.is64Bit()`), which happens when an APK ships some native
+  library only for a 32-bit ABI. The rule is "a 64-bit process on a 64-bit
+  ABI" (`BareHostAbi.isSupportedRuntime`).
+- The pinned Bare Kit prebuilds (v2.5.5) no longer list `libnativehelper.so`
+  in `DT_NEEDED` and do not import `JNI_GetCreatedJavaVMs`, so nothing loads
+  the stub today. When a library is loaded only as a `DT_NEEDED` dependency,
+  ART never calls its `JNI_OnLoad`, so the stub would report no VM anyway.
+  The stub stays until its removal is verified on a device against the pinned
+  release (see the comment in `bare_nativehelper_stub.c`).
+
 ## Rationale
 
 - Modern Android is 64-bit. 32-bit-only devices have no maintenance path.

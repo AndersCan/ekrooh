@@ -127,19 +127,41 @@ public enum BareProtocol {
     code: String,
     message: String
   ) -> WireMessage {
+    buildErrorResponse(
+      headerJson: headerJson, code: code, message: message, type: "INVOKE_RESPONSE")
+  }
+
+  /**
+   * Same as `buildErrorResponse(headerJson:code:message:)` with an explicit
+   * response `type` (the host IPC answers `HOST_INVOKE_RESPONSE`). Mirror of
+   * the Kotlin overload. Request fields are echoed only when they are strings
+   * within `HostIpcRouter.maxFieldBytes`, so an oversized id is never copied
+   * back.
+   */
+  public static func buildErrorResponse(
+    headerJson: String,
+    code: String,
+    message: String,
+    type: String
+  ) -> WireMessage {
     let request =
       (try? JSONSerialization.jsonObject(with: Data(headerJson.utf8)))
       as? [String: Any] ?? [:]
+    func field(_ name: String) -> String? {
+      guard let value = request[name] as? String, HostIpcRouter.isValidField(value)
+      else { return nil }
+      return value
+    }
     var response: [String: Any] = [
-      "type": "INVOKE_RESPONSE",
-      "pluginId": request["pluginId"] as? String ?? "",
-      "event": request["event"] as? String ?? "",
+      "type": type,
+      "pluginId": field("pluginId") ?? "",
+      "event": field("event") ?? "",
       "error": [
         "code": code,
         "message": message,
       ],
     ]
-    if let requestId = request["requestId"] as? String {
+    if let requestId = field("requestId") {
       response["requestId"] = requestId
     }
     return WireMessage(
@@ -149,8 +171,14 @@ public enum BareProtocol {
     )
   }
 
-  /** Compact JSON encoding; returns `{}` if the value cannot be encoded. */
+  /**
+   * Compact JSON encoding; returns `{}` if the value cannot be encoded.
+   * `JSONSerialization.data` raises an Objective-C exception (which `try?`
+   * cannot catch) for a non-JSON value such as a `URL`, `Date`, `Data` or
+   * `Double.nan`, so the value is checked with `isValidJSONObject` first.
+   */
   public static func encodeJSON(_ value: Any) -> String {
+    guard JSONSerialization.isValidJSONObject(value) else { return "{}" }
     guard let data = try? JSONSerialization.data(
       withJSONObject: value,
       options: [.withoutEscapingSlashes]

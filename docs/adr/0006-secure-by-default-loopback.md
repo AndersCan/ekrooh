@@ -1,7 +1,9 @@
 # Loopback admission: the origin rule holds in every mode, device mode is the default, and only the bootstrap nonce logs a page in
 
-Status: proposed. Needs owner approval before it binds (it changes defaults of
-`@ekrooh/bare/runtime` exports and the `/login` contract). Extends ADR 0003.
+Status: accepted and implemented (shipped in 0.6.0). Extends ADR 0003 and
+supersedes its token-in-handoff and legacy-token points. Since then,
+`createWorkletRuntime({ auth: false })` without `deviceMode: false` throws
+instead of being honoured.
 
 ## Context
 

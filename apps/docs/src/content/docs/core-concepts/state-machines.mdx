@@ -13,18 +13,36 @@ never leak into the public `@ekrooh/bare` surface.
 `web/connection-machine.ts` owns the WebSocket lifecycle:
 
 ```
-idle → opening → connected
-           ↘ backoff ⇄ opening → gaveUp (final)
+idle ──LOGIN_OK──▶ opening ──SOCKET_OPEN──▶ connected
+  │                  │  ▲                      │
+  LOGIN_FAIL         │  └──RETRY_TIMER/WAKE──┐ │ SOCKET_CLOSE /
+  ▼                  └──SOCKET_CLOSE /       │ │ SOCKET_REPLACED
+gaveUp ◀──retry cap──── OPEN_TIMEOUT ──▶ backoff ◀┘
+  └──WAKE──▶ idle
+
+any state ──CLOSE──▶ closed (final)
 ```
 
-- `LOGIN_OK` / `LOGIN_FAIL` drive the token→cookie bootstrap.
-- `SOCKET_OPEN` / `SOCKET_CLOSE` track socket state.
-- `RETRY_TIMER` schedules exponential backoff, capped by `maxRetries`.
+- `LOGIN_OK` / `LOGIN_FAIL` drive the nonce→cookie bootstrap.
+- `SOCKET_OPEN` / `SOCKET_CLOSE` track socket state; `OPEN_TIMEOUT` drops a
+  socket stuck in `opening` (10 s).
+- `STABLE_TIMER` resets the retry count once a socket has stayed open for 5 s,
+  so a socket that opens and drops at once keeps backing off.
+- `RETRY_TIMER` schedules the jittered exponential backoff. The retry cap
+  (`maxRetries`) applies only to a client that has never connected, and only
+  after the 10 s boot window; a client that has connected retries forever.
+- `SOCKET_REPLACED` (the server closed the socket with code 4001 because
+  another document took the session) waits 30 s in `backoff` instead of the
+  normal delay.
+- `WAKE` (the page returned to the foreground) skips a backoff wait, and takes
+  `gaveUp` back to `idle` so the shell can log in again. `gaveUp` is not final.
+- `CLOSE` (`transport.close()`) moves every state to `closed`, the only final
+  state.
 
 The transport shell drives socket I/O against the machine and reacts to state
-changes; `gaveUp` fails the queued messages with a deterministic transport
-error. The machine uses an injected `Clock`, so tests run on a `VirtualClock`
-without real timers.
+changes; `gaveUp` and `closed` fail the queued messages with a deterministic
+transport error. The machine uses an injected `Clock`, so tests run on a
+`VirtualClock` without real timers.
 
 ## Why actors
 
@@ -33,6 +51,8 @@ without real timers.
 - Terminal states emit outputs (`RESOLVED`/`REJECTED`) that a parent routes —
   no dangling promises.
 - Deterministic, testable, and readable in one glance.
+
+{/* docs-check: skip */}
 
 ```ts
 import { Actor, RealClock, state, event } from '@mantaq/core';

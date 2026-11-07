@@ -1,0 +1,150 @@
+# Sources/BareHost/BareHostLogger.swift
+BareHostLogger :: public static func log(_ message: String)
+public enum BareHostLogger
+
+# Sources/BareHost/BareProtocol.swift
+BareProtocol :: public enum MessageType
+BareProtocol :: public static func buildErrorResponse( headerJson: String, code: String, message: String ) -> WireMessage
+BareProtocol :: public static func buildErrorResponse( headerJson: String, code: String, message: String, type: String ) -> WireMessage
+BareProtocol :: public static func buildMessage( type: UInt8, headerJson: String, payload: Data? = nil ) throws -> Data
+BareProtocol :: public static func encodeJSON(_ value: Any) -> String
+BareProtocol :: public static func parseMessage(_ buffer: Data) -> WireMessage?
+BareProtocol :: public static let maxFrameBytes = 16 * 1024 * 1024
+BareProtocol :: public static let maxHeaderBytes = 0xffff
+BareProtocol :: public static let version: UInt8 = 1
+BareProtocol :: public struct WireMessage
+BareProtocol.MessageType :: public static let envelope: UInt8 = 1
+BareProtocol.WireMessage :: public let header: String
+BareProtocol.WireMessage :: public let payload: Data?
+BareProtocol.WireMessage :: public let type: UInt8
+BareProtocolError :: case frameTooLarge(Int)
+BareProtocolError :: case headerTooLarge(Int)
+public enum BareProtocol
+public enum BareProtocolError: Error, Equatable
+
+# Sources/BareHost/BareWebHost.swift
+BareHandoff :: public func bootstrapUserScript() -> WKUserScript
+BareHandoff :: public let bootstrap: String
+BareHandoff :: public let origin: String
+BareHandoff :: public let port: Int
+BareHandoff :: public static func consume(at url: URL, fileManager: FileManager = .default) -> BareHandoff?
+BareHandoff :: public static func parse(_ data: Data) -> BareHandoff?
+BareHandoff :: public var bootstrapScriptSource: String
+BareHandoff :: public var host: String
+BareHandoff :: public var pageURL: URL
+BareNavigationDecision :: case allow
+BareNavigationDecision :: case cancel
+BareNavigationDecision :: case loadInPlace
+BareNavigationDecision :: case openExternally
+BareNavigationDelegate :: open func webView( _ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void )
+BareNavigationDelegate :: open func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!)
+BareNavigationDelegate :: public func confine(to handoff: BareHandoff)
+BareNavigationDelegate :: public init(policy: BareNavigationPolicy = BareNavigationPolicy())
+BareNavigationDelegate :: public var onPageLoaded: (() -> Void)?
+BareNavigationDelegate :: public var openExternally: (URL) -> Void
+BareNavigationDelegate :: public var policy: BareNavigationPolicy
+BareNavigationPolicy :: public func decide( url: URL?, isMainFrame: Bool, isNewWindow: Bool, isLinkActivated: Bool ) -> BareNavigationDecision
+BareNavigationPolicy :: public func isAppURL(_ url: URL) -> Bool
+BareNavigationPolicy :: public init(allowedHost: String? = nil, allowedPort: Int? = nil, allowsForeignSubframes: Bool = false)
+BareNavigationPolicy :: public init(handoff: BareHandoff)
+BareNavigationPolicy :: public var allowedHost: String?
+BareNavigationPolicy :: public var allowedPort: Int?
+BareNavigationPolicy :: public var allowsForeignSubframes: Bool
+BareStorage :: public static func prepare( applicationSupport: URL, caches: URL, legacyStorage: URL?, fileManager: FileManager = .default ) throws -> BareStorageDirectories
+BareStorage :: public static func prepare(fileManager: FileManager = .default) throws -> BareStorageDirectories
+BareStorageDirectories :: public let cache: URL
+BareStorageDirectories :: public let storage: URL
+BareStorageDirectories :: public var handoff: URL
+BareStorageError :: case backupExclusionFailed(Error)
+BareStorageError :: case noApplicationSupportDirectory
+BareWebHost :: public static func configure(_ webView: WKWebView)
+BareWebHost :: public static func load( _ handoff: BareHandoff, in webView: WKWebView, delegate: BareNavigationDelegate )
+open class BareNavigationDelegate: NSObject, WKNavigationDelegate
+public enum BareNavigationDecision: Equatable
+public enum BareStorage
+public enum BareStorageError: Error
+public enum BareWebHost
+public struct BareHandoff: Equatable
+public struct BareNavigationPolicy: Equatable
+public struct BareStorageDirectories: Equatable
+
+# Sources/BareHost/DefaultHostPlugins.swift
+public func registerDefaultHostPlugins(_ registry: HostPluginRegistry)
+
+# Sources/BareHost/ErrorCodes.swift
+ErrorCodes :: public static let frameInvalid = "FRAME_INVALID"
+ErrorCodes :: public static let frameTooLarge = "FRAME_TOO_LARGE"
+ErrorCodes :: public static let hostError = "HOST_ERROR"
+ErrorCodes :: public static let invalidResponse = "INVALID_RESPONSE"
+ErrorCodes :: public static let pluginError = "PLUGIN_ERROR"
+ErrorCodes :: public static let timeout = "TIMEOUT"
+ErrorCodes :: public static let transportError = "TRANSPORT_ERROR"
+ErrorCodes :: public static let unsupportedCapability = "UNSUPPORTED_CAPABILITY"
+ErrorCodes :: public static let unsupportedEvent = "UNSUPPORTED_EVENT"
+public enum ErrorCodes
+
+# Sources/BareHost/FrameDecoder.swift
+FrameDecoder :: public init()
+FrameDecoder :: public mutating func clear()
+FrameDecoder :: public mutating func push(_ chunk: Data) -> [BareProtocol.WireMessage]
+FrameDecoder :: public private(set) var error: Error?
+public struct FrameDecoder
+
+# Sources/BareHost/HostIpcCoordinator.swift
+HostIpcCoordinator :: public func start()
+HostIpcCoordinator :: public init( ipc: IPC, hostPlugins: HostPluginRegistry )
+HostIpcRouter :: public func handle(_ message: BareProtocol.WireMessage)
+HostIpcRouter :: public init(hostPlugins: HostPluginRegistry, send: @escaping (Data) -> Void)
+HostIpcRouter :: public static let maxFieldBytes = 256
+public final class HostIpcCoordinator
+public final class HostIpcRouter
+
+# Sources/BareHost/HostPluginRegistry.swift
+HostPluginRegistry :: public enum HostInvokeOutcome
+HostPluginRegistry :: public func dispatch( pluginId: String, event: String, args: [String: Any]?, payload: Data?, respond: @escaping (HostInvokeOutcome) -> Void )
+HostPluginRegistry :: public func invokeTimeout(pluginId: String, event: String) -> TimeInterval
+HostPluginRegistry :: public func register( pluginId: String, event: String, handler: @escaping Handler )
+HostPluginRegistry :: public func register( pluginId: String, event: String, timeout: TimeInterval?, handler: @escaping Handler )
+HostPluginRegistry :: public func toCapabilitiesJSON() -> [[String: Any]]
+HostPluginRegistry :: public init()
+HostPluginRegistry :: public static let defaultInvokeTimeout: TimeInterval = 30
+HostPluginRegistry :: public static let maxInvokeTimeout: TimeInterval = 24 * 60 * 60
+HostPluginRegistry :: public static let userMediatedInvokeTimeout: TimeInterval = 5 * 60
+HostPluginRegistry :: public struct Key: Hashable
+HostPluginRegistry :: public typealias Handler = ([String: Any]?, Data?, @escaping (HostInvokeOutcome) -> Void) -> Void
+HostPluginRegistry.HostInvokeOutcome :: case fail(code: String, message: String)
+HostPluginRegistry.HostInvokeOutcome :: case ok([String: Any])
+HostPluginRegistry.Key :: public init(pluginId: String, event: String)
+HostPluginRegistry.Key :: public let event: String
+HostPluginRegistry.Key :: public let pluginId: String
+public final class HostPluginRegistry
+
+# Sources/BareKit/IPC.swift
+IPC :: public func close() async
+IPC :: public func makeAsyncIterator() -> AsyncIterator
+IPC :: public func read() async throws -> Data?
+IPC :: public func write(data: Data) async throws
+IPC :: public init(worklet: Worklet) throws
+IPC :: public struct AsyncIterator: AsyncIteratorProtocol
+IPC :: public typealias Element = Data
+IPC.AsyncIterator :: public func next() async throws -> Data?
+public struct IPC: AsyncSequence
+
+# Sources/BareKit/Worklet.swift
+Worklet :: public func push( data: Data ) async throws -> Data?
+Worklet :: public func push( data: Data, queue: OperationQueue ) async throws -> Data?
+Worklet :: public func push( data: String, encoding: String.Encoding ) async throws -> String?
+Worklet :: public func push( data: String, encoding: String.Encoding, queue: OperationQueue ) async throws -> String?
+Worklet :: public func resume()
+Worklet :: public func start( name: String, ofType type: String, arguments: [String] = [] )
+Worklet :: public func start( name: String, ofType type: String, inBundle bundle: Bundle, arguments: [String] = [] )
+Worklet :: public func start( name: String, ofType type: String, inDirectory subpath: String, arguments: [String] = [] )
+Worklet :: public func start( name: String, ofType type: String, inDirectory subpath: String, inBundle bundle: Bundle, arguments: [String] = [] )
+Worklet :: public func suspend(linger: Int32 = 0)
+Worklet :: public func terminate()
+Worklet :: public init(configuration: Configuration = Configuration()) throws
+Worklet :: public struct Configuration
+Worklet.Configuration :: public init(memoryLimit: UInt = 0, assets: String? = nil)
+WorkletError :: case initializationFailed
+public enum WorkletError: Error
+public struct Worklet

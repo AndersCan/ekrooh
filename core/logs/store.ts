@@ -1,5 +1,16 @@
 import { LogEntry, LogStore, LogViewOptions } from './types';
 
+/** How many of `available` entries a `tail` asks for. Omitted means all and
+ * `Infinity` all there is; a fraction rounds down. Anything else that is not a
+ * non-negative number (`NaN`, a negative, a string from an unchecked caller)
+ * asks for none: `Math.min(NaN, n)` is `NaN`, and `slice(NaN)` would return
+ * the whole ring, so an invalid tail must never mean "everything". */
+function tailCount(tail: unknown, available: number): number {
+  if (tail === undefined) return available;
+  if (typeof tail !== 'number' || Number.isNaN(tail) || tail <= 0) return 0;
+  return Math.min(Math.floor(tail), available);
+}
+
 /** Bounded FIFO log buffer. Newest entries are retained; the oldest are
  * dropped once `capacity` is exceeded. `seq` is a monotonic counter assigned
  * on append and shared across every source, so read-back stays ordered. */
@@ -46,9 +57,7 @@ export function createLogRingBuffer(capacity: number): LogStore {
           (level === undefined || e.level === level) &&
           (source === undefined || e.source === source),
       );
-      const count =
-        tail === undefined ? filtered.length : Math.min(tail, filtered.length);
-      return filtered.slice(filtered.length - count);
+      return filtered.slice(filtered.length - tailCount(tail, filtered.length));
     },
     clear() {
       const cleared = size;

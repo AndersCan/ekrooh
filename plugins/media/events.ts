@@ -1,4 +1,7 @@
 import { EventSpec, invokeEvent, InvokeEnvelope } from '../../core/messages';
+// The native picker/camera is user-mediated and can stay open for minutes;
+// never let the invoke timeout (default 5s) abort it.
+import { MEDIA_INVOKE_TIMEOUT_MS } from './kinds';
 
 export type MediaKind = 'image' | 'video';
 
@@ -6,10 +9,6 @@ export type MediaResult = {
   /** URL served by the worklet's loopback HTTP server (no bytes on the wire). */
   url: string;
 };
-
-// The native picker/camera is user-mediated and can stay open for minutes;
-// never let the invoke timeout (default 5s) abort it.
-const MEDIA_INVOKE_TIMEOUT_MS = 5 * 60 * 1000;
 
 export const mediaSpecs = {
   pick: {

@@ -1,64 +1,128 @@
 import { describe, expect, it } from 'vite-plus/test';
+import { createMockTransport } from './mock';
 import {
-  createHealthInvokeHandlers,
-  createLogsInvokeHandlers,
-} from './mock-handlers';
-import { createHealthPlugin } from '../../plugins/health/plugin';
-import { createLogsPlugin } from '../../plugins/logs/plugin';
+  MessageType,
+  type CapabilityDescriptor,
+  type PluginInvokeResponseHeader,
+} from '../../core/messages';
+import { createDefaultPlugins } from '../../plugins';
+import { createPluginRegistry } from '../../core/messages';
 import { createLogRingBuffer } from '../../core/logs/store';
 
-describe('mock-handlers parity with the health plugin', () => {
-  it('covers exactly the events the health plugin declares', () => {
-    const mockKeys = Object.keys(createHealthInvokeHandlers()).sort();
-    const plugin = createHealthPlugin();
-    const pluginEvents = (plugin.events ?? []).sort();
+/** One invoke through the mock, resolved with its response header. */
+function call(
+  pluginId: string,
+  event: string,
+  args?: Record<string, unknown>,
+  payload: Uint8Array | string | null = null,
+): Promise<PluginInvokeResponseHeader> {
+  const transport = createMockTransport();
+  return new Promise((resolve) => {
+    transport.subscribe((m) => resolve(m.header as PluginInvokeResponseHeader));
+    transport.send(
+      MessageType.ENVELOPE,
+      { type: 'INVOKE_REQUEST', pluginId, event, requestId: 'r', args },
+      payload,
+    );
+  });
+}
 
-    expect(mockKeys).toEqual(pluginEvents);
+/** The worklet's own plugin list, as `createWorkletRuntime` registers it. */
+function realWorkletPlugins() {
+  const registry = createPluginRegistry();
+  for (const plugin of createDefaultPlugins({
+    listBareCapabilities: () => registry.listCapabilities(),
+    queryHostCapabilities: async () => [],
+    staticServer: {} as never,
+    invokeOnHost: async () => null,
+    store: createLogRingBuffer(10),
+  })) {
+    registry.register(plugin);
+  }
+  return registry;
+}
+
+describe('mock transport parity with the real worklet (D-8)', () => {
+  it('discovery lists every plugin the real worklet registers, core.logs included', async () => {
+    const real = realWorkletPlugins();
+    const header = await call('core.discovery', 'discovery.list', {});
+    const rows = (header.result as { capabilities: CapabilityDescriptor[] })
+      .capabilities;
+    const mockIds = rows.map((r) => r.pluginId).sort();
+    const realIds = real
+      .listCapabilities()
+      .map((r) => r.pluginId)
+      .concat('core.permissions')
+      .filter((id, i, all) => all.indexOf(id) === i)
+      .sort();
+    expect(mockIds).toEqual(realIds);
+    expect(mockIds).toContain('core.logs');
+    for (const row of rows) {
+      expect(row.events.sort()).toEqual(
+        (real.get(row.pluginId)?.events ?? []).slice().sort(),
+      );
+    }
   });
 
-  it('mocks match the plugin output shape for health.ping', async () => {
-    const invoke = createHealthPlugin().runtimes.bare?.invoke;
-    if (!invoke) throw new Error('expected bare invoke adapter');
+  it('permissions: a known id is answered, an unknown or missing id is unsupported (D-12)', async () => {
+    const camera = await call('core.permissions', 'permissions.request', {
+      permission: 'camera',
+    });
+    expect(camera.result).toEqual({ permission: 'camera', status: 'granted' });
 
-    const [, pluginResult] = await invoke(
-      'health.ping',
-      { message: 'hi' },
-      { runtime: 'bare', payload: new Uint8Array(0) },
-    );
-    const mockResult = createHealthInvokeHandlers()['health.ping']({
-      message: 'hi',
+    const location = await call('core.permissions', 'permissions.request', {
+      permission: 'location',
+    });
+    expect(location.result).toEqual({
+      permission: 'location',
+      status: 'unsupported',
     });
 
-    // Same shape and values; `ts` may differ by a millisecond because the mock
-    // and plugin call `Date.now()` at slightly different instants.
-    const plugin = pluginResult as { message: string; ts: number };
-    const mock = mockResult as { message: string; ts: number };
-    expect(Object.keys(mock).sort()).toEqual(Object.keys(plugin).sort());
-    expect(mock.message).toBe(plugin.message);
-    expect(Math.abs(mock.ts - plugin.ts)).toBeLessThanOrEqual(1);
-  });
-});
+    const missing = await call('core.permissions', 'permissions.status', {});
+    expect(missing.result).toEqual({ permission: '', status: 'unsupported' });
 
-describe('mock-handlers parity with the logs plugin', () => {
-  it('covers exactly the events the logs plugin declares', () => {
-    const mockKeys = Object.keys(createLogsInvokeHandlers()).sort();
-    const plugin = createLogsPlugin({ store: createLogRingBuffer(100) });
-    const pluginEvents = (plugin.events ?? []).sort();
-    expect(mockKeys).toEqual(pluginEvents);
+    const bogus = await call('core.permissions', 'permissions.status', {
+      permission: 42,
+    });
+    expect(bogus.result).toEqual({ permission: '', status: 'unsupported' });
   });
 
-  it('logs.clear matches the plugin output shape and value', async () => {
-    const invoke = createLogsPlugin({
-      store: createLogRingBuffer(100),
-    }).runtimes.bare?.invoke;
-    if (!invoke) throw new Error('expected bare invoke adapter');
+  it('media: an unknown kind is rejected like the real plugin', async () => {
+    const bad = await call('vendor.media', 'media.pick', { kind: '../etc' });
+    expect(bad.error?.code).toBe('PLUGIN_ERROR');
+    expect(bad.result).toBeUndefined();
 
-    const [, pluginResult] = await invoke(
-      'logs.clear',
-      {},
-      { runtime: 'bare', payload: new Uint8Array(0) },
+    const good = await call('vendor.media', 'media.capture', {
+      kind: 'video',
+    });
+    expect(good.error).toBeUndefined();
+    expect((good.result as { url: string }).url).toMatch(/^data:image\//);
+  });
+
+  it('routes by pluginId as well as event name', async () => {
+    const header = await call('app.anything', 'health.ping', {});
+    expect(header.error?.code).toBe('UNSUPPORTED_EVENT');
+  });
+
+  it('logs.view rejects a non-number tail like the real plugin', async () => {
+    const header = await call('core.logs', 'logs.view', { tail: 'all' });
+    expect(header.error?.code).toBe('PLUGIN_ERROR');
+  });
+
+  it('health.payloadEcho measures the payload like the real plugin', async () => {
+    const bytes = await call(
+      'core.health',
+      'health.payloadEcho',
+      { label: 'b' },
+      new Uint8Array([1, 2, 3]),
     );
-    const mockResult = createLogsInvokeHandlers()['logs.clear'](undefined);
-    expect(pluginResult).toEqual(mockResult);
+    expect(bytes.result).toEqual({ label: 'b', payloadSize: 3 });
+    const text = await call(
+      'core.health',
+      'health.payloadEcho',
+      { label: 't' },
+      'abc',
+    );
+    expect(text.result).toEqual({ label: 't', payloadSize: 3 });
   });
 });

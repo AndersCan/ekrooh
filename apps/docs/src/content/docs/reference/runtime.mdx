@@ -8,15 +8,31 @@ backend, the unified loopback server, and IPC helpers.
 
 ## Exports
 
-- `createWorkletRuntime(options)` — creates one worklet runtime: a
-  per-instance, stateless factory that wires the loopback server, cookie auth,
-  plugin registry, and host IPC bridge. `options.plugins` registers consumer
-  plugins after the canonical defaults.
+- `createWorkletRuntime(options)` — creates one worklet runtime
+  (synchronously): a per-instance factory that wires the loopback server,
+  cookie auth, plugin registry, and host IPC bridge. `options.plugins`
+  registers consumer plugins after the canonical defaults. Device mode (auth
+  on, ephemeral port) is the default; `auth: false` is accepted only with
+  `deviceMode: false` and **throws** otherwise.
+  - `runtime.start()` binds the server, mounts the web app, attaches the
+    protocol socket and, in device mode with `storage`, writes `handoff.json`
+    (`{ origin, port, bootstrap }`, atomically, owner-only). It resolves to
+    `{ origin, port, token, bootstrap }`. It is idempotent, and it rejects when
+    the handoff file cannot be written or after `close()`.
+  - `runtime.close(cb?)` closes the server, detaches the host IPC listener,
+    fails pending host calls and stops feeding this runtime's log store. It is
+    idempotent; the console is restored when the last runtime closes.
+  - Router limits: `maxInflight` (64), `maxInflightPerChannel` (default three
+    quarters of it) and `maxInflightPerPlugin` (default `maxInflight`, so no
+    separate per-plugin cap unless you set one); a call over a
+    limit fails with `TRANSPORT_ERROR`.
 - `resolveWorkletConfig()` — reads the host-provided worklet configuration
   from `Bare.argv`, falling back to labeled CLI tokens (`resolveCliConfig()`).
   A missing config keeps the secure device defaults (auth on, ephemeral port);
   the dev backend needs an explicit `mode=dev` token.
-- `createLoopbackServer(...)` / `LoopbackServer` — the unified HTTP+WS server
+- `createLoopbackServer(options?)` / `LoopbackServer` — the unified HTTP+WS
+  server, created synchronously (`url()`/`credentials()` resolve once it is
+  bound)
   (web app at `/`, media mounts, protocol socket) plus `registerRoute` and
   `push` for custom endpoints and server-initiated dispatch. `mountDir(..., {
 public: true })` marks a world-readable bootstrap mount (the web app at `/`);
@@ -27,8 +43,8 @@ bootstrap }` — the host injects only `bootstrap` into the page.
 - `createLoopbackPush(server, protocol)` — the backend → web push seam.
 - `getIPC()` — access the worklet's IPC stream to the host (`null` when no
   host is present).
-- `collectRequestBody(req)` — accumulate an HTTP request body into a UTF-8
-  string (for `registerRoute` handlers).
+- `collectRequestBody(req, maxBytes?)` — accumulate an HTTP request body into
+  a UTF-8 string (for `registerRoute` handlers); rejects past `maxBytes`.
 
 ## Types
 
@@ -36,10 +52,15 @@ bootstrap }` — the host injects only `bootstrap` into the page.
   `LoopbackRouteHandler`, `LoopbackPush`.
 
 ```ts
-import { createWorkletRuntime } from '@ekrooh/bare/runtime';
+import {
+  createWorkletRuntime,
+  resolveWorkletConfig,
+} from '@ekrooh/bare/runtime';
 
-const runtime = await createWorkletRuntime(resolveWorkletConfig());
+const runtime = createWorkletRuntime(resolveWorkletConfig());
 // runtime owns the loopback server, plugins, and the protocol socket.
+const { origin } = await runtime.start();
+console.log(`worklet ready on ${origin}`);
 ```
 
 ## Bare worklet entry

@@ -54,4 +54,30 @@ describe('createBareRuntimeContext', () => {
     const ctx = createBareRuntimeContext();
     expect(ctx.pluginRegistry).toBeDefined();
   });
+
+  it('refuses a header that only decodes by U+FFFD substitution (C-2)', () => {
+    // bare-encoding (mocked by the lenient node:util decoder here) has no
+    // fatal mode; the context must still reject invalid UTF-8.
+    const { protocol } = createBareRuntimeContext();
+    const frame = protocol.encode(
+      MessageType.ENVELOPE,
+      { type: 'DISPATCH', pluginId: 'a.b', event: 'XX' },
+      null,
+    );
+    const text = new TextDecoder().decode(frame);
+    const at = text.indexOf('XX');
+    const bad = new Uint8Array(frame);
+    bad[at] = 0xff;
+    bad[at + 1] = 0xfe;
+    expect(() => protocol.decode(bad)).toThrow(/FRAME_INVALID/);
+    // A real U+FFFD in the header still decodes.
+    const real = protocol.encode(
+      MessageType.ENVELOPE,
+      { type: 'DISPATCH', pluginId: 'a.b', event: '\uFFFD' },
+      null,
+    );
+    expect((protocol.decode(real).header as { event: string }).event).toBe(
+      '\uFFFD',
+    );
+  });
 });

@@ -13,6 +13,7 @@
 		18D52ECECC3CBF512E0F52EB /* DefaultHostPluginsTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF6B9A180D9F5B6D66FD6AE9 /* DefaultHostPluginsTest.swift */; };
 		29C240A81BE97F1DA2631B5D /* BareHost in Frameworks */ = {isa = PBXBuildFile; productRef = 1A07DF693EDED0A38DE8D2AF /* BareHost */; };
 		2E08DBBD7219E8496F1E8D15 /* bare-hrtime.2.1.2.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8FB7C4148944F0B1A3EE3C9E /* bare-hrtime.2.1.2.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		38A6E5E0781954AD14CAFCBE /* HostIpcRouterTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8BB629F064E69BE1A79190 /* HostIpcRouterTest.swift */; };
 		39749658832CA87449A90A68 /* bare-crypto.1.15.4.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D7950B6BAF9622115AE139D6 /* bare-crypto.1.15.4.xcframework */; };
 		3A329C64BD6B727CE6848A9A /* rabin-native.2.0.0.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 3E6AABF83FB9E0C74534C3EF /* rabin-native.2.0.0.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		3D653ABA75015E2776558C5A /* bare-dns.2.3.1.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1225C56DC8FA78DCCF78D1E7 /* bare-dns.2.3.1.xcframework */; };
@@ -41,6 +42,7 @@
 		93EE53F4106205F6EEE3B6DF /* bare-type.1.4.0.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8CDB213EB13869D2E0D1D158 /* bare-type.1.4.0.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		962969FE9CE8A3E97D02206C /* bare-type.1.4.0.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8CDB213EB13869D2E0D1D158 /* bare-type.1.4.0.xcframework */; };
 		9697AE31CF4B9F3CF0A74E65 /* bare-pipe.4.4.0.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = BAD67F218239232EFC0F3D50 /* bare-pipe.4.4.0.xcframework */; };
+		9D6165869211AAFEF4F8CDFC /* BareWebHostTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = C16676F5A0B91F529E0E38FB /* BareWebHostTest.swift */; };
 		9DF369EAF8C2189216DAD39A /* P2PVerifyTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6975CFA7693AB93952A7C5FC /* P2PVerifyTest.swift */; };
 		A0A2BBF3375DE6E1A65A3094 /* bare-tls.3.1.14.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = BFF34472C9302741E0C71AED /* bare-tls.3.1.14.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A482605613C2103ACBE70419 /* rocksdb-native.3.19.1.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = DAC6CD220B7C7FFA35716525 /* rocksdb-native.3.19.1.xcframework */; };
@@ -143,7 +145,9 @@
 		B955CCC8D01552C46ABD4CA6 /* sodium-native.5.1.0.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "sodium-native.5.1.0.xcframework"; path = "addons/sodium-native.5.1.0.xcframework"; sourceTree = "<group>"; };
 		BAD67F218239232EFC0F3D50 /* bare-pipe.4.4.0.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-pipe.4.4.0.xcframework"; path = "addons/bare-pipe.4.4.0.xcframework"; sourceTree = "<group>"; };
 		BFF34472C9302741E0C71AED /* bare-tls.3.1.14.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-tls.3.1.14.xcframework"; path = "addons/bare-tls.3.1.14.xcframework"; sourceTree = "<group>"; };
+		C16676F5A0B91F529E0E38FB /* BareWebHostTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BareWebHostTest.swift; sourceTree = "<group>"; };
 		C521227D3BAFDF01C0F623E3 /* ios-appUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = "ios-appUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		CE8BB629F064E69BE1A79190 /* HostIpcRouterTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostIpcRouterTest.swift; sourceTree = "<group>"; };
 		CF770F49D6C546F930063C7E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		D2ED4E4F7F5E530D8912097D /* BareProtocolTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BareProtocolTest.swift; sourceTree = "<group>"; };
 		D7950B6BAF9622115AE139D6 /* bare-crypto.1.15.4.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "bare-crypto.1.15.4.xcframework"; path = "addons/bare-crypto.1.15.4.xcframework"; sourceTree = "<group>"; };
@@ -304,8 +308,10 @@
 			isa = PBXGroup;
 			children = (
 				D2ED4E4F7F5E530D8912097D /* BareProtocolTest.swift */,
+				C16676F5A0B91F529E0E38FB /* BareWebHostTest.swift */,
 				DF6B9A180D9F5B6D66FD6AE9 /* DefaultHostPluginsTest.swift */,
 				B77F41681FC1649B2DF6883C /* ErrorCodesParityTest.swift */,
+				CE8BB629F064E69BE1A79190 /* HostIpcRouterTest.swift */,
 				5A15BBD07807E1102B648011 /* HostPluginRegistryTest.swift */,
 				6975CFA7693AB93952A7C5FC /* P2PVerifyTest.swift */,
 			);
@@ -439,8 +445,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				F88759CC9F08046548E63AA8 /* BareProtocolTest.swift in Sources */,
+				9D6165869211AAFEF4F8CDFC /* BareWebHostTest.swift in Sources */,
 				18D52ECECC3CBF512E0F52EB /* DefaultHostPluginsTest.swift in Sources */,
 				DF6313D7B4F57C52E040522B /* ErrorCodesParityTest.swift in Sources */,
+				38A6E5E0781954AD14CAFCBE /* HostIpcRouterTest.swift in Sources */,
 				71B75504AE83437EB8683F1D /* HostPluginRegistryTest.swift in Sources */,
 				9DF369EAF8C2189216DAD39A /* P2PVerifyTest.swift in Sources */,
 			);

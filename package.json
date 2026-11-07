@@ -3,7 +3,7 @@
   "version": "0.6.2",
   "type": "module",
   "description": "One soul, many platforms — the boring bootstrap for cross-platform apps on the Bare runtime: wire protocol, plugin kernel, RPC messenger, transports, and native host bridges.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/AndersCan/ekrooh.git"
@@ -72,6 +72,7 @@
     "smoke:p2p": "npm run build:p2p-verify && rm -rf .p2p-smoke && mkdir .p2p-smoke && bare core/p2p-verify.core.gen.js .p2p-smoke",
     "build:p2p-verify": "esbuild core/p2p-verify.core.ts --bundle --packages=external --platform=node --format=esm --outfile=core/p2p-verify.core.gen.js",
     "prebuilds": "node scripts/fetch-prebuilds.mjs",
+    "api:snapshot": "node scripts/api-snapshot.mjs --update",
     "prepare": "vp config"
   },
   "devDependencies": {
@@ -89,7 +90,8 @@
     "hyperswarm": "^4.17.0",
     "typescript": "^7.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
-    "vite-plus": "1.4.0"
+    "vite-plus": "1.4.0",
+    "yaml": "^2.9.1"
   },
   "dependencies": {
     "@mantaq/core": "^0.2.0",

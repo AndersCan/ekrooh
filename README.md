@@ -85,7 +85,8 @@ timeout-bound.
 
 ## Plugins
 
-Core ships no product features. Plugin IDs are `vendor.plugin`; events are
+Core ships no product features. Plugin IDs are namespaced (`app.photos`;
+`core.*` and `vendor.*` are reserved for the framework); events are
 plugin-local (`health.ping`). Runtime adapters: `web`, `android`, `ios`, `bare`.
 Canonical plugins are listed under Repository layout.
 
@@ -143,7 +144,7 @@ Canonical list: [`AGENTS.md`](AGENTS.md#canonical-commands). Common ones:
 | `npm run build:core`         | Bundle `core/main.core.ts` (esbuild)               |
 | `npm run build:web`          | Build `examples/web` into the Android app's assets |
 | `npm run build:ios`          | iOS inputs (addons, bundle, web assets, xcodegen)  |
-| `npm run prebuilds`          | Fetch Bare Kit prebuilds (requires `gh`)           |
+| `npm run prebuilds`          | Fetch Bare Kit prebuilds (hash-checked, no token)  |
 | `npm run playwright:install` | Download Chromium into `.playwright-browsers/`     |
 | `npm run smoke:loopback`     | Smoke-test the loopback server under `bare`        |
 

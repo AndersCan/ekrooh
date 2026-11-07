@@ -29,4 +29,11 @@ class BareHostAbiTest {
         assertFalse(BareHostAbi.has64BitAbi(emptyList()))
         assertFalse(BareHostAbi.has64BitAbi(listOf("mips")))
     }
+
+    @Test
+    fun `rejects a 32-bit process on a 64-bit device`() {
+        assertFalse(BareHostAbi.isSupportedRuntime(false, listOf("arm64-v8a", "armeabi-v7a")))
+        assertTrue(BareHostAbi.isSupportedRuntime(true, listOf("arm64-v8a", "armeabi-v7a")))
+        assertFalse(BareHostAbi.isSupportedRuntime(true, listOf("armeabi-v7a")))
+    }
 }

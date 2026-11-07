@@ -16,5 +16,8 @@ dependencyResolutionManagement {
 include ":bare-host"
 project(":bare-host").projectDir = file("android")
 
+include ":bare-kit-runtime"
+project(":bare-kit-runtime").projectDir = file("android/bare-kit-runtime")
+
 include ":examples:android-app"
 project(":examples:android-app").projectDir = file("examples/android-app")

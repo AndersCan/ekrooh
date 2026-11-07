@@ -1,52 +1,91 @@
 ---
 title: iOS Embedding
-description: Embed the BareHost SPM source + prebuilds + web assets in a consumer app.
+description: Embed the BareHost Swift package and your web assets in a consumer app.
 ---
 
-The iOS host ships as **source** — no CocoaPods/XCFramework artifact yet.
-`ios/` in the framework repo is an SPM package (`BareHost`) published on every
-release tag. Consumers embed it plus the Bare Kit prebuilds and their own web
-assets.
+The iOS host is a Swift package (`BareHost`) published from the repo root
+`Package.swift` on every release tag. `BareKit.xcframework` comes with it as a
+SwiftPM `.binaryTarget` (pinned by `url` + `checksum`), so a consumer adds one
+package dependency and needs no prebuilds download or
+`FRAMEWORK_SEARCH_PATHS`.
 
 ## What you need
 
-1. The `BareHost` SPM package source (from the framework repo, at the version
-   you depend on).
-2. `BareKit.xcframework` (from the prebuilds; the SPM package provides the
-   typed `Worklet`/`IPC` wrappers and the `.linkedFramework("BareKit")` link
-   instruction, but the binary itself must be embedded by the app).
+1. The `BareHost` package at the exact ekrooh version you depend on (its
+   products are `BareHost` and `BareKit`).
+2. Your worklet bundle and built web assets, as app resources.
 3. The linked addons (udx-native, rocksdb-native, sodium-native, and
-   hypercore's native deps) for p2p work — the reference app links them via
-   `bare-link` and verifies them on the simulator (`P2PVerifyTest`).
+   hypercore's native deps) for p2p work, produced by
+   `bare-link --preset ios` and embedded in the app target.
 
 ## project.yml (xcodegen)
 
 ```yaml
 packages:
   BareHost:
-    path: ./path/to/ios
+    url: https://github.com/AndersCan/ekrooh
+    exactVersion: X.Y.Z
 targets:
   MyApp:
     dependencies:
+      # Links both BareHost and BareKit; Xcode embeds BareKit through the
+      # package. Do not embed a BareKit.xcframework yourself as well
+      # ("Multiple commands produce .../BareKit.framework").
       - package: BareHost
+      # Every addon emitted by `bare-link --preset ios`, listed explicitly.
+      - framework: addons/bare-fs.4.8.4.xcframework
+        embed: true
 ```
 
-## Build inputs
+In `Package.swift` instead:
+`.package(url: "https://github.com/AndersCan/ekrooh", exact: "X.Y.Z")`, then
+`.product(name: "BareHost", package: "ekrooh")`.
 
-From the framework repo's release tag you generate the app inputs:
+## Host shell
+
+`BareHost` ships the pieces that enforce the security model, so the app calls
+them instead of re-implementing them (`examples/ios-app/app/BareRuntime.swift`
+uses exactly these):
+
+1. **`BareStorage.prepare()`** creates `Application Support/bare` (durable,
+   excluded from backup; it throws if the exclusion fails, and the host must
+   not start) and `Caches/bare-cache`, deletes a stale `handoff.json`, and
+   moves a `Documents/bare` left by an older version (a failed move is retried
+   next launch, and the leftover is excluded from backup meanwhile). Start the worklet
+   with `[webAssets, dirs.storage, dirs.cache]`.
+2. **`BareWebHost.configure(webView)`** turns link previews off and the view
+   not inspectable.
+3. **`BareNavigationDelegate`** confines the WebView to the loopback origin.
+   Install it (`webView.navigationDelegate = delegate`) before any page loads.
+   Off-origin links open in Safari only when the user activated them; an
+   off-origin `target=_blank` opens Safari, a same-origin one (or
+   `window.open`) loads in place (`BareNavigationDecision.loadInPlace`);
+   subframes are app-origin only.
+4. **`BareHandoff.consume(at: dirs.handoff)`** polls for the worklet's
+   `handoff.json`; it accepts only a `http://127.0.0.1:<port>` origin and a
+   base64url nonce, and deletes the file as it reads it.
+5. **`BareWebHost.load(handoff, in: webView, delegate: delegate)`** confines
+   the delegate to the handoff's origin, adds an origin-guarded, main-frame
+   only `WKUserScript` at document start that sets
+   `window.__ekrooh = { bootstrap }` and `window.BareShell`, loads
+   `/index.html`, and removes the script once that page has loaded.
+
+Host plugins register on a `HostPluginRegistry` and are served by a
+`HostIpcCoordinator`. A user-mediated handler (a picker, a permission prompt)
+registers with `timeout: HostPluginRegistry.userMediatedInvokeTimeout`
+(5 minutes); the default is 30 s. Timeouts are clamped to
+`HostPluginRegistry.maxInvokeTimeout` (one day), and a non-positive or NaN
+timeout is a precondition failure.
+
+## Build inputs (framework repo)
 
 ```bash
-npm run prebuilds   # prebuilds/ios/BareKit.xcframework
+npm run prebuilds   # prebuilds/ios (hash-checked, no token)
 npm run build:ios   # addons/, Resources/, web assets, ios-app.xcodeproj
 ```
 
-The reference `examples/ios-app` shows the full consumer shell: it runs the
-same web assets, injects `window.__ekrooh = { bootstrap }` (a one-time nonce,
-never the raw token) via a `WKUserScript`, and loads
-`http://127.0.0.1:<port>/index.html` from the worklet's `handoff.json`.
-
 ## Parity status
 
-The iOS host has first-class reference parity with Android — protocol, cookie
-auth, permissions, and a real picker/camera. Distribution as a binary artifact
-is revisited when a consumer needs it; until then, source + SPM is the path.
+The iOS host has reference parity with Android: protocol, cookie auth,
+navigation confinement, permissions, and a real picker/camera. Its public
+Swift API is pinned by `ios/public-api.swift.snap`.

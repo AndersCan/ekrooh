@@ -17,7 +17,7 @@ import { $currentTime } from './current-time';
 import { handleMessage } from './handle-message';
 import { safeMediaUrl } from './media-url';
 import { $router, type AppPage } from './router';
-import { getTransport } from './transport';
+import { diagnosticsEnabled, getTransport } from './transport';
 import { useStore } from './use-store';
 
 let transport: MessageTransport;
@@ -26,9 +26,11 @@ let bus: ReturnType<typeof createPluginBus>;
 async function boot() {
   // On-device the page is served by the loopback server, which exposes a
   // same-origin `POST /logs` ingest. Capture the webview console so decode and
-  // runtime errors surface in the loopback log tail that enriches invoke-timeout
-  // diagnostics (see rpc-messenger / websocket-client). Skip in mock mode — no
-  // loopback backend exists to ingest into. Failures are swallowed by the seam.
+  // runtime errors land in the loopback log ring (`GET /logs`). Invoke-timeout
+  // and give-up errors quote that tail only when diagnostics are on (dev, or
+  // `VITE_BARE_DIAGNOSTICS=true`; see `diagnosticsEnabled`). Skip in mock mode —
+  // no loopback backend exists to ingest into. Failures are swallowed by the
+  // seam.
   const webEnv = (
     import.meta as { env?: Record<string, string | boolean | undefined> }
   ).env;
@@ -37,9 +39,11 @@ async function boot() {
   }
 
   transport = await getTransport();
+  // A variable, not a literal: also type-checks against an older `dist/`.
+  const messengerOptions = { diagnostics: diagnosticsEnabled() };
   const messenger = createProtocolMessenger((request, payload) => {
     transport.send(MessageType.ENVELOPE, request, payload);
-  });
+  }, messengerOptions);
   bus = createPluginBus(messenger);
   transport.subscribe((message) => {
     messenger.handleIncoming(message.header);

@@ -26,3 +26,17 @@ describe('getTransport', () => {
     expect(typeof transport.send).toBe('function');
   });
 });
+
+describe('diagnosticsEnabled (adv-E-1)', () => {
+  it('is on in dev or with VITE_BARE_DIAGNOSTICS=true, off otherwise', async () => {
+    const { diagnosticsEnabled } = await import('./transport');
+    expect(diagnosticsEnabled({ DEV: true })).toBe(true);
+    expect(
+      diagnosticsEnabled({ VITE_BARE_DIAGNOSTICS: 'true', DEV: false }),
+    ).toBe(true);
+    expect(diagnosticsEnabled({ VITE_BARE_DIAGNOSTICS: '1', DEV: false })).toBe(
+      false,
+    );
+    expect(diagnosticsEnabled({ PROD: true, DEV: false })).toBe(false);
+  });
+});

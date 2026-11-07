@@ -12,14 +12,56 @@ import UniformTypeIdentifiers
 /// extension is always preserved/derived so the loopback server can set the
 /// content type. Simulators report a deterministic "camera unavailable" error
 /// (`UIImagePickerController.isSourceTypeAvailable(.camera)` is false).
+///
+/// Staged files live in `tmp/ekrooh-media/` with complete-until-first-unlock
+/// protection; the directory is emptied at launch, so picks the page no longer
+/// references (evicted mounts, invokes that timed out) do not pile up.
 enum MediaHostPlugins {
   static func register(_ registry: HostPluginRegistry) {
-    registry.register(pluginId: "vendor.media", event: "media.pick") { args, _, respond in
+    purgeStagedFiles()
+    // The picker and camera wait on the user, so these get the 5-minute
+    // user-mediated deadline instead of the 30 s default.
+    registry.register(
+      pluginId: "vendor.media", event: "media.pick",
+      timeout: HostPluginRegistry.userMediatedInvokeTimeout
+    ) { args, _, respond in
       MediaHostPlugins.pick(kind: Self.kind(from: args), respond: respond)
     }
-    registry.register(pluginId: "vendor.media", event: "media.capture") { args, _, respond in
+    registry.register(
+      pluginId: "vendor.media", event: "media.capture",
+      timeout: HostPluginRegistry.userMediatedInvokeTimeout
+    ) { args, _, respond in
       MediaHostPlugins.capture(kind: Self.kind(from: args), respond: respond)
     }
+  }
+
+  /// Where picked/captured files are staged for the worklet to serve.
+  static var stagingDirectory: URL {
+    URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent("ekrooh-media", isDirectory: true)
+  }
+
+  /// A fresh staging path, with the directory created.
+  static func stagingURL(extension ext: String) -> URL? {
+    let dir = stagingDirectory
+    do {
+      try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    } catch {
+      return nil
+    }
+    return dir.appendingPathComponent("media-\(UUID().uuidString).\(ext)")
+  }
+
+  /// Applies file protection to a staged file (best effort).
+  static func protect(_ url: URL) {
+    try? FileManager.default.setAttributes(
+      [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+      ofItemAtPath: url.path
+    )
+  }
+
+  private static func purgeStagedFiles() {
+    try? FileManager.default.removeItem(at: stagingDirectory)
   }
 
   private static func kind(from args: [String: Any]?) -> String {
@@ -92,13 +134,15 @@ enum MediaHostPlugins {
     return nil
   }
 
-  private static var active = Set<MediaPickerController>()
+  /// Main-actor only: inserted when a picker is presented, removed when it
+  /// finishes. Picker callbacks arrive on other queues and hop here first.
+  @MainActor private static var active = Set<MediaPickerController>()
 
-  fileprivate static func retain(_ controller: MediaPickerController) {
+  @MainActor fileprivate static func retain(_ controller: MediaPickerController) {
     active.insert(controller)
   }
 
-  fileprivate static func release(_ controller: MediaPickerController) {
+  @MainActor fileprivate static func release(_ controller: MediaPickerController) {
     active.remove(controller)
   }
 }
@@ -121,24 +165,26 @@ private final class MediaPickerController: NSObject, PHPickerViewControllerDeleg
     self.respond = respond
   }
 
+  /// Callable from any queue: `respond` is thread-safe, and the release of
+  /// `self` from the main-actor-only `active` set hops to the main actor.
   private func abort(_ message: String) {
     respond(.fail(code: ErrorCodes.hostError, message: message))
-    MediaHostPlugins.release(self)
+    Task { @MainActor in MediaHostPlugins.release(self) }
   }
 
   private func finish(_ path: URL) {
     respond(.ok(["path": path.path]))
-    MediaHostPlugins.release(self)
+    Task { @MainActor in MediaHostPlugins.release(self) }
   }
 
   private func stage(from source: URL) -> URL? {
     let ext =
       source.pathExtension.isEmpty
       ? (kind == "video" ? "mov" : "heic") : source.pathExtension
-    let dest = URL(fileURLWithPath: NSTemporaryDirectory())
-      .appendingPathComponent("media-\(UUID().uuidString).\(ext)")
+    guard let dest = MediaHostPlugins.stagingURL(extension: ext) else { return nil }
     do {
       try FileManager.default.copyItem(at: source, to: dest)
+      MediaHostPlugins.protect(dest)
       return dest
     } catch {
       return nil
@@ -188,11 +234,11 @@ private final class MediaPickerController: NSObject, PHPickerViewControllerDeleg
       abort("No captured image")
       return
     }
-    let dest = URL(fileURLWithPath: NSTemporaryDirectory())
-      .appendingPathComponent("media-\(UUID().uuidString).jpg")
     guard
+      let dest = MediaHostPlugins.stagingURL(extension: "jpg"),
       let data = image.jpegData(compressionQuality: 0.9),
-      (try? data.write(to: dest)) != nil
+      (try? data.write(to: dest, options: .completeFileProtectionUntilFirstUserAuthentication))
+        != nil
     else {
       abort("Failed to stage captured image")
       return

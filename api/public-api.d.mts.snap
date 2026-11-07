@@ -1,0 +1,649 @@
+// @ekrooh/bare public type surface (normalized dist/*.d.mts).
+// Generated; do not edit. Regenerate: npm run build:pkg && node scripts/api-snapshot.mjs --update
+
+// ==== index-<chunk>.d.mts
+declare const VERSION = 1;
+declare const MessageType: {
+readonly ENVELOPE: 1;
+};
+type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];
+declare const ErrorCode: {
+readonly UNSUPPORTED_CAPABILITY: 'UNSUPPORTED_CAPABILITY';
+readonly UNSUPPORTED_EVENT: 'UNSUPPORTED_EVENT';
+readonly HOST_ERROR: 'HOST_ERROR';
+readonly TRANSPORT_ERROR: 'TRANSPORT_ERROR';
+readonly PLUGIN_ERROR: 'PLUGIN_ERROR';
+readonly INVALID_RESPONSE: 'INVALID_RESPONSE';
+readonly FRAME_TOO_LARGE: 'FRAME_TOO_LARGE';
+readonly FRAME_INVALID: 'FRAME_INVALID';
+readonly TIMEOUT: 'TIMEOUT';
+};
+type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+declare const MAX_HEADER_BYTES = 65535;
+declare const MAX_FRAME_BYTES: number;
+interface WireMessage {
+type: MessageTypeValue;
+header: MessageHeader;
+payload: Uint8Array;
+}
+type HeaderBase = {
+type: string;
+requestId?: string;
+};
+type ErrorCodeOrString = ErrorCode | (string & {});
+declare class CoreError extends Error {
+code: ErrorCodeOrString;
+constructor(code: ErrorCodeOrString, message: string);
+}
+type CoreErrorWire = {
+code: string;
+message: string;
+};
+type RuntimeTarget = 'web' | 'android' | 'ios' | 'bare';
+type Either<E, A> = [E, null] | [null, A];
+type DispatchEnvelope<TEvent extends string = string, TArgs extends Record<string, unknown> = Record<string, unknown>> = {
+kind: 'dispatch';
+pluginId: string;
+event: TEvent;
+args: TArgs;
+payload?: Uint8Array | ArrayBuffer | string | null;
+};
+type InvokeEnvelope<TEvent extends string = string, TArgs extends Record<string, unknown> = Record<string, unknown>, TResult = unknown> = {
+kind: 'invoke';
+pluginId: string;
+event: TEvent;
+args: TArgs;
+payload?: Uint8Array | ArrayBuffer | string | null;
+timeoutMs?: number;
+__result?: TResult;
+};
+type PluginInvokeRequestHeader = HeaderBase & {
+type: 'INVOKE_REQUEST';
+pluginId: string;
+event: string;
+args?: Record<string, unknown>;
+};
+type PluginInvokeResponseHeader = HeaderBase & {
+type: 'INVOKE_RESPONSE';
+pluginId: string;
+event: string;
+result?: unknown;
+error?: CoreErrorWire;
+};
+type PluginDispatchHeader = HeaderBase & {
+type: 'DISPATCH';
+pluginId: string;
+event: string;
+args?: Record<string, unknown>;
+};
+type PluginHeader = PluginInvokeRequestHeader | PluginInvokeResponseHeader | PluginDispatchHeader;
+type HostCapabilitiesQueryHeader = {
+type: 'HOST_CAPABILITIES_QUERY';
+requestId: string;
+};
+type HostCapabilitiesResponseHeader = {
+type: 'HOST_CAPABILITIES_RESPONSE';
+requestId: string;
+capabilities: CapabilityDescriptor[];
+error?: CoreErrorWire;
+};
+type HostInvokeRequestHeader = {
+type: 'HOST_INVOKE_REQUEST';
+requestId: string;
+pluginId: string;
+event: string;
+args?: Record<string, unknown>;
+};
+type HostInvokeResponseHeader = {
+type: 'HOST_INVOKE_RESPONSE';
+requestId: string;
+pluginId: string;
+event: string;
+result?: unknown;
+error?: CoreErrorWire;
+};
+type CapabilityDescriptor = {
+pluginId: string;
+capabilities: string[];
+events: string[];
+runtimes: RuntimeTarget[];
+};
+type MessageHeader = PluginHeader | HostCapabilitiesQueryHeader | HostCapabilitiesResponseHeader | HostInvokeRequestHeader | HostInvokeResponseHeader;
+interface PluginContext {
+runtime: RuntimeTarget;
+payload: Uint8Array;
+sender?: {
+pluginId: string;
+};
+}
+interface PluginRuntimeAdapter {
+dispatch?: (event: string, args: Record<string, unknown> | undefined, context: PluginContext) => void | Promise<void>;
+invoke?: (event: string, args: Record<string, unknown> | undefined, context: PluginContext) => Either<CoreError, unknown> | Promise<Either<CoreError, unknown>>;
+}
+interface PluginManifest {
+id: string;
+version?: string;
+capabilities?: string[];
+events?: string[];
+hostTimeoutsMs?: Readonly<Record<string, number>>;
+runtimes: Partial<Record<RuntimeTarget, PluginRuntimeAdapter>>;
+}
+declare function ok<T>(result: T): [null, T];
+declare function err(code: ErrorCodeOrString, message: string): [CoreError, null];
+declare function coerceErrorCode(code: string | undefined): ErrorCode;
+type Ok<T> = [null, T];
+type Err = [CoreError, null];
+type PluginResult<T> = Either<CoreError, T>;
+interface Platform {
+randomBytes(bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
+now(): number;
+}
+type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never;
+type InternalDispatchRequest = (PluginDispatchHeader & {
+requestId: string;
+}) | (PluginInvokeRequestHeader & {
+requestId: string;
+});
+type DispatchRequest = DistributiveOmit<PluginDispatchHeader, 'requestId'>;
+type InvokeRequest = DistributiveOmit<PluginInvokeRequestHeader, 'requestId'>;
+interface ProtocolMessenger {
+dispatch(request: DispatchRequest, payload?: Uint8Array | ArrayBuffer | string | null): string;
+invoke(request: InvokeRequest, payload?: Uint8Array | ArrayBuffer | string | null, timeoutMs?: number): Promise<MessageHeader>;
+handleIncoming(header: MessageHeader): void;
+}
+declare function createProtocolMessenger(send: (request: InternalDispatchRequest, payload?: Uint8Array | ArrayBuffer | string | null) => void, options?: {
+platform?: Partial<Platform>;
+diagnostics?: boolean;
+}): ProtocolMessenger;
+interface PluginRegistry {
+register(plugin: PluginManifest): void;
+resolve(pluginId: string, runtime: RuntimeTarget): PluginManifest['runtimes'][RuntimeTarget] | undefined;
+get(pluginId: string): PluginManifest | undefined;
+listCapabilities(runtime?: RuntimeTarget): Array<{
+pluginId: string;
+capabilities: string[];
+events: string[];
+runtimes: RuntimeTarget[];
+}>;
+}
+declare function createPluginRegistry(): PluginRegistry;
+interface PluginRouter {
+route(header: MessageHeader, payload: Uint8Array,
+context?: {
+channel?: string;
+}): Promise<PluginInvokeResponseHeader | null>;
+}
+type PluginRouterOptions = {
+delegateToHost?: (header: PluginInvokeRequestHeader, payload: Uint8Array, timeoutMs?: number) => Promise<PluginInvokeResponseHeader | null>;
+getHostCapabilities?: () => Promise<CapabilityDescriptor[]>;
+logger?: Pick<Console, 'warn' | 'error' | 'debug'>;
+maxInflight?: number;
+maxInflightPerChannel?: number;
+maxInflightPerPlugin?: number;
+serialPlugins?: readonly string[];
+hostCapabilitiesTtlMs?: number;
+};
+declare function createPluginRouter(registry: PluginRegistry, runtime: RuntimeTarget, options?: PluginRouterOptions): PluginRouter;
+interface PluginBus {
+dispatch(envelope: DispatchEnvelope): string;
+invoke<TResult>(envelope: InvokeEnvelope<string, Record<string, unknown>, TResult>): Promise<Either<CoreError, TResult>>;
+}
+declare function createPluginBus(messenger: ProtocolMessenger): PluginBus;
+type Encoder = (str: string) => Uint8Array;
+type Decoder = (bytes: Uint8Array) => string;
+interface ProtocolOptions {
+encode?: Encoder;
+decode?: Decoder;
+allowUnknownTypes?: boolean;
+maxFrameBytes?: number;
+}
+declare class MessageProtocol {
+private encodeStr;
+private decodeStr;
+private allowUnknownTypes;
+readonly maxFrameBytes: number;
+constructor(options?: ProtocolOptions);
+encode(type: MessageTypeValue, header: MessageHeader, payload?: Uint8Array | ArrayBuffer | string | null): Uint8Array;
+decode(data: ArrayBuffer | Uint8Array): WireMessage;
+}
+interface EventSpec<TArgs extends Record<string, unknown> = Record<string, never>, TResult = unknown> {
+readonly pluginId: string;
+readonly name: string;
+readonly args: TArgs;
+readonly result: TResult;
+readonly validate?: (args: unknown) => boolean;
+readonly hostTimeoutMs?: number;
+}
+type InvokeHandler<TArgs extends Record<string, unknown> = Record<string, never>, TResult = unknown> = (args: TArgs, context: PluginContext) => Either<CoreError, TResult> | Promise<Either<CoreError, TResult>>;
+type DispatchHandler<TArgs extends Record<string, unknown> = Record<string, never>> = (args: TArgs, context: PluginContext) => void | Promise<void>;
+type InvokeHandlers<TSpecs extends Record<string, EventSpec<any, any>>> = { [K in keyof TSpecs]?: InvokeHandler<TSpecs[K]['args'], TSpecs[K]['result']>; };
+type DispatchHandlers<TSpecs extends Record<string, EventSpec<any, any>>> = { [K in keyof TSpecs]?: DispatchHandler<TSpecs[K]['args']>; };
+declare function definePlugin<const TSpecs extends Record<string, EventSpec<any, any>>>(id: string, specs: TSpecs, options?: {
+capabilities?: string[];
+invoke?: InvokeHandlers<TSpecs>;
+dispatch?: DispatchHandlers<TSpecs>;
+}): PluginManifest;
+declare function invokeEvent<TSpec extends EventSpec<any, any>>(spec: TSpec, args: TSpec['args'], payload?: Uint8Array | ArrayBuffer | string | null, timeoutMs?: number): InvokeEnvelope<TSpec['name'], TSpec['args'], TSpec['result']>;
+declare function dispatchEvent<TSpec extends EventSpec<any, any>>(spec: TSpec, args: TSpec['args'], payload?: Uint8Array | ArrayBuffer | string | null): DispatchEnvelope<TSpec['name'], TSpec['args']>;
+interface BareRuntimeContext {
+protocol: MessageProtocol;
+pluginRegistry: PluginRegistry;
+pluginRouter: PluginRouter;
+}
+declare function createBareRuntimeContext(plugins?: PluginManifest[], routerOptions?: PluginRouterOptions): BareRuntimeContext;
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+type LogSource = 'backend' | 'web';
+interface LogEntry {
+seq: number;
+ts: number;
+level: LogLevel;
+source: LogSource;
+tag?: string;
+message: string;
+}
+interface LogViewOptions {
+tail?: number;
+level?: LogLevel;
+source?: LogSource;
+}
+interface LogStore {
+readonly capacity: number;
+append(entry: Omit<LogEntry, 'seq'>): void;
+view(options?: LogViewOptions): LogEntry[];
+clear(): number;
+}
+type WebConsoleCaptureOptions = {
+endpoint?: string;
+flushThreshold?: number;
+flushIntervalMs?: number;
+ingest?: (payload: {
+source: 'web';
+entries: Array<{
+level: LogLevel;
+tag?: string;
+message: string;
+}>;
+}) => void | Promise<void>;
+};
+type WebConsoleCapture = {
+flush(): void;
+restore(): void;
+};
+declare function installWebConsoleCapture(options?: WebConsoleCaptureOptions): WebConsoleCapture;
+export { BareRuntimeContext, CapabilityDescriptor, CoreError, CoreErrorWire, Decoder, DispatchEnvelope, DispatchHandler, DispatchRequest, Either, Encoder, Err, ErrorCode, ErrorCodeOrString, EventSpec, HostCapabilitiesQueryHeader, HostCapabilitiesResponseHeader, HostInvokeRequestHeader, HostInvokeResponseHeader, InvokeEnvelope, InvokeHandler, InvokeRequest, LogEntry, LogLevel, LogSource, LogStore, MAX_FRAME_BYTES, MAX_HEADER_BYTES, MessageHeader, MessageProtocol, MessageType, MessageTypeValue, Ok, Platform, PluginBus, PluginContext, PluginDispatchHeader, PluginHeader, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, PluginRegistry, PluginResult, PluginRouter, PluginRouterOptions, PluginRuntimeAdapter, ProtocolMessenger, ProtocolOptions, RuntimeTarget, VERSION, WireMessage, coerceErrorCode, createBareRuntimeContext, createPluginBus, createPluginRegistry, createPluginRouter, createProtocolMessenger, definePlugin, dispatchEvent, err, installWebConsoleCapture, invokeEvent, ok };
+
+// ==== index.d.mts
+import { BareRuntimeContext, CapabilityDescriptor, CoreError, CoreErrorWire, Decoder, DispatchEnvelope, DispatchHandler, DispatchRequest, Either, Encoder, Err, ErrorCode, ErrorCodeOrString, EventSpec, HostCapabilitiesQueryHeader, HostCapabilitiesResponseHeader, HostInvokeRequestHeader, HostInvokeResponseHeader, InvokeEnvelope, InvokeHandler, InvokeRequest, MAX_FRAME_BYTES, MAX_HEADER_BYTES, MessageHeader, MessageProtocol, MessageType, MessageTypeValue, Ok, Platform, PluginBus, PluginContext, PluginDispatchHeader, PluginHeader, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, PluginRegistry, PluginResult, PluginRouter, PluginRouterOptions, PluginRuntimeAdapter, ProtocolMessenger, ProtocolOptions, RuntimeTarget, VERSION, WireMessage, coerceErrorCode, createBareRuntimeContext, createPluginBus, createPluginRegistry, createPluginRouter, createProtocolMessenger, definePlugin, dispatchEvent, err, installWebConsoleCapture, invokeEvent, ok } from "./index-<chunk>.mjs";
+export { BareRuntimeContext, CapabilityDescriptor, CoreError, CoreErrorWire, Decoder, DispatchEnvelope, DispatchHandler, DispatchRequest, Either, Encoder, Err, ErrorCode, ErrorCodeOrString, EventSpec, HostCapabilitiesQueryHeader, HostCapabilitiesResponseHeader, HostInvokeRequestHeader, HostInvokeResponseHeader, InvokeEnvelope, InvokeHandler, InvokeRequest, MAX_FRAME_BYTES, MAX_HEADER_BYTES, MessageHeader, MessageProtocol, MessageType, MessageTypeValue, Ok, PluginBus, PluginContext, PluginDispatchHeader, PluginHeader, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, PluginRegistry, PluginResult, PluginRouter, PluginRouterOptions, PluginRuntimeAdapter, ProtocolMessenger, ProtocolOptions, RuntimeTarget, VERSION, WireMessage, coerceErrorCode, createBareRuntimeContext, createPluginBus, createPluginRegistry, createPluginRouter, createProtocolMessenger, definePlugin, dispatchEvent, err, installWebConsoleCapture, invokeEvent, ok, type Platform };
+
+// ==== plugins-discovery-events.d.mts
+import { CapabilityDescriptor, InvokeEnvelope } from "./index-<chunk>.mjs";
+export type DiscoveryListResult = {
+schemaVersion: 1;
+capabilities: CapabilityDescriptor[];
+};
+export declare const discoverySpecs: {
+readonly list: {
+readonly pluginId: 'core.discovery';
+readonly name: 'discovery.list';
+readonly args: Record<string, never>;
+readonly result: DiscoveryListResult;
+};
+};
+export declare const discoveryEvents: {
+discovery: {
+list(): InvokeEnvelope<"discovery.list", Record<string, never>, DiscoveryListResult>;
+};
+};
+
+// ==== plugins-health-events.d.mts
+import { InvokeEnvelope } from "./index-<chunk>.mjs";
+export declare const healthSpecs: {
+readonly ping: {
+readonly pluginId: 'core.health';
+readonly name: 'health.ping';
+readonly args: {
+message?: string;
+};
+readonly result: {
+message: string;
+ts: number;
+};
+};
+readonly payloadEcho: {
+readonly pluginId: 'core.health';
+readonly name: 'health.payloadEcho';
+readonly args: {
+label: string;
+};
+readonly result: {
+label: string;
+payloadSize: number;
+};
+};
+readonly roundtrip: {
+readonly pluginId: 'core.health';
+readonly name: 'health.roundtrip';
+readonly args: Record<string, never>;
+readonly result: {
+pong: true;
+ts: number;
+};
+};
+};
+export declare const healthEvents: {
+health: {
+ping(message?: string): InvokeEnvelope<'health.ping', {
+message?: string;
+}, {
+message: string;
+ts: number;
+}>;
+payloadEcho(label: string, payload: Uint8Array | ArrayBuffer | string): InvokeEnvelope<'health.payloadEcho', {
+label: string;
+}, {
+label: string;
+payloadSize: number;
+}>;
+roundtrip(): InvokeEnvelope<'health.roundtrip', Record<string, never>, {
+pong: true;
+ts: number;
+}>;
+};
+};
+
+// ==== plugins-logs-events.d.mts
+import { InvokeEnvelope, LogEntry, LogLevel, LogSource } from "./index-<chunk>.mjs";
+export type LogsViewArgs = {
+tail?: number;
+level?: LogLevel;
+source?: LogSource;
+};
+export type LogsViewResult = {
+entries: LogEntry[];
+};
+export type LogsClearResult = {
+cleared: number;
+};
+export declare const logsSpecs: {
+readonly view: {
+readonly pluginId: 'core.logs';
+readonly name: 'logs.view';
+readonly args: LogsViewArgs;
+readonly result: LogsViewResult;
+};
+readonly clear: {
+readonly pluginId: 'core.logs';
+readonly name: 'logs.clear';
+readonly args: Record<string, never>;
+readonly result: LogsClearResult;
+};
+};
+export declare const logEvents: {
+logs: {
+view(options?: LogsViewArgs): InvokeEnvelope<'logs.view', LogsViewArgs, LogsViewResult>;
+clear(): InvokeEnvelope<'logs.clear', Record<string, never>, LogsClearResult>;
+};
+};
+export type { LogEntry, LogLevel, LogSource };
+
+// ==== plugins-media-events.d.mts
+import { InvokeEnvelope } from "./index-<chunk>.mjs";
+export type MediaKind = 'image' | 'video';
+export type MediaResult = {
+url: string;
+};
+export declare const mediaSpecs: {
+readonly pick: {
+readonly pluginId: 'vendor.media';
+readonly name: 'media.pick';
+readonly args: {
+kind?: MediaKind;
+};
+readonly result: MediaResult;
+};
+readonly capture: {
+readonly pluginId: 'vendor.media';
+readonly name: 'media.capture';
+readonly args: {
+kind?: MediaKind;
+};
+readonly result: MediaResult;
+};
+};
+export declare const mediaEvents: {
+media: {
+pick(kind?: MediaKind): InvokeEnvelope<'media.pick', {
+kind?: MediaKind;
+}, MediaResult>;
+capture(kind?: MediaKind): InvokeEnvelope<'media.capture', {
+kind?: MediaKind;
+}, MediaResult>;
+};
+};
+
+// ==== plugins-permissions-events.d.mts
+import { InvokeEnvelope } from "./index-<chunk>.mjs";
+export type PermissionId = 'storage' | 'camera';
+export type PermissionStatus = 'granted' | 'denied' | 'notDetermined' | 'unsupported';
+export type PermissionResult = {
+permission: PermissionId;
+status: PermissionStatus;
+};
+export declare const permissionSpecs: {
+readonly request: {
+readonly pluginId: 'core.permissions';
+readonly name: 'permissions.request';
+readonly args: {
+permission: PermissionId;
+};
+readonly result: PermissionResult;
+readonly hostTimeoutMs: number;
+};
+readonly status: {
+readonly pluginId: 'core.permissions';
+readonly name: 'permissions.status';
+readonly args: {
+permission: PermissionId;
+};
+readonly result: PermissionResult;
+};
+};
+export declare const permissionEvents: {
+permissions: {
+request(permission: PermissionId): InvokeEnvelope<'permissions.request', {
+permission: PermissionId;
+}, PermissionResult>;
+status(permission: PermissionId): InvokeEnvelope<'permissions.status', {
+permission: PermissionId;
+}, PermissionResult>;
+};
+};
+
+// ==== plugins.d.mts
+import { CapabilityDescriptor, LogStore, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, RuntimeTarget } from "./index-<chunk>.mjs";
+import { LoopbackServer } from "./static-file-server-<chunk>.mjs";
+type DiscoveryPluginDeps = {
+listBareCapabilities: () => Array<{
+pluginId: string;
+capabilities: string[];
+events: string[];
+runtimes: RuntimeTarget[];
+}>;
+queryHostCapabilities: () => Promise<CapabilityDescriptor[]>;
+};
+type LogsPluginDeps = {
+store: LogStore;
+};
+type MediaPluginDeps = {
+staticServer: LoopbackServer;
+invokeOnHost: (header: PluginInvokeRequestHeader, payload: Uint8Array, timeoutMs?: number) => Promise<PluginInvokeResponseHeader | null>;
+};
+export type DefaultPluginsDeps = DiscoveryPluginDeps & MediaPluginDeps & LogsPluginDeps;
+export declare function createDefaultPlugins(deps: DefaultPluginsDeps): PluginManifest[];
+export type { DiscoveryPluginDeps, LogsPluginDeps, MediaPluginDeps };
+
+// ==== runtime.d.mts
+import { BareRuntimeContext, CapabilityDescriptor, MessageHeader, MessageProtocol, Platform, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, WireMessage, createPluginRegistry, createPluginRouter } from "./index-<chunk>.mjs";
+import { LoopbackRouteHandler, LoopbackServer, collectRequestBody, createLoopbackServer } from "./static-file-server-<chunk>.mjs";
+type BareIpcLike = {
+write(data: Uint8Array | string): boolean;
+};
+declare function createHostIpcBridge(config: {
+ipc: BareIpcLike;
+protocol: MessageProtocol;
+platform: Platform;
+}): {
+close(reason?: string): void;
+tryConsumeDownstream: (parsed: WireMessage) => boolean;
+tryConsumeDownstreamFromHost(raw: Uint8Array | ArrayBuffer): boolean;
+queryCapabilities(timeoutMs?: number): Promise<CapabilityDescriptor[]>;
+invokeOnHost(header: PluginInvokeRequestHeader, payload: Uint8Array, timeoutMs?: number): Promise<PluginInvokeResponseHeader | null>;
+};
+type LoopbackPush = (header: MessageHeader, payload?: Uint8Array | ArrayBuffer | null) => boolean;
+export declare function createLoopbackPush(server: LoopbackServer, protocol: MessageProtocol): LoopbackPush;
+export declare function attachWebSocketProtocol(server: LoopbackServer, context: BareRuntimeContext): void;
+interface BareIPC extends NodeJS.EventEmitter {
+read(n?: number): Buffer | null;
+write(data: Uint8Array | string): boolean;
+resume?(): void;
+pause?(): void;
+}
+export declare function getIPC(): BareIPC | null;
+export declare function resolveWorkletConfig(): WorkletRuntimeOptions;
+export declare function resolveCliConfig(argv?: readonly string[]): WorkletRuntimeOptions;
+export type WorkletRuntimeOptions = {
+webAssets?: string;
+storage?: string;
+cache?: string;
+host?: string;
+port?: number;
+auth?: boolean;
+allowedOrigins?: readonly string[];
+handoffFile?: boolean;
+deviceMode?: boolean;
+plugins?: PluginManifest[];
+wsIdleTimeoutMs?: number;
+wsDeadPeerTimeoutMs?: number;
+wsReplaceMinIntervalMs?: number;
+wsMaxQueuedBytes?: number;
+logsCapacity?: number;
+maxInflight?: number;
+maxInflightPerChannel?: number;
+maxInflightPerPlugin?: number;
+serialPlugins?: readonly string[];
+logsMinLevel?: 'debug' | 'info' | 'warn' | 'error';
+};
+export type WorkletRuntimeConfig = {
+webAssets?: string;
+storage?: string;
+cache?: string;
+deviceMode: boolean;
+};
+export interface WorkletRuntime {
+protocol: MessageProtocol;
+pluginRegistry: ReturnType<typeof createPluginRegistry>;
+pluginRouter: ReturnType<typeof createPluginRouter>;
+server: LoopbackServer;
+hostBridge: ReturnType<typeof createHostIpcBridge> | null;
+config: WorkletRuntimeConfig;
+start(): Promise<{
+origin: string;
+port: number;
+token: string;
+bootstrap: string;
+}>;
+close(cb?: (err?: Error | null) => void): void;
+}
+export declare function createWorkletRuntime(options?: WorkletRuntimeOptions): WorkletRuntime;
+export { collectRequestBody, createLoopbackServer, type LoopbackPush, type LoopbackRouteHandler, type LoopbackServer };
+
+// ==== static-file-server-<chunk>.d.mts
+import { HTTPIncomingMessage, HTTPServerResponse } from "bare-http1";
+import "bare-tcp";
+type WebSocketLike = {
+on(event: 'data', listener: (chunk: unknown) => void): unknown;
+on(event: 'close', listener: () => void): unknown;
+on(event: 'drain', listener: () => void): unknown;
+on(event: 'error', listener: (err: Error) => void): unknown;
+write(data: Uint8Array): boolean;
+destroy(): void;
+pause?(): void;
+resume?(): void;
+};
+type LoopbackRequest = {
+url?: string;
+method?: string;
+headers: Record<string, string | string[] | number | undefined>;
+};
+type LoopbackConnectionHandler = (socket: WebSocketLike, request: LoopbackRequest) => void;
+declare function collectRequestBody(req: HTTPIncomingMessage, maxBytes?: number): Promise<string>;
+type LoopbackRouteHandler = (req: HTTPIncomingMessage, res: HTTPServerResponse) => void;
+interface LoopbackServerOptions {
+host?: string;
+port?: number;
+auth?: boolean;
+token?: string;
+allowedOrigins?: readonly string[];
+wsIdleTimeoutMs?: number;
+wsDeadPeerTimeoutMs?: number;
+wsReplaceMinIntervalMs?: number;
+wsMaxQueuedBytes?: number;
+foldPathCase?: boolean;
+bootstrapTtlMs?: number;
+}
+interface LoopbackServer {
+origin(): Promise<string>;
+url(path: string): Promise<string>;
+token(): string;
+pauseBootstrapClock?(): void;
+resumeBootstrapClock?(): void;
+credentials(): Promise<{
+origin: string;
+port: number;
+token: string;
+bootstrap: string;
+}>;
+mount(path: string, filePath: string): void;
+unmount(path: string): void;
+mountDir(prefix: string, dirPath: string, opts?: {
+public?: boolean;
+}): void;
+onConnection(handler: LoopbackConnectionHandler): void;
+registerRoute(method: string, path: string, handler: LoopbackRouteHandler): void;
+push(frame: Uint8Array): boolean;
+close(cb?: (err?: Error | null) => void): void;
+}
+declare function createLoopbackServer(options?: LoopbackServerOptions): LoopbackServer;
+export { LoopbackRouteHandler, LoopbackServer, collectRequestBody, createLoopbackServer };
+
+// ==== transports.d.mts
+import { MessageHeader, MessageTypeValue, WireMessage } from "./index-<chunk>.mjs";
+declare global {
+interface Window {
+__ekrooh?: {
+bootstrap?: string;
+[key: string]: unknown;
+};
+BareShell?: boolean;
+}
+}
+interface CreateWebSocketTransportOptions {
+url?: string;
+login?: boolean;
+maxRetries?: number;
+backoffMs?: number;
+loginTimeoutMs?: number;
+minBootWindowMs?: number;
+openTimeoutMs?: number;
+maxQueued?: number;
+diagnostics?: boolean;
+}
+interface MessageTransport {
+send(type: MessageTypeValue, header: MessageHeader, payload?: Uint8Array | ArrayBuffer | string | null): void;
+subscribe(handler: (message: WireMessage) => void): () => void;
+close?(): void;
+}
+export declare function createWebSocketTransport(urlOrOptions?: string | CreateWebSocketTransportOptions): MessageTransport;
+export declare function createMockTransport(): MessageTransport;
+export type { MessageTransport };

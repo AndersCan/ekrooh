@@ -1,0 +1,134 @@
+name: Release Bare Kit runtime
+# Publishes io.github.anderscan.ekrooh:bare-kit-runtime (the ~70 MB Bare Kit
+# Android prebuild) to Maven Central. It runs only on a Bare Kit bump, not on
+# every ekrooh release, because Central limits monthly release size
+# (docs/adr/0007-separate-bare-kit-runtime-artifact.md, RELEASING.md).
+on:
+  push:
+    tags:
+      - 'bare-kit-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # never cancel a publish half-way
+
+# Two jobs, like release.yml: `build` runs Gradle with no secret and stages
+# the unsigned publication; `publish` holds the signing and Sonatype secrets
+# and runs no build tool, only .github/scripts/publish-maven.sh (gpg + curl).
+jobs:
+  build:
+    name: Build bare-kit-runtime ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      published: ${{ steps.exists.outputs.published }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+
+      - name: Resolve the runtime version and check the tag
+        # The tag must name exactly the `maven` pin in the lockfile, so a tag
+        # can never publish a version the build would not depend on.
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION=$(node -e "console.log(require('./scripts/prebuilds.lock.json').maven['bare-kit-runtime'])")
+          if [ "$TAG" != "bare-kit-v$VERSION" ]; then
+            echo "Tag $TAG does not match the lockfile pin bare-kit-runtime $VERSION (expected bare-kit-v$VERSION)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if already on Maven Central
+        # Central versions are immutable; re-running a tag must not fail.
+        id: exists
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          POM="https://repo1.maven.org/maven2/io/github/anderscan/ekrooh/bare-kit-runtime/$VERSION/bare-kit-runtime-$VERSION.pom"
+          if curl -fsSI "$POM" >/dev/null 2>&1; then
+            echo "bare-kit-runtime $VERSION is already on Maven Central — skipping"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        if: steps.exists.outputs.published != 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        if: steps.exists.outputs.published != 'true'
+        with:
+          packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018
+
+      - name: Fetch Bare Kit prebuilds
+        # Hash-checked against scripts/prebuilds.lock.json. No npm install:
+        # the fetch script uses only Node built-ins and the public release URL.
+        if: steps.exists.outputs.published != 'true'
+        run: node scripts/fetch-prebuilds.mjs
+
+      - name: Build, check and stage the runtime AAR (unsigned, local)
+        if: steps.exists.outputs.published != 'true'
+        run: |
+          ./gradlew --no-daemon :bare-kit-runtime:assembleRelease :bare-kit-runtime:publishMavenAarPublicationToLocalStagingRepository
+          READELF="$(ls "$ANDROID_HOME"/ndk/27.2.12479018/toolchains/llvm/prebuilt/*/bin/llvm-readelf)" \
+            scripts/check-aar-page-size.sh android/bare-kit-runtime/build/outputs/aar/bare-kit-runtime-release.aar
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.exists.outputs.published != 'true'
+        with:
+          name: maven-staging
+          path: build/maven-staging
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish bare-kit-runtime ${{ github.ref_name }}
+    needs: build
+    if: needs.build.outputs.published != 'true'
+    # Same protected environment as release.yml: a maintainer approves before
+    # the signing and Sonatype secrets are exposed. Its tag rule must allow
+    # `bare-kit-v*` as well as `v*`.
+    environment: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Only for publish-maven.sh, from the tagged commit. No build runs here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: maven-staging
+          path: ${{ runner.temp }}/maven-staging
+
+      - name: Sign the staged publication (gpg, no Gradle)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: .github/scripts/publish-maven.sh prepare "$RUNNER_TEMP/maven-staging" bare-kit-runtime "$VERSION" "$RUNNER_TEMP/maven-signed"
+
+      - name: Publish bare-kit-runtime to Maven Central
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+        run: .github/scripts/publish-maven.sh central "$RUNNER_TEMP/maven-signed" bare-kit-runtime "$VERSION"

@@ -17,6 +17,8 @@ import {
   type PluginRuntimeAdapter,
 } from '../messages';
 import { createHealthPlugin } from '../../plugins/health/plugin';
+import { createHostIpcBridge } from '../messages/host-ipc';
+import { barePlatform } from '../lib/bare-platform';
 
 // The `../messages` index re-exports `core/logs`, whose routes value-import
 // `core/server/static-file-server.ts` → `bare-fs`/`bare-http1`/`bare-ws`/etc.
@@ -221,6 +223,71 @@ describe('attachWebSocketProtocol', () => {
     expect(spy).toHaveBeenCalled();
     expect(socket.destroy).toHaveBeenCalledTimes(1);
     spy.mockRestore();
+  });
+
+  it('ignores a forged HOST_INVOKE_RESPONSE sent over the protocol socket (C-6)', async () => {
+    vi.useFakeTimers();
+    try {
+      // A real host call is pending on the bridge with a known host-channel id.
+      const ipcWrites: Uint8Array[] = [];
+      const bridge = createHostIpcBridge({
+        ipc: {
+          write: (data) => {
+            ipcWrites.push(new Uint8Array(data as Uint8Array));
+            return true;
+          },
+        },
+        protocol,
+        platform: barePlatform,
+      });
+      let settled = false;
+      const call = bridge
+        .invokeOnHost(
+          {
+            type: 'INVOKE_REQUEST',
+            pluginId: 'core.permissions',
+            event: 'permissions.request',
+            requestId: 'page-1',
+          },
+          new Uint8Array(0),
+        )
+        .finally(() => {
+          settled = true;
+        });
+      const hostId = (
+        protocol.decode(ipcWrites[0]).header as { requestId: string }
+      ).requestId;
+      const forged = protocol.encode(
+        MessageType.ENVELOPE,
+        {
+          type: 'HOST_INVOKE_RESPONSE',
+          requestId: hostId,
+          pluginId: 'core.permissions',
+          event: 'permissions.request',
+          result: { status: 'granted' },
+        },
+        null,
+      );
+
+      const harness = serverHarness();
+      attachWebSocketProtocol(
+        harness.server as never,
+        healthContext() as never,
+      );
+      const socket = fakeSocket();
+      harness.handler!(socket as never, { headers: {} });
+      socket.emit('data', forged);
+      await vi.advanceTimersByTimeAsync(10);
+
+      // The socket answered nothing and the host call is still waiting: only
+      // the host IPC channel may consume host responses.
+      expect(socket.write).not.toHaveBeenCalled();
+      expect(settled).toBe(false);
+      expect(bridge.tryConsumeDownstreamFromHost(forged)).toBe(true);
+      await expect(call).resolves.toMatchObject({ requestId: 'page-1' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('ignores empty frames', async () => {
@@ -590,7 +657,7 @@ describe('attachWebSocketProtocol oversized results', () => {
     expect(header.requestId).toBe('big-1');
     expect(header.result).toBeUndefined();
     expect(header.error?.code).toBe('FRAME_TOO_LARGE');
-    expect(header.error?.message).toContain('test.big.big');
+    expect(header.error?.message).toContain('exceeds the frame size limit');
   });
 });
 

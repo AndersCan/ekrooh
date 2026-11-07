@@ -34,9 +34,18 @@ function safeStringify(value: unknown): string {
   }
 }
 
+/** Longest captured backend message, in UTF-16 code units. The ring holds a
+ * fixed number of entries, so this (with the ingest caps in `routes.ts`) is
+ * what bounds its memory: a backend line can echo page-supplied text (a
+ * plugin error, a rejected header), and must not pin capacity × that. */
+export const MAX_CAPTURED_MESSAGE_CHARS = 16 * 1024;
+
 function formatArgs(args: unknown[]): string {
   if (args.length === 0) return '';
-  return args.map((a) => safeStringify(a)).join(' ');
+  const message = args.map((a) => safeStringify(a)).join(' ');
+  return message.length > MAX_CAPTURED_MESSAGE_CHARS
+    ? `${message.slice(0, MAX_CAPTURED_MESSAGE_CHARS)}…`
+    : message;
 }
 
 /** Handle from {@link installConsoleCapture} so a consumer can tear the seam

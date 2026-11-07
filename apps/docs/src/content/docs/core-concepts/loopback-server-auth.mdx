@@ -13,11 +13,11 @@ every gated request is authorized by a per-session credential:
    `handoff.json` (never the session token). The host injects **only the one-time `bootstrap` nonce**
    into the page (`window.__ekrooh = { bootstrap }`), never the raw token.
 2. The page exchanges the bootstrap nonce for a `bare_session_<port>` cookie
-   via `POST /login` (`HttpOnly; SameSite=Strict; Path=/`). Cookies are scoped
-   to the host, not the port, so the port in the name keeps two loopback
-   servers sharing one cookie store from overwriting each other's session. The nonce is
-   single-use: after the page redeems it, it is spent. The raw session token
-   is never accepted as a login body.
+   via `POST /login` (`HttpOnly; SameSite=Strict; Path=/`). The nonce is
+   single-use: after the page redeems it, it is spent. An unredeemed nonce
+   also **expires** (see below), so a late `/login` with it is a 401; an
+   existing session cookie keeps working. The raw session token is never
+   accepted as a login body.
 3. The cookie then authorizes `<img>`/`<video>`/`fetch` and the WebSocket
    upgrade. Non-browser clients use the `X-Bare-Token` header. There is **no**
    `?token=` query-param path — a token must never appear in a URL.
@@ -25,6 +25,31 @@ every gated request is authorized by a per-session credential:
    `handoff.json`. A host that needs the session token for its own
    `X-Bare-Token` calls gets it from `runtime.start()` inside the worklet, not
    from disk.
+
+The nonce lives for `BOOTSTRAP_TTL_MS` (120 s) of **running** time, counted
+from the first public page request (normally the host loading the page; a `POST /login`
+that arrives before any page load is accepted only inside the 600 s unloaded
+window). The clock pauses while the Bare worklet is
+suspended and restarts on resume, so an app backgrounded between page load and
+login still logs in. A nonce whose page never loads expires after 600 s of
+running time from bind. `bootstrapTtlMs` on `LoopbackServerOptions` changes the
+120 s; a non-positive or non-finite value falls back to the default, and it is
+capped at 600 s. An expired nonce never comes back.
+
+Cookies are scoped to the host, not the port (RFC 6265 §8.5). The port in the
+cookie name (`bare_session_<port>`) only stops two ekrooh servers on one
+machine from **overwriting** each other's session; it does not stop the
+browser from **sending** the cookie to another listener on `127.0.0.1`. A page
+served from another loopback port is also _same-site_ with this server, so
+`SameSite=Strict` still attaches the cookie to its `<img>`/`<video>` loads and
+navigations. With auth on, the server therefore refuses (403) any gated
+request or WebSocket upgrade whose `Sec-Fetch-Site` is `same-site` or
+`cross-site`; only `same-origin` and `none` (a navigation the user started)
+are admitted. A request whose `Origin` is exactly an `allowedOrigins` entry
+is exempt (you listed it because it is cross-site); a request without `Origin`
+never is. A client that sends no `Sec-Fetch-Site` (a non-browser client, an
+older WebView) is judged by the origin rule alone. The public app mount and
+dev mode are not affected.
 
 Every request, in every mode, must also pass the **origin rule**: its `Host`
 must name the bound server (`127.0.0.1`, `localhost` or `[::1]` on the bound
@@ -61,22 +86,45 @@ Publicness is an explicit opt-in marker, never a property of the mount kind.
 ```ts
 import { createLoopbackServer } from '@ekrooh/bare/runtime';
 
-const server = await createLoopbackServer();
+const server = createLoopbackServer(); // synchronous; binds on first use
 server.mount('/media/photo-1', '/path/to/photo.jpg'); // gated
 server.mountDir('/photos', '/path/to/photos', { public: false }); // gated
 const url = await server.url('/media/photo-1');
 ```
 
+A gated directory mount must not be inside (or equal to) the public one:
+`mountDir` throws when the gated root is inside or equal to the public root,
+in either mount order (compared by real path,
+case- and normalization-insensitively on macOS, iOS and Windows, whose
+filesystems ignore case; `foldPathCase` overrides). A gated root strictly
+around the public root is allowed: it only re-serves public files, sandboxed.
+Otherwise the gated files would be served before login, as app code, under the
+public mount's URL. The public mount also refuses any file whose real path is
+inside a gated directory mount. A gated **file** mount (`mount`) inside the
+public root is not caught: keep files you gate out of the web app directory.
+
 ## Security notes
 
 - Tokens are never placed in URLs or exposed to page JS — only the one-time
   bootstrap nonce, and the session cookie is `HttpOnly`.
-- `Referrer-Policy: no-referrer` on all responses.
+- `Referrer-Policy: no-referrer` and `X-Content-Type-Options: nosniff` on
+  framework responses, custom routes included. Gated responses also carry
+  `Cross-Origin-Resource-Policy: same-origin` whenever auth is on; with auth
+  off (dev) it is left off so the Vite dev page can embed backend media.
+- Gated requests and upgrades with `Sec-Fetch-Site: same-site|cross-site` are
+  refused (403) when auth is on.
+- The bootstrap nonce is single-use and expires after 120 s of running time
+  from the page load (600 s if the page never loads).
+- Credentials are compared in constant time.
 - Files from file mounts and gated directory mounts carry a `sandbox`
   Content-Security-Policy: opened as a document, they run in an opaque origin.
 - A non-loopback `host` is refused unless auth is on; the Host/Origin rule
   only stops browsers.
-- WS upgrade origin check, single-client policy, idle timeout.
+- WS upgrade origin check, single-client policy, idle timeout. A replaced
+  protocol socket is closed with WebSocket code 4001 (`"replaced"`), and any
+  frame it still sends is ignored.
+- `POST /login` bodies are capped at 4 KiB: an oversized body is a 413 and the
+  connection is closed.
 - Media mounts are per-session URLs — the mount id is unguessable.
 
 The full decision, including the tradeoff vs per-resource capability tokens

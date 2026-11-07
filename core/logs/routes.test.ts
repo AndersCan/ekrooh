@@ -1,4 +1,12 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vite-plus/test';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vite-plus/test';
 import http from 'node:http';
 import { PassThrough } from 'node:stream';
 import type { HashOptions } from 'node:crypto';
@@ -87,6 +95,28 @@ beforeAll(async () => {
   origin = creds.origin;
 });
 
+// Every test starts from an empty ring, so none depends on what another one
+// ingested (the suite passes under `--sequence.shuffle`).
+beforeEach(() => {
+  store.clear();
+});
+
+/** The two web entries the read-back tests look at, ingested over HTTP. */
+async function seedWebBatch() {
+  const post = await request('/logs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source: 'web',
+      entries: [
+        { level: 'info', message: 'booted' },
+        { level: 'warn', tag: 'sync', message: 'retry' },
+      ],
+    }),
+  });
+  return post;
+}
+
 afterAll(async () => {
   await new Promise<void>((resolve) => {
     if (!server) return resolve();
@@ -104,17 +134,7 @@ afterAll(async () => {
 
 describe('registerLogRoutes', () => {
   it('POST /logs ingests a web batch and GET /logs reads it back as text', async () => {
-    const post = await request('/logs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        source: 'web',
-        entries: [
-          { level: 'info', message: 'booted' },
-          { level: 'warn', tag: 'sync', message: 'retry' },
-        ],
-      }),
-    });
+    const post = await seedWebBatch();
     expect(post.status).toBe(200);
     expect(JSON.parse(post.body)).toEqual({ accepted: 2 });
 
@@ -125,6 +145,7 @@ describe('registerLogRoutes', () => {
   });
 
   it('GET /logs?format=jsonl returns NDJSON', async () => {
+    await seedWebBatch();
     const res = await request('/logs?format=jsonl');
     expect(res.status).toBe(200);
     const lines = res.body
@@ -140,6 +161,7 @@ describe('registerLogRoutes', () => {
   });
 
   it('GET /logs supports tail, level and source filters', async () => {
+    await seedWebBatch();
     const res = await request('/logs?tail=1&level=warn&source=web');
     expect(res.status).toBe(200);
     expect(res.body).toContain('WARN web [sync] retry');

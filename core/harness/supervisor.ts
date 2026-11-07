@@ -11,6 +11,7 @@ import {
   type WorkletRuntime,
   type WorkletRuntimeOptions,
 } from '../runtime';
+import { isLoopbackHost } from '../server/static-file-server';
 import { createHarnessRegistry, type HarnessRegistry } from './registry';
 
 /**
@@ -30,11 +31,18 @@ export interface HarnessSupervisorOptions {
   webAssets: string;
   /** Gitignored base dir; per-instance `storage`/`cache` dirs live under it. */
   baseDir: string;
+  /** Bind address of the management server and every instance. Must be a
+   * loopback address: the management API hands out instance credentials to
+   * whoever asks, so it never listens on the network. Defaults to
+   * `127.0.0.1`. */
   host?: string;
   /** Management-server port; `0` picks an ephemeral port (default). */
   port?: number;
   /** Reap instances idle longer than this (ms). Default 5 minutes. */
   idleTimeoutMs?: number;
+  /** Most instances alive (or being started) at once; `POST /instances` past
+   * it answers 429. Defaults to `DEFAULT_MAX_INSTANCES`. */
+  maxInstances?: number;
   /** Extra `createWorkletRuntime` options forwarded per instance. */
   runtimeOptions?: Omit<
     WorkletRuntimeOptions,
@@ -49,6 +57,18 @@ export interface HarnessSupervisor {
   /** Reaps idle instances now. Returns the reaped ids. */
   reapNow(): Promise<string[]>;
   close(cb?: (err?: Error | null) => void): void;
+}
+
+/** Default cap on live harness instances: each holds a loopback server and two
+ * dirs, and any local process may ask for one. */
+export const DEFAULT_MAX_INSTANCES = 32;
+
+/** `host:port` with an IPv6 literal bracketed, as a `Host` header and a URL
+ * spell it. */
+function hostPort(host: string, port: number | undefined): string {
+  const literal =
+    host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `${literal}:${port}`;
 }
 
 function writeJson(
@@ -81,8 +101,16 @@ export function createHarnessSupervisor(
   options: HarnessSupervisorOptions,
 ): HarnessSupervisor {
   const host = options.host ?? '127.0.0.1';
+  if (!isLoopbackHost(host)) {
+    throw new Error(
+      `refusing to bind the harness supervisor to '${host}': it hands out instance credentials, so only a loopback address may serve it`,
+    );
+  }
   const port = options.port ?? 0;
   const idleTimeoutMs = options.idleTimeoutMs ?? 5 * 60 * 1000;
+  const maxInstances = options.maxInstances ?? DEFAULT_MAX_INSTANCES;
+  /** Allocations past the cap check whose instance is not registered yet. */
+  let starting = 0;
   const registry = createHarnessRegistry<WorkletRuntime>();
   const origins = new Map<string, string>();
 
@@ -106,18 +134,31 @@ export function createHarnessSupervisor(
   }> {
     const id = `inst-${nextInstanceId++}`;
     const { dir, storage, cache } = instanceDirs(id);
-    const runtime = createWorkletRuntime({
-      webAssets: options.webAssets,
-      storage,
-      cache,
-      host,
-      port: 0,
-      ...options.runtimeOptions,
-    });
-    const creds = await runtime.start();
+    let runtime: WorkletRuntime | null = null;
+    let creds: Awaited<ReturnType<WorkletRuntime['start']>>;
+    try {
+      runtime = createWorkletRuntime({
+        webAssets: options.webAssets,
+        storage,
+        cache,
+        host,
+        port: 0,
+        ...options.runtimeOptions,
+      });
+      creds = await runtime.start();
+    } catch (err) {
+      // A half-started instance must not keep its server, port or dirs.
+      const failed = runtime;
+      if (failed) {
+        await new Promise<void>((resolve) => failed.close(() => resolve()));
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+      throw err;
+    }
+    const started = runtime;
     // Touch on connection traffic AND close so active use postpones the reap
     // (a tab actively used past the idle timeout is never reaped mid-journey).
-    runtime.server.onConnection((socket) => {
+    started.server.onConnection((socket) => {
       const touch = () => registry.touch(id, Date.now());
       touch();
       socket.on('data', touch);
@@ -127,10 +168,10 @@ export function createHarnessSupervisor(
       id,
       createdAt: Date.now(),
       lastActiveAt: Date.now(),
-      runtime,
+      runtime: started,
       destroy: async () => {
         origins.delete(id);
-        await new Promise<void>((resolve) => runtime.close(() => resolve()));
+        await new Promise<void>((resolve) => started.close(() => resolve()));
         fs.rmSync(dir, { recursive: true, force: true });
       },
     });
@@ -161,7 +202,17 @@ export function createHarnessSupervisor(
         }
 
         if (req.method === 'POST' && cleanPath === '/instances') {
-          const allocated = await allocate();
+          if (registry.list().length + starting >= maxInstances) {
+            writeJson(res, 429, { error: 'too many instances' });
+            return;
+          }
+          starting++;
+          let allocated: Awaited<ReturnType<typeof allocate>>;
+          try {
+            allocated = await allocate();
+          } finally {
+            starting--;
+          }
           writeJson(res, 201, allocated);
           return;
         }
@@ -192,8 +243,10 @@ export function createHarnessSupervisor(
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Not found');
       } catch (err) {
+        // The cause is logged, never echoed: it can carry file paths.
         const message = err instanceof Error ? err.message : String(err);
-        writeJson(res, 500, { error: message });
+        console.error(`[harness] ${req.method} ${req.url} failed: ${message}`);
+        writeJson(res, 500, { error: 'internal error' });
       }
     },
   );
@@ -210,12 +263,12 @@ export function createHarnessSupervisor(
           const address = server.address();
           const bound = address?.port;
           boundHosts = new Set([
-            `${host}:${bound}`,
+            hostPort(host, bound),
             `127.0.0.1:${bound}`,
             `localhost:${bound}`,
             `[::1]:${bound}`,
           ]);
-          resolve(`http://${host}:${bound}`);
+          resolve(`http://${hostPort(host, bound)}`);
         });
       });
     }

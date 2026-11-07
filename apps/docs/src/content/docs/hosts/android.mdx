@@ -16,18 +16,42 @@ the framework version you depend on.
 ## Public surface
 
 - `BareProtocol` — Kotlin mirror of the binary wire protocol.
-- `HostIpcCoordinator` — frames in/out of the worklet's IPC.
+- `HostIpcCoordinator` — frames in/out of the worklet's IPC, written through
+  one serialized writer.
 - `HostPluginRegistry` — maps host plugin IDs to handlers.
-- `BareWebViewClient` — WebView wiring; logs resource errors.
+- `BareHandoff` — parses `handoff.json` and deletes it as it reads it.
+- `BareWebViewClient` — WebView wiring: logs resource errors and confines the
+  main frame to `allowedOrigin`. A link the user taps to another http(s) site
+  opens in the system browser; a navigation without a gesture (a meta
+  refresh, a script redirect) is only cancelled; a POST navigation is answered
+  with an empty 403.
+- `BareHostAbi` — `requireSupportedAbi()` throws on a 32-bit-only device or in
+  a 32-bit process (see ADR 0002).
+
+The public API is dumped to `android/api/bare-host.api`; `./gradlew check`
+runs `apiCheck`, so a changed signature fails the build until the dump is
+regenerated with `./gradlew :bare-host:apiDump` and reviewed.
 
 ## Reference app
 
 `examples/android-app` is the shell that embeds the backend and WebView:
 
-- The shell starts the worklet with the web assets dir, reads `handoff.json`,
-  injects `window.__ekrooh = { bootstrap }` (a one-time nonce, never the raw
-  token; plus `window.BareShell`), and loads
-  `http://127.0.0.1:<port>/index.html`.
+- The worklet runs in the `Application` (`BareApplication` +
+  `ReferenceHost`), not per Activity, so rotation and a second launch do not
+  restart the backend. `MainActivity` is the only exported component, with
+  `launchMode="singleTop"`, and its `configChanges` cover rotation, UI mode,
+  density, font scale, locale and layout direction. Only the first WebView
+  gets the bootstrap nonce; later ones log in with the session cookie.
+- The host starts the worklet with `[webAssets, storage, cache]`, where durable
+  storage is `noBackupFilesDir/bare` (moved once from the old `cacheDir/bare`),
+  (a failed move falls back to the old directory and is retried each launch),
+  reads `handoff.json` through `BareHandoff.consume` (a late handoff is still
+  consumed after the error page is shown), injects
+  `window.__ekrooh = { bootstrap }` (a one-time nonce, never the raw token;
+  plus `window.BareShell`) with `addDocumentStartJavaScript` after a WebView
+  feature check, and loads `http://127.0.0.1:<port>/index.html`.
+- The WebView has file and content access off; cleartext is allowed only to
+  `127.0.0.1`/`localhost`, and every backup domain is excluded.
 - A real native photo picker/camera feeds `vendor.media`.
 
 ## Consuming

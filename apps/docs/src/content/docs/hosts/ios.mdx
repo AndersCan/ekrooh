@@ -11,10 +11,31 @@ checkout, no cross-repo npm step.
 
 ## Public surface
 
-- `BareProtocol` — Swift mirror of the binary wire protocol.
-- `HostIpcCoordinator` — IPC frames; delegates host plugins.
-- `HostPluginRegistry` — plugin ID → handler map.
+- `BareProtocol` — Swift mirror of the binary wire protocol
+  (`buildErrorResponse(…type:)`).
+- `HostIpcCoordinator` / `HostIpcRouter` — IPC frames; delegates host plugins.
+  Malformed fields (empty, non-string, over 256 bytes) and unreadable headers
+  are answered `FRAME_INVALID`; a non-JSON handler result is
+  `INVALID_RESPONSE`; an oversized one `FRAME_TOO_LARGE`.
+- `HostPluginRegistry` — plugin ID → handler map, with a per-handler
+  `timeout` (`defaultInvokeTimeout` 30 s, `userMediatedInvokeTimeout` 5 min,
+  clamped to `maxInvokeTimeout` 1 day; `invokeTimeout(pluginId:event:)`). A
+  non-positive or NaN timeout traps (precondition).
+- `BareStorage` / `BareStorageDirectories` / `BareStorageError` — worklet
+  directories in Application Support (excluded from backup) and Caches.
+- `BareHandoff` — parses and deletes `handoff.json`; builds the bootstrap
+  user script.
+- `BareNavigationPolicy` / `BareNavigationDecision` (`allow`, `cancel`,
+  `openExternally`, `loadInPlace` for a same-origin new window) /
+  `BareNavigationDelegate` — loopback-origin confinement.
+- `BareWebHost` — `configure(_:)` (WebView hardening) and
+  `load(_:in:delegate:)` (bootstrap injection + first load).
 - `BareHostLogger` — unified logger (`subsystem: "to.holepunch.bare.ios"`).
+
+The public Swift API is pinned by `ios/public-api.swift.snap`
+(`security.apple.test.ts`); after an intended, reviewed change regenerate it
+with `vp test security.apple.test.ts -u`. See
+[iOS Embedding](../consumers/ios-embedding) for how a shell uses these.
 
 ## Dependencies
 
@@ -36,13 +57,15 @@ checkout, no cross-repo npm step.
 .product(name: "BareKit",  package: "ekrooh")
 ```
 
-An app target must still embed `BareKit` and the `bare-link --preset ios`
-addon frameworks into its `Embed Frameworks` phase. See `ios/readme.md` for
-the full contract.
+Xcode embeds `BareKit` through the package product; do not embed the
+prebuild a second time. An app target must still embed the
+`bare-link --preset ios` addon frameworks. See `ios/readme.md` for the full
+contract.
 
 ## Reference app
 
-`examples/ios-app` runs the same web assets; the reference host wires a real
+`examples/ios-app` runs the same web assets with the library's storage,
+handoff and navigation pieces; the reference host wires a real
 picker/camera (`PHPickerViewController` + `UIImagePickerController`) and real
 permissions (`AVCaptureDevice.requestAccess`).
 

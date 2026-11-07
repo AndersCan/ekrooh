@@ -10,10 +10,15 @@ final class IOSAppUITests: XCTestCase {
 
   #if DEBUG
   /// Forces the handoff timeout to 0s and asserts the visible timeout message
-  /// renders, proving the stage diagnostic used by the main test works.
+  /// renders, proving the stage diagnostic used by the main test works. The
+  /// app keeps polling after the timeout (a late handoff still loads), so the
+  /// test also stops polling to keep the message on screen.
   func testHandoffTimeoutMessageRenders() throws {
     let app = XCUIApplication()
-    app.launchArguments = ["-ekroohHandoffTimeoutSeconds", "0"]
+    app.launchArguments = [
+      "-ekroohHandoffTimeoutSeconds", "0",
+      "-ekroohHandoffStopAfterTimeout", "YES",
+    ]
     app.launch()
     let message = app.staticTexts.matching(
       NSPredicate(format: "label CONTAINS %@", "Worklet handoff timed out")

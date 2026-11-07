@@ -11,4 +11,12 @@ import { createWorkletRuntime, resolveWorkletConfig } from './runtime';
  * the framework's own reference running.
  */
 const runtime = createWorkletRuntime(resolveWorkletConfig());
-void runtime.start();
+runtime.start().catch((err: unknown) => {
+  // A failed start (port in use, handoff file not writable) must say why
+  // instead of surfacing as an unhandled rejection or a silent hang; the
+  // runtime is closed so the worklet does not keep a half-started server.
+  console.error(
+    `[runtime] failed to start: ${err instanceof Error ? err.message : String(err)}`,
+  );
+  runtime.close();
+});

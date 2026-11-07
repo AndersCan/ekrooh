@@ -18,21 +18,28 @@ import { EventSpec, invokeEvent } from '@ekrooh/bare/core';
 
 export type CaptureResult = {
   url: string;
-  path: string;
 };
 
 export const photoSpecs = {
   capture: {
     pluginId: 'app.photos',
     name: 'photos.capture',
-    args: {} as Record<string, never>,
+    args: {} as { album?: string },
     result: {} as CaptureResult,
+    // Runtime check of the untrusted args (see "Args are untrusted").
+    validate: (args: unknown) =>
+      typeof args === 'object' &&
+      args !== null &&
+      ((args as { album?: unknown }).album === undefined ||
+        typeof (args as { album?: unknown }).album === 'string'),
   },
 } as const satisfies Record<string, EventSpec<any, any>>;
 
 export const photoEvents = {
-  capture() {
-    return invokeEvent(photoSpecs.capture, {});
+  photos: {
+    capture(album?: string) {
+      return invokeEvent(photoSpecs.capture, { album });
+    },
   },
 };
 ```
@@ -44,14 +51,17 @@ otherwise.
 
 ```ts
 import { definePlugin, err, ErrorCode, ok } from '@ekrooh/bare/core';
+import { photoSpecs } from './shared/photo-events';
+
+declare function capturePhoto(album?: string): Promise<string | null>;
 
 export const photosPlugin = definePlugin('app.photos', photoSpecs, {
   capabilities: ['photos'],
   invoke: {
-    async capture() {
-      const path = await someHostDelegate(); // or local logic
-      if (!path) return err(ErrorCode.HOST_ERROR, 'no capture');
-      return ok({ url, path });
+    async capture(args) {
+      const url = await capturePhoto(args.album); // or a host delegate
+      if (!url) return err(ErrorCode.HOST_ERROR, 'no capture');
+      return ok({ url });
     },
   },
 });
@@ -61,22 +71,68 @@ export const photosPlugin = definePlugin('app.photos', photoSpecs, {
 - **`dispatch`** handlers are fire-and-forget.
 - A plugin with no local handlers (e.g. a host-delegated permission plugin)
   passes neither — it declares events only and the host answers them.
+- A declared event with no handler is answered `UNSUPPORTED_EVENT`.
 
 ## 3. Register it
 
-In your worklet entry:
+In your worklet entry, before `start()`:
 
 ```ts
-runtime.pluginRegistry.register(photosPlugin);
+import {
+  createWorkletRuntime,
+  resolveWorkletConfig,
+} from '@ekrooh/bare/runtime';
+import { photosPlugin } from './photos-plugin';
+
+const runtime = createWorkletRuntime({
+  ...resolveWorkletConfig(),
+  plugins: [photosPlugin], // or runtime.pluginRegistry.register(photosPlugin)
+});
+void runtime.start();
 ```
 
 ## 4. Call it from the web layer
 
 ```ts
+import type { PluginBus } from '@ekrooh/bare/core';
 import { photoEvents } from './shared/photo-events';
 
-const { url } = await transport.invoke(photoEvents.capture());
+declare const bus: PluginBus; // createPluginBus(messenger), see Transports
+
+const [err, result] = await bus.invoke(photoEvents.photos.capture('holiday'));
+if (!err) console.log(result); // { url }
 ```
+
+`bus.invoke` never throws: it resolves to `[error, null]` or `[null, result]`.
+
+## Args are untrusted
+
+`args` and `result` in an `EventSpec` are **compile-time types only**. Whoever
+holds the protocol socket can send any JSON value as `args`, so a handler that
+uses an argument as a path, URL, command, permission id or mount key must check
+it. Two ways:
+
+- Give the spec a `validate(args)` function. The generated adapter runs it
+  before the handler and answers `PLUGIN_ERROR` ("Invalid arguments for
+  …") without calling the handler when it returns anything but `true`.
+- Check inside the handler and return `err(...)`, as `vendor.media` does for
+  `kind`.
+
+Decoded args are rebuilt without a prototype (`__proto__` never reaches the
+handler), but their shape is whatever the sender chose.
+
+## Errors
+
+- Return `err(code, message)` for a failure the page should see. Use the
+  canonical `ErrorCode` set, or an app-scoped code such as
+  `app.photos/not-found`; both reach the page verbatim.
+- A handler that **throws** is answered with a fixed message
+  (`<pluginId>.<event> failed`) and the code `PLUGIN_ERROR` (or the canonical
+  code of a thrown `CoreError`). The exception text goes to the worklet log,
+  never to the page, because it can carry paths and internals.
+- A host handler's error code outside the canonical set and the app-scoped
+  form (`ns.x/code`, at most 64 characters) reaches the page as `HOST_ERROR`;
+  host messages are capped at 512 characters.
 
 ## Invoke timeouts
 
@@ -92,7 +148,12 @@ Give network- and spool-bound events generous, explicit timeouts — the consume
 app uses 30s for list/status and 60s for join:
 
 ```ts
-import { invokeEvent } from '@ekrooh/bare/core';
+import { invokeEvent, type EventSpec } from '@ekrooh/bare/core';
+
+declare const spoolSpecs: {
+  open: EventSpec<{ remoteId: string }, { ok: true }>;
+  list: EventSpec<{ remoteId: string }, { ids: string[] }>;
+};
 
 export const spoolEvents = {
   open(remoteId: string) {
@@ -111,11 +172,23 @@ forwards via `HOST_INVOKE_REQUEST` and returns the host's answer — see
 `plugins/media/plugin.ts` and `plugins/permissions/plugin.ts` in the framework
 repo for the reference pattern.
 
+The worklet waits 30 seconds for the host by default. A user-mediated host
+call (a permission prompt, a picker) needs longer: set `hostTimeoutMs` on its
+`EventSpec` (it becomes the manifest's `hostTimeoutsMs`) and pass a matching
+page-side `timeoutMs` to `invokeEvent`, so neither side gives up while the
+user is still deciding. A host that does not answer in time is reported as
+`TIMEOUT`.
+
 ## Conventions
 
-- Plugin IDs are `vendor.plugin` (e.g. `app.photos`); events are plugin-local
-  (`photos.capture`).
+- Plugin IDs are namespaced: two or more dot-separated segments of letters,
+  digits, `-` and `_`, at most 256 UTF-8 bytes (`app.photos`); events are
+  plugin-local (`photos.capture`). `registry.register` throws on any other id.
+- The `core.*` and `vendor.*` namespaces are reserved for the framework's own
+  plugins (`core.health`, `core.discovery`, `core.permissions`, `core.logs`,
+  `vendor.media`); registering anything else there throws. Use your own
+  namespace (`app.*`, your company name).
 - Errors use the deterministic `ErrorCode` set — never raw platform exceptions
   across the wire.
-- The exact exported names of every `@ekrooh/bare/*` subpath are frozen by
-  the contract test; new plugins are additive, so they don't break it.
+- The exact exported names and types of every `@ekrooh/bare/*` subpath are
+  frozen by the contract test; new plugins are additive, so they don't break it.

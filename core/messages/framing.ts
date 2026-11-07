@@ -1,5 +1,6 @@
 import { MAX_HEADER_BYTES } from './constants';
 import type { WireMessage } from './types';
+import { FrameContentError } from './frame-content';
 import type { MessageProtocol } from './wire-codec';
 
 /** Smallest buffer allocated for a partial frame whose length is not yet known
@@ -19,13 +20,18 @@ const RETAIN_BYTES = 64 * 1024;
  * unknown fields) cannot touch these bytes. `push` is fully synchronous: it
  * drains whatever complete frames a chunk completes and leaves partial bytes
  * buffered, so a channel that awaits downstream routing cannot interleave
- * reads/writes on a shared buffer. A frame-level failure (a framing violation
- * or a decode error from {@link MessageProtocol.decode}) marks the decoder
- * inert — clearing the internal buffer so a corrupt byte stream self-resyncs —
- * but the frames already decoded from the same chunk are still returned; the
- * caller decides whether to drop the channel. The caller checks `error` after a
- * `push` rather than relying on a throw, so a good frame is never lost to a
- * later frame failing in the same chunk.
+ * reads/writes on a shared buffer.
+ *
+ * Two kinds of failure are told apart:
+ * - A framing violation (oversized length prefix, wrong version or type)
+ *   means the byte stream can no longer be trusted. It marks the decoder inert
+ *   and clears the buffer, but the frames already decoded from the same chunk
+ *   are still returned. The caller checks `error` after a `push` rather than
+ *   relying on a throw, and decides whether to drop the channel.
+ * - A content error ({@link FrameContentError}: a correctly delimited frame
+ *   whose header is not valid UTF-8 or JSON, or fails the schema) leaves the
+ *   stream in sync. Only that frame is skipped: it is reported to
+ *   `onRejected` and decoding carries on with the next frame.
  *
  * Reassembly is linear in the bytes received: once the length prefix of an
  * incomplete frame is known the partial buffer is sized to that frame once and
@@ -37,7 +43,10 @@ export interface FrameDecoder {
   get error(): Error | null;
 }
 
-export function createFrameDecoder(protocol: MessageProtocol): FrameDecoder {
+export function createFrameDecoder(
+  protocol: MessageProtocol,
+  onRejected?: (err: FrameContentError) => void,
+): FrameDecoder {
   /** Partial-frame storage: the first `length` bytes are buffered data. Empty
    * whenever nothing is buffered, so a chunk of whole frames is decoded
    * straight from the caller's bytes without being copied in first. */
@@ -154,10 +163,15 @@ export function createFrameDecoder(protocol: MessageProtocol): FrameDecoder {
       try {
         out.push(protocol.decode(frame));
       } catch (err) {
-        // A successfully-buffered frame whose header/payload content is
-        // malformed must not discard the frames decoded before it in the same
-        // chunk. Return them, mark the channel inert, and stop: the byte stream
-        // is no longer trustworthy past this boundary.
+        if (err instanceof FrameContentError) {
+          // The frame was delimited by its prefix, so the next frame starts
+          // right after it: skip this one only.
+          onRejected?.(err);
+          continue;
+        }
+        // A framing violation found by `decode` (version, type): return the
+        // frames decoded before it, mark the decoder inert, and stop — the byte
+        // stream is no longer trustworthy past this boundary.
         fail(err instanceof Error ? err : new Error(String(err)));
         return out;
       }

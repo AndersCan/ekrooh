@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import { createMockTransport } from './mock';
 import { MessageType } from '../../core/messages';
 import type { WireMessage } from '../../core/messages';
@@ -136,5 +136,21 @@ describe('createMockTransport', () => {
     );
     await flush();
     expect(messages).toHaveLength(0);
+  });
+
+  it('warns loudly when it runs inside an app shell (D-16)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('window', { BareShell: true });
+    try {
+      createMockTransport();
+      createMockTransport();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain(
+        'tests and browser dev',
+      );
+    } finally {
+      vi.unstubAllGlobals();
+      warn.mockRestore();
+    }
   });
 });

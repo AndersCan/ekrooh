@@ -1,23 +1,85 @@
 plugins {
   id "com.android.application" version "9.5.0" apply false
   id "com.android.library" version "9.5.0" apply false
-  id "io.github.gradle-nexus.publish-plugin" version "2.0.0"
 }
 
-// The nexus publish plugin resolves the Sonatype staging profile from the
-// root project's group — it must match the published groupId below and the
-// namespace verified on central.sonatype.com (RELEASING.md).
 group = "io.github.anderscan.ekrooh"
 
-// Maven Central publication (Sonatype Central Portal via the OSSRH staging
-// API). Credentials come from the sonatypeUsername / sonatypePassword Gradle
-// properties (CI sets ORG_GRADLE_PROJECT_sonatypeUsername / ...Password).
-// See RELEASING.md.
-nexusPublishing {
-  repositories {
-    sonatype {
-      nexusUrl = uri("https://ossrh-staging-api.central.sonatype.com/service/local/")
-      snapshotRepositoryUrl = uri("https://central.sonatype.com/repository/maven-snapshots/")
+// Gradle never signs or uploads anything. Each published module adds this
+// local file repository (`publish...ToLocalStagingRepository`), which the
+// credential-free release build job fills; the publish job then signs and
+// uploads those files with .github/scripts/publish-maven.sh, without Gradle
+// (docs/security.md, "Release pipeline").
+ext.ekroohStagingRepo = { handler ->
+  handler.maven { repo ->
+    repo.name = "LocalStaging"
+    repo.url = rootProject.layout.buildDirectory.dir("maven-staging").get().asFile
+  }
+}
+
+// Resolves every resolvable configuration of every project (leniently: AGP has
+// configurations that only resolve inside a variant). Used to (re)generate
+// gradle/verification-metadata.xml with all artifacts the build, test, lint and
+// publish tasks need, without running the npm-backed app tasks. Regenerate
+// after any dependency or plugin bump (and review the diff):
+//   ./gradlew --write-verification-metadata sha256 resolveAllDependencies build \
+//     :bare-host:javaDocReleaseJar :examples:android-app:assembleDebugAndroidTest \
+//     -x link -x buildWebAssets -x pack -x packApp -x buildBareJs \
+//     -x packP2pVerify -x buildP2pVerifyJs
+tasks.register("resolveAllDependencies") {
+  description = "Resolves every configuration (for dependency verification metadata)."
+  doLast {
+    allprojects.each { p ->
+      p.configurations.findAll { it.canBeResolved }.each { c ->
+        c.incoming.artifactView { lenient = true }.files.files
+      }
+      p.buildscript.configurations.findAll { it.canBeResolved }.each { c ->
+        c.incoming.artifactView { lenient = true }.files.files
+      }
     }
+    // AGP fetches the aapt2 binary per host OS through a detached
+    // configuration at task time, so the metadata needs every OS variant
+    // (CI runs on Linux and macOS). Its version is the aapt2-proto version on
+    // the plugin classpath.
+    def aapt2Version = null
+    allprojects.each { p ->
+      p.buildscript.configurations.findAll { it.canBeResolved }.each { c ->
+        c.incoming.resolutionResult.allComponents.each { comp ->
+          def id = comp.moduleVersion
+          if (id != null && id.group == "com.android.tools.build" && id.name == "aapt2-proto") aapt2Version = id.version
+        }
+      }
+    }
+    if (aapt2Version == null) throw new GradleException("aapt2-proto not found on the plugin classpath")
+    ["linux", "osx", "windows"].each { os ->
+      configurations.detachedConfiguration(
+        dependencies.create("com.android.tools.build:aapt2:${aapt2Version}:${os}")
+      ).resolve()
+    }
+  }
+}
+
+// Shared POM metadata for every published artifact (Maven Central requires
+// license, developer and SCM). Call inside a `pom { }` block.
+ext.ekroohPom = { pom ->
+  pom.url = "https://github.com/AndersCan/ekrooh"
+  pom.licenses {
+    license {
+      name = "Apache-2.0"
+      url = "https://www.apache.org/licenses/LICENSE-2.0"
+      distribution = "repo"
+    }
+  }
+  pom.developers {
+    developer {
+      id = "AndersCan"
+      name = "Anders Can"
+      email = "anders.can1@gmail.com"
+    }
+  }
+  pom.scm {
+    connection = "scm:git:https://github.com/AndersCan/ekrooh.git"
+    developerConnection = "scm:git:git@github.com:AndersCan/ekrooh.git"
+    url = "https://github.com/AndersCan/ekrooh"
   }
 }

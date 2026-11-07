@@ -8,13 +8,15 @@ Every message over the socket is a binary frame:
 - `version` (1 byte)
 - `type` (1 byte)
 - `headerLen` (2 bytes, big-endian)
-- `header` (UTF-8 JSON)
-- `payload` (optional)
+- `payloadLen` (3 bytes, big-endian)
+- `header` (`headerLen` bytes of UTF-8 JSON)
+- `payload` (`payloadLen` bytes, optional)
 
 `MessageProtocol` in `core/messages` implements encode/decode with validation:
 headers are capped at `MAX_HEADER_BYTES` (0xffff) and frames at
-`MAX_FRAME_BYTES` (16 MiB). `VERSION` is pinned at `1` by the contract test —
-changing it is a **major-version event**.
+`MAX_FRAME_BYTES` (16 MiB); an option can lower the frame cap, never raise it.
+The same limits are mirrored by the Kotlin and Swift hosts. `VERSION` is
+pinned at `1` by the contract test — changing it is a **major-version event**.
 
 ## Message types
 
@@ -22,6 +24,30 @@ changing it is a **major-version event**.
 - `INVOKE_REQUEST` — request/response; echoes `requestId`.
 - `INVOKE_RESPONSE` — the reply to an `INVOKE_REQUEST`, carrying the same
   `requestId` plus a result or a deterministic `ErrorCode`.
+- `HOST_CAPABILITIES_*`, `HOST_INVOKE_*` — worklet ↔ host only. They are
+  consumed from the host IPC channel; a `HOST_*_RESPONSE` sent over the
+  WebSocket is ignored, so a page cannot answer a host call.
+
+## Decoding is an allowlist
+
+A decoded header is rebuilt from the known fields of its `type`: unknown
+fields are dropped, and `args`/`result` objects are rebuilt without a
+prototype (`__proto__`, `constructor` and `prototype` keys are removed).
+`pluginId`, `event` and `requestId` are at most 256 UTF-8 bytes, and the header
+must be valid UTF-8 JSON.
+
+## Bad frames
+
+- A frame that is correctly delimited but whose **content** is invalid (not
+  UTF-8, not JSON, an unknown header type, an over-long id) is skipped on its
+  own; the stream stays in sync. An `INVOKE_REQUEST` among them is answered
+  with `FRAME_INVALID` when its `requestId` survived. On the host IPC, a bad
+  host response fails the call waiting on it at once.
+- A **framing** violation (wrong version, a length past the caps) means the
+  stream can no longer be trusted. The WebSocket is closed (the page
+  reconnects on a clean stream); the host IPC drops the buffered bytes and
+  gives up on the channel after repeated failures. Frames decoded before the
+  violation are still handled.
 
 ## Minimal example
 

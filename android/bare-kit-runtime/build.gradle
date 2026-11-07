@@ -1,0 +1,80 @@
+plugins {
+  id "com.android.library"
+  id "maven-publish"
+}
+
+// `:bare-kit-runtime` repackages the upstream Bare Kit Android prebuild
+// (`libbare-kit.so` + `libc++_shared.so` per ABI, and the IPC/Worklet
+// `classes.jar`) as its own Maven artifact. It is ~70 MB and changes only when
+// the pinned bare-kit version changes, so it is published separately from
+// `bare-host` on a `bare-kit-v*` tag, under its own version (the `maven` pin in
+// scripts/prebuilds.lock.json), and `bare-host` depends on it. See
+// docs/adr/0007-separate-bare-kit-runtime-artifact.md.
+
+def lock = new groovy.json.JsonSlurper().parseText(
+  rootProject.file("scripts/prebuilds.lock.json").getText("UTF-8"))
+def runtimeVersion = lock.maven["bare-kit-runtime"] as String
+def prebuild = rootProject.file("prebuilds/android/bare-kit")
+
+android {
+  namespace = "io.github.anderscan.ekrooh.barekit"
+  compileSdk = 35
+
+  defaultConfig {
+    minSdk = 29
+    // Keep the Bare Kit IPC + Worklet entry points that native code reaches
+    // across JNI in consumer apps' R8 runs.
+    consumerProguardFiles "consumer-rules.pro"
+  }
+
+  compileOptions {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+  }
+
+  sourceSets {
+    main {
+      jniLibs.srcDirs new File(prebuild, "jni")
+    }
+  }
+
+  packaging {
+    jniLibs {
+      useLegacyPackaging = true
+    }
+  }
+
+  publishing {
+    singleVariant("release") {
+      withSourcesJar()
+      withJavadocJar()
+    }
+  }
+}
+
+dependencies {
+  // AGP packages this local jar into the AAR's libs/, so the published
+  // artifact carries the classes (file deps never appear in the POM).
+  api files(new File(prebuild, "classes.jar"))
+}
+
+afterEvaluate {
+  publishing {
+    publications {
+      mavenAar(MavenPublication) {
+        groupId = "io.github.anderscan.ekrooh"
+        artifactId = "bare-kit-runtime"
+        version = runtimeVersion
+        from components.release
+        pom {
+          name = "io.github.anderscan.ekrooh:bare-kit-runtime"
+          description = "Bare Kit ${lock.version} Android runtime (holepunchto/bare-kit prebuild) repackaged for io.github.anderscan.ekrooh:bare-host."
+          rootProject.ekroohPom(delegate)
+        }
+      }
+    }
+    repositories {
+      rootProject.ekroohStagingRepo(delegate)
+    }
+  }
+}

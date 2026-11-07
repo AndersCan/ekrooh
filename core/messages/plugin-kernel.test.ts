@@ -33,10 +33,10 @@ describe('createPluginRegistry', () => {
 
   it('rejects duplicate plugin ids', () => {
     const registry = createPluginRegistry();
-    registry.register({ id: 'vendor.plugin', runtimes: {} });
-    expect(() =>
-      registry.register({ id: 'vendor.plugin', runtimes: {} }),
-    ).toThrow(/already registered/);
+    registry.register({ id: 'app.plugin', runtimes: {} });
+    expect(() => registry.register({ id: 'app.plugin', runtimes: {} })).toThrow(
+      /already registered/,
+    );
   });
 
   it('lists capabilities and resolves runtimes', () => {
@@ -70,7 +70,7 @@ describe('createPluginRegistry', () => {
       runtimes: { bare: { invoke: () => ok({}) } },
     });
     registry.register({
-      id: 'core.other',
+      id: 'app.other',
       runtimes: { android: { invoke: () => ok({}) } },
     });
     const rows = registry.listCapabilities('bare');
@@ -224,7 +224,8 @@ describe('createPluginRouter', () => {
       new Uint8Array(0),
     );
     expect(response?.error?.code).toBe(ErrorCode.PLUGIN_ERROR);
-    expect(response?.error?.message).toBe('adapter exploded');
+    // The exception text stays in the log; the page gets a fixed message.
+    expect(response?.error?.message).toBe('core.health.health.bogus failed');
   });
 
   it('wraps dispatch exceptions as PLUGIN_ERROR and logs them', async () => {
@@ -317,7 +318,10 @@ describe('createPluginRouter', () => {
       pluginId: 'vendor.media',
       event: 'media.pickMany',
       requestId: 'r-caps',
-      error: { code: 'HOST_ERROR', message: 'no CSPRNG' },
+      error: {
+        code: 'HOST_ERROR',
+        message: 'vendor.media.media.pickMany failed',
+      },
     });
     expect(delegateToHost).not.toHaveBeenCalled();
   });
@@ -653,7 +657,7 @@ describe('createPluginRouter', () => {
       // The failure answers the caller (ekrooh#268) and is not cached.
       expect((await invoke())?.error).toEqual({
         code: 'HOST_ERROR',
-        message: 'Host IPC timeout',
+        message: 'core.permissions.permissions.requestStorage failed',
       });
       expect((await invoke())?.error).toBeUndefined();
       expect(queries).toHaveBeenCalledTimes(2);
@@ -710,7 +714,9 @@ describe('createPluginRouter', () => {
       new Uint8Array(0),
     );
     expect(response?.error?.code).toBe('HOST_ERROR');
-    expect(response?.error?.message).toBe('host exploded');
+    expect(response?.error?.message).toBe(
+      'core.permissions.permissions.requestStorage failed',
+    );
   });
 });
 
@@ -1025,7 +1031,7 @@ describe('createPluginRouter concurrency', () => {
         return ok({ event });
       }),
       'bare',
-      { maxInflight: 2 },
+      { maxInflight: 2, maxInflightPerPlugin: 2 },
     );
 
     const first = router.route(
@@ -1127,5 +1133,269 @@ describe('createPluginRouter concurrency', () => {
     expect(other?.result).toEqual({ fast: true });
     slow.release();
     await pending;
+  });
+});
+
+describe('security-review hardening', () => {
+  const quiet = () => ({ warn: vi.fn(), error: vi.fn(), debug: vi.fn() });
+
+  function slowRegistry(ids: string[], open: Promise<void>) {
+    const registry = createPluginRegistry();
+    for (const id of ids) {
+      registry.register({
+        id,
+        events: ['slow'],
+        runtimes: {
+          bare: {
+            invoke: async () => {
+              await open;
+              return ok({ id });
+            },
+          },
+        },
+      });
+    }
+    return registry;
+  }
+
+  function call(pluginId: string, requestId: string) {
+    return {
+      type: 'INVOKE_REQUEST',
+      pluginId,
+      event: 'slow',
+      requestId,
+    } as const;
+  }
+
+  it('rejects malformed ids and reserves core.* / vendor.* for framework plugins (D-10)', () => {
+    const registry = createPluginRegistry();
+    for (const id of ['a.', '.b', 'a b.c', 'a.b/c', `a.${'x'.repeat(300)}`]) {
+      expect(() => registry.register({ id, runtimes: {} })).toThrow(
+        /namespaced/,
+      );
+    }
+    expect(() => registry.register({ id: 'core.evil', runtimes: {} })).toThrow(
+      /reserved for framework plugins/,
+    );
+    expect(() =>
+      registry.register({ id: 'vendor.plugin', runtimes: {} }),
+    ).toThrow(/reserved for framework plugins/);
+    for (const id of [
+      'core.health',
+      'core.discovery',
+      'core.permissions',
+      'core.logs',
+      'vendor.media',
+      'app.my-plugin_2',
+    ]) {
+      expect(() => registry.register({ id, runtimes: {} })).not.toThrow();
+    }
+  });
+
+  it('passes the manifest host timeout of the event to delegateToHost (C-1)', async () => {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'core.permissions',
+      events: ['permissions.request', 'permissions.status'],
+      hostTimeoutsMs: { 'permissions.request': 300_000 },
+      runtimes: {},
+    });
+    const delegateToHost = vi.fn(
+      async (
+        header: { requestId?: string },
+        _payload: Uint8Array,
+        _timeoutMs?: number,
+      ) => ({
+        type: 'INVOKE_RESPONSE' as const,
+        pluginId: 'core.permissions',
+        event: 'x',
+        requestId: header.requestId,
+        result: {},
+      }),
+    );
+    const router = createPluginRouter(registry, 'bare', {
+      delegateToHost,
+      getHostCapabilities: async () => [
+        {
+          pluginId: 'core.permissions',
+          capabilities: [],
+          events: ['permissions.request', 'permissions.status'],
+          runtimes: ['android'],
+        },
+      ],
+    });
+    for (const event of ['permissions.request', 'permissions.status']) {
+      await router.route(
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.permissions',
+          event,
+          requestId: event,
+        },
+        new Uint8Array(0),
+      );
+    }
+    expect(delegateToHost.mock.calls[0][2]).toBe(300_000);
+    expect(delegateToHost.mock.calls[1][2]).toBeUndefined();
+  });
+
+  it('keeps a canonical CoreError code from a throw but never its message (C-9)', async () => {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'core.permissions',
+      events: ['permissions.request'],
+      runtimes: {},
+    });
+    const logger = quiet();
+    const router = createPluginRouter(registry, 'bare', {
+      logger,
+      delegateToHost: async () => {
+        throw new CoreError(
+          ErrorCode.TIMEOUT,
+          'Host IPC timeout waiting for HOST_INVOKE_RESPONSE (secret-id)',
+        );
+      },
+      getHostCapabilities: async () => [
+        {
+          pluginId: 'core.permissions',
+          capabilities: [],
+          events: ['permissions.request'],
+          runtimes: ['ios'],
+        },
+      ],
+    });
+    const response = await router.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.permissions',
+        event: 'permissions.request',
+        requestId: 'r',
+      },
+      new Uint8Array(0),
+    );
+    expect(response?.error).toEqual({
+      code: 'TIMEOUT',
+      message: 'core.permissions.permissions.request timed out',
+    });
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('secret-id'),
+    );
+  });
+
+  it('caps calls per channel so one peer cannot take every slot (C-11)', async () => {
+    let release!: () => void;
+    const open = new Promise<void>((resolve) => (release = resolve));
+    const router = createPluginRouter(
+      slowRegistry(['app.a', 'app.b'], open),
+      'bare',
+      {
+        maxInflight: 4,
+        maxInflightPerChannel: 2,
+        maxInflightPerPlugin: 4,
+        logger: quiet(),
+      },
+    );
+    const held = [
+      router.route(call('app.a', '1'), new Uint8Array(), { channel: '[ws]' }),
+      router.route(call('app.b', '2'), new Uint8Array(), { channel: '[ws]' }),
+    ];
+    const over = await router.route(call('app.a', '3'), new Uint8Array(), {
+      channel: '[ws]',
+    });
+    expect(over?.error?.code).toBe(ErrorCode.TRANSPORT_ERROR);
+    expect(over?.error?.message).toMatch(/on this channel \(limit 2\)/);
+    // The other channel still has room.
+    const ipc = router.route(call('app.a', '4'), new Uint8Array(), {
+      channel: '[ipc]',
+    });
+    release();
+    expect((await ipc)?.result).toEqual({ id: 'app.a' });
+    await Promise.all(held);
+    const after = await router.route(call('app.a', '5'), new Uint8Array(), {
+      channel: '[ws]',
+    });
+    expect(after?.error).toBeUndefined();
+  });
+
+  it('caps calls per plugin when maxInflightPerPlugin is set (D-9)', async () => {
+    let release!: () => void;
+    const open = new Promise<void>((resolve) => (release = resolve));
+    const router = createPluginRouter(
+      slowRegistry(['app.slow', 'app.ok'], open),
+      'bare',
+      {
+        maxInflight: 8,
+        maxInflightPerPlugin: 4,
+        logger: quiet(),
+      },
+    );
+    const held = [1, 2, 3, 4].map((n) =>
+      router.route(call('app.slow', `s${n}`), new Uint8Array()),
+    );
+    const over = await router.route(call('app.slow', 's5'), new Uint8Array());
+    expect(over?.error?.message).toMatch(/for this plugin \(limit 4\)/);
+    const other = router.route(call('app.ok', 'o1'), new Uint8Array());
+    release();
+    expect((await other)?.result).toEqual({ id: 'app.ok' });
+    await Promise.all(held);
+  });
+
+  it('lets one plugin use every slot by default, so bursty apps are not throttled (adv-B-2)', async () => {
+    let release!: () => void;
+    const open = new Promise<void>((resolve) => (release = resolve));
+    const router = createPluginRouter(
+      slowRegistry(['app.grid'], open),
+      'bare',
+      {
+        maxInflight: 8,
+        logger: quiet(),
+      },
+    );
+    const held = Array.from({ length: 8 }, (_, n) =>
+      router.route(call('app.grid', `g${n}`), new Uint8Array()),
+    );
+    const over = await router.route(call('app.grid', 'g8'), new Uint8Array());
+    expect(over?.error?.message).toMatch(
+      /too many calls in flight \(limit 8\)/,
+    );
+    release();
+    for (const result of await Promise.all(held)) {
+      expect(result?.error).toBeUndefined();
+    }
+  });
+
+  it('caps a manifest host timeout at the setTimeout limit (adv-A-7)', async () => {
+    const registry = createPluginRegistry();
+    registry.register({
+      id: 'core.permissions',
+      events: ['permissions.request'],
+      hostTimeoutsMs: { 'permissions.request': 1e12 },
+      runtimes: {},
+    });
+    const delegateToHost = vi.fn(
+      async (_h: unknown, _p: Uint8Array, _t?: number) => null,
+    );
+    const router = createPluginRouter(registry, 'bare', {
+      delegateToHost,
+      logger: quiet(),
+      getHostCapabilities: async () => [
+        {
+          pluginId: 'core.permissions',
+          capabilities: [],
+          events: ['permissions.request'],
+          runtimes: ['ios'],
+        },
+      ],
+    });
+    await router.route(
+      {
+        type: 'INVOKE_REQUEST',
+        pluginId: 'core.permissions',
+        event: 'permissions.request',
+        requestId: 'r',
+      },
+      new Uint8Array(0),
+    );
+    expect(delegateToHost.mock.calls[0][2]).toBe(2 ** 31 - 1);
   });
 });

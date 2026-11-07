@@ -11,6 +11,8 @@ output into the same buffer through the loopback ingest route.
 
 Entries are `LogEntry`:
 
+{/* docs-check: skip */}
+
 ```ts
 { seq: number, ts: number, level: 'debug'|'info'|'warn'|'error',
   source: 'backend'|'web', tag?: string, message: string }
@@ -22,15 +24,21 @@ ordered.
 ## plugin events
 
 - `logs.view({ tail?, level?, source? })` → `{ entries }` — a small bounded
-  window over the framed invoke (it must respect the header size cap).
+  window over the framed invoke (it must respect the header size cap). `tail`
+  must be a number; a non-number `tail` or an unknown `level`/`source` is
+  answered `PLUGIN_ERROR`.
 - `logs.clear()` → `{ cleared }` — empties the ring buffer.
 
 ```ts
+import type { PluginBus } from '@ekrooh/bare/core';
 import { logEvents } from '@ekrooh/bare/plugins/logs/events';
 
-const { entries } = await transport.invoke(
+declare const bus: PluginBus; // createPluginBus(messenger), see Transports
+
+const [err, result] = await bus.invoke(
   logEvents.logs.view({ tail: 50, source: 'backend' }),
 );
+if (!err) console.table(result.entries);
 ```
 
 ## Loopback routes
@@ -40,7 +48,9 @@ ceiling. The routes inherit the loopback server's auth gate and single-server
 rule:
 
 - `GET /logs?tail=&level=&source=&format=jsonl|text` — read-back (defaults to
-  human-readable text; `format=jsonl` returns newline-delimited JSON).
+  human-readable text; `format=jsonl` returns newline-delimited JSON). This is
+  the bulk path: a `tail`, `level` or `source` it cannot parse is ignored, so
+  the read-back is unfiltered.
 - `POST /logs` with `{ entries: [...] }` — ingest web/browser log batches.
   Every ingested entry is recorded as `source: 'web'`; only the worklet's own
   console capture writes `backend` entries.
@@ -49,10 +59,17 @@ rule:
 
 The worklet runtime installs a console seam at startup
 (`installConsoleCapture`) that forwards to the originals while feeding the ring
-buffer. Retention is a consumer knob: the ring `capacity` is set via the
-`logsCapacity` runtime option. A rotating file sink is an app decision and is
+buffer. Each captured backend message is capped at 16 KiB. Retention is a
+consumer knob: the ring `capacity` is set via the `logsCapacity` runtime option
+and the lowest recorded level via `logsMinLevel`. The console is patched once
+per process and restored when the last runtime closes. A rotating file sink is an app decision and is
 kept out of the framework.
 
 The web layer can install `installWebConsoleCapture`, which buffers console
 output and flushes it into `POST /logs`. Skip it in mock mode, where there is no
 loopback backend to ingest into.
+
+The log ring is readable by whoever holds the session: a route or handler that
+fails is answered with a bare 500, but its cause (which can include an
+exception message) is logged, and `GET /logs` shows it. Treat the ring as
+diagnostics for the session holder, not as a place for secrets.

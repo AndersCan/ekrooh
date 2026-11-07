@@ -1,12 +1,13 @@
 ---
 title: Android AAR Setup
-description: Consume io.ekrooh:bare-host from GitHub Packages Maven.
+description: Consume io.github.anderscan.ekrooh:bare-host from Maven Central.
 ---
 
-The Android host publishes as a **self-contained AAR** to GitHub Packages:
-`io.ekrooh:bare-host`. "Self-contained" means the Bare Kit runtime jar ships in
-the AAR's `libs/` and its native libs in `jni/` — consumers need **no
-prebuilds download and no `bare-link` addons** for the core runtime.
+The Android host publishes as a **self-contained AAR**:
+`io.github.anderscan.ekrooh:bare-host`, on Maven Central (with GitHub Packages
+as a fallback). "Self-contained" means the Bare Kit runtime jar ships in the
+AAR's `libs/` and its native libs in `jni/` — consumers need **no prebuilds
+download and no `bare-link` addons** for the core runtime.
 
 ## settings.gradle
 
@@ -14,38 +15,25 @@ prebuilds download and no `bare-link` addons** for the core runtime.
 dependencyResolutionManagement {
   repositories {
     google()
-    mavenCentral()
-    maven {
-      name = "GitHubPackages"
-      url = uri("https://maven.pkg.github.com/AndersCan/ekrooh")
-      credentials {
-        username = project.findProperty("gpr.user") ?: System.getenv("GITHUB_ACTOR")
-        password = project.findProperty("gpr.key") ?: System.getenv("GITHUB_TOKEN")
-      }
-    }
+    mavenCentral() // no credentials needed
   }
 }
 ```
-
-## Credentials
-
-GitHub Packages requires authentication even for public packages:
-
-- Locally, add to `~/.gradle/gradle.properties`:
-  `gpr.user=<your-github-username>` and `gpr.key=<a PAT with read:packages>`.
-- In CI, `GITHUB_ACTOR` + `GITHUB_TOKEN` are automatic.
 
 ## Version
 
 ```gradle
 dependencies {
-  implementation "io.ekrooh:bare-host:0.1.0"
+  implementation "io.github.anderscan.ekrooh:bare-host:<version>"
 }
 ```
 
 The version is the same single `vX.Y.Z` as the npm package — bump both
-together. Check [GitHub Packages](https://github.com/AndersCan/ekrooh/packages)
-for published versions.
+together. Check
+[Maven Central](https://repo1.maven.org/maven2/io/github/anderscan/ekrooh/bare-host/)
+for published versions. If you consumed it from GitHub Packages before, the
+Maven layout is identical: drop the `maven.pkg.github.com` repository and its
+`read:packages` credentials.
 
 ## What you get
 
@@ -54,9 +42,14 @@ The host library surfaces:
 - `BareProtocol` — Kotlin mirror of the wire protocol.
 - `HostIpcCoordinator` — frames to/from the worklet.
 - `HostPluginRegistry` — host-side plugin handlers.
-- `BareWebViewClient` — WebView wiring.
+- `BareHandoff` — reads `handoff.json` and deletes it (`BareHandoff.consume`).
+- `BareWebViewClient` — WebView wiring and loopback-origin confinement.
+- `BareHostAbi` — fails fast on an unsupported (32-bit) runtime.
 
-Your `MainActivity` starts the worklet, waits for the handoff file, injects
+The public Kotlin API is a stability boundary: it is dumped to
+`android/api/bare-host.api` and checked on every Gradle `check`.
+
+Your app starts the worklet, waits for the handoff file, injects
 `window.__ekrooh = { bootstrap }` (a one-time nonce — never the raw token), and
 loads the loopback page — see [Host Handoff Flow](./host-handoff) for the
 sequence, and the framework's `examples/android-app` for a working shell.

@@ -7,11 +7,13 @@ The transports subpath exports the UI-facing transport surface.
 
 ## Exports
 
-- `MessageTransport` (type) — `send(type, header, payload?)` + `subscribe(handler)`.
+- `MessageTransport` (type) — `send(type, header, payload?)` +
+  `subscribe(handler)` + optional `close()`.
 - `createWebSocketTransport(urlOrOptions?)` — same-origin default, cookie
   bootstrap, reconnect with backoff.
-- `createMockTransport(handlers?)` — deterministic, in-process responses for
-  tests.
+- `createMockTransport()` — deterministic, in-process responses for tests and
+  browser dev, routed through the real plugin kernel. It is part of the
+  transports bundle; select it only behind a dev/test guard.
 
 ## Options
 
@@ -22,8 +24,24 @@ The transports subpath exports the UI-facing transport surface.
 - `login?` — default `true`: bootstrap the `bare_session_<port>` cookie via
   `POST /login` when `window.__ekrooh.bootstrap` is present. The raw session
   token is never a login credential.
-- `maxRetries?` — default 5.
-- `backoffMs?` — default 250, doubling to a 2s cap.
+- `maxRetries?` — default 5. Applies only before the first connect, and only
+  once `minBootWindowMs` has passed; a client that has connected retries
+  forever.
+- `backoffMs?` — default 250, doubling to a 2s cap (equal jitter).
+- `loginTimeoutMs?` — default 2000: how long `/login` may take.
+- `minBootWindowMs?` — default 10000: a never-connected client gives up only
+  after this long.
+- `openTimeoutMs?` — default 10000: a socket still connecting after this is
+  dropped and retried.
+- `maxQueued?` — default 256: requests held while connecting; past it, new
+  requests fail fast with `TRANSPORT_ERROR`.
+- `diagnostics?` — default `false`: fold the server's recent `[loopback]`
+  rejection lines into the give-up error.
+
+Invokes already sent fail with `TRANSPORT_ERROR` when their socket is lost. A
+socket the server replaced (close code 4001) reconnects after 30 s or when the
+page returns to the foreground. See [Transports](../core-concepts/transports)
+for the full reconnect rules.
 
 The transport never places a credential in a URL — there is no `?token=`
 fallback.

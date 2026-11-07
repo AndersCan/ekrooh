@@ -1,4 +1,5 @@
 import { ErrorCode } from './constants';
+import { isCanonicalErrorCode } from './error-codes';
 import { CoreError, type ErrorCodeOrString } from './types';
 import type { Either } from './types';
 
@@ -21,10 +22,8 @@ export function err(
  * Framework callers that want app codes preserved construct the error
  * directly instead. */
 export function coerceErrorCode(code: string | undefined): ErrorCode {
-  if (code && code in ErrorCode) return code as ErrorCode;
-  return ErrorCode.PLUGIN_ERROR;
+  return isCanonicalErrorCode(code) ? code : ErrorCode.PLUGIN_ERROR;
 }
-
 export type Ok<T> = [null, T];
 export type Err = [CoreError, null];
 export type PluginResult<T> = Either<CoreError, T>;

@@ -389,4 +389,34 @@ describe('createFrameDecoder', () => {
     expect(requests(decoded)).toEqual(['a.one']);
     expect(decoder.error).not.toBeNull();
   });
+
+  it('skips only a frame whose content is invalid and keeps decoding (C-4)', () => {
+    const rejected: unknown[] = [];
+    const decoder = createFrameDecoder(protocol, (err) => rejected.push(err));
+    const frame = (event: string, args: unknown = {}) =>
+      protocol.encode(
+        MessageType.ENVELOPE,
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'a.b',
+          event,
+          requestId: event,
+          args,
+        } as never,
+        null,
+      );
+    let deep: unknown = 1;
+    for (let i = 0; i < 20; i++) deep = { d: deep };
+    const parts = [frame('one'), frame('bad', deep), frame('two')];
+    const all = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0));
+    let at = 0;
+    for (const p of parts) {
+      all.set(p, at);
+      at += p.byteLength;
+    }
+    expect(requests(decoder.push(all))).toEqual(['one', 'two']);
+    expect(decoder.error).toBeNull();
+    expect(rejected).toHaveLength(1);
+    expect(requests(decoder.push(frame('three')))).toEqual(['three']);
+  });
 });

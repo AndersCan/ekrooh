@@ -47,6 +47,17 @@ the glibc requirement stays low.
    so a crashed host leaves no orphan either; one that ignores EOF for 5s is
    killed.
 
+## Hardening
+
+- The window is confined to the backend origin (`decideNavigation` in
+  `src/main.zig`, with the native glue in `src/harden_darwin.m` and
+  `src/harden_gtk.c`) before it navigates there. A link the user clicks to
+  another site opens in the system browser; any other off-origin navigation
+  is cancelled.
+- Clipboard read access for page script is off.
+- The nonce script is injected on the backend's origin only, never escaped
+  into another one; devtools are on only with `--debug`.
+
 If the backend fails to start (exits, times out after 20s, or hands off
 garbage) or dies while the window is open, the window shows an error page
 pointing at `<storage>/backend.log` instead of vanishing, and the host exits 1
@@ -67,9 +78,12 @@ examples/desktop-app/dist/Ekrooh.app/Contents/MacOS/ekrooh --debug --storage /tm
 Host flags: `--resources <dir>`, `--storage <dir>` (default
 `~/Library/Application Support/Ekrooh`, created `0700`), `--debug` (webview
 devtools; backend output to the terminal instead of `backend.log`).
-`zig build test` runs the host unit tests; `npm run smoke:desktop` launches two instances of the built app and checks
-the pipe handoff and nonce redemption, the single-instance no-op, surviving a
-backend crash, and orphan cleanup (CI job `desktop`).
+`zig build test` runs the host unit tests; `npm run smoke:desktop` builds its
+own host with `-Dtest-hooks=true` in a temp dir (only that build honours the
+`EKROOH_TEST_HANDOFF_COPY` hook it uses to read the nonce; a normal build
+ignores it), launches two instances, and checks the pipe handoff and nonce
+redemption, the single-instance no-op, surviving a backend crash, and orphan
+cleanup (CI job `desktop`).
 
 ## Not done yet
 

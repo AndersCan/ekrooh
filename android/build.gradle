@@ -1,6 +1,6 @@
-plugins {  id "com.android.library"
+plugins {
+  id "com.android.library"
   id "maven-publish"
-  id "signing"
 }
 
 android {
@@ -17,7 +17,8 @@ android {
         // symbol `libbare-kit.so` imports from the Android platform library
         // `libnativehelper.so` (JNI_GetCreatedJavaVMs), which app processes
         // can't otherwise resolve from the classloader namespace (ekrooh#45,
-        // #46). Shipped alongside `libbare-kit.so` in the AAR.
+        // #46). Ships in this AAR; `libbare-kit.so` itself comes from the
+        // `:bare-kit-runtime` dependency.
         cppFlags ""
         // Link with 16 KB LOAD alignment (Google Play requires it for 64-bit
         // libs). NDK r27 defaults to 4 KB, so this must be explicit.
@@ -38,6 +39,12 @@ android {
     targetCompatibility = JavaVersion.VERSION_17
   }
 
+  // android.util.Log and friends return defaults in JVM unit tests instead of
+  // throwing, so debug-only logging in error paths can be exercised.
+  testOptions {
+    unitTests.returnDefaultValues = true
+  }
+
   // Generate BuildConfig so host logging can be gated on BuildConfig.DEBUG.
   buildFeatures {
     buildConfig true
@@ -48,12 +55,6 @@ android {
   buildTypes {
     release {
       consumerProguardFiles "consumer-rules.pro"
-    }
-  }
-
-  sourceSets {
-    main {
-      jniLibs.srcDirs "../prebuilds/android/bare-kit/jni"
     }
   }
 
@@ -77,9 +78,97 @@ kotlin {
   }
 }
 
-// The Bare Kit runtime is shipped in the published AAR: AGP packages the local
-// `api fileTree` jar into the AAR's libs/ and the native libs (jniLibs) into
-// jni/, so published consumers need no separate prebuilds download.
+// The Bare Kit runtime (libbare-kit.so per ABI + its classes.jar, ~70 MB) is
+// NOT in this AAR: it ships as io.github.anderscan.ekrooh:bare-kit-runtime,
+// published only when bare-kit is bumped, and reaches consumers as a normal
+// POM dependency (docs/adr/0007-separate-bare-kit-runtime-artifact.md).
+
+// --- Public API dump (stability contract, vision.md) -------------------------
+// The Kotlin host public API is a stability boundary: removing or changing a
+// public signature is a major-version event. `apiDump` writes the public and
+// protected JVM signatures of the release compile jar (what consumers link
+// against) to api/bare-host.api, which is committed. `apiCheck` (part of
+// `check`, so `./gradlew build` runs it) fails when the compiled API no longer
+// matches the dump: an intended additive change is accepted by re-running
+// `./gradlew :bare-host:apiDump` and committing the diff, which makes every API
+// change visible in review.
+//
+// This uses javap rather than the Kotlin binary-compatibility-validator because
+// BCV does not recognise AGP 9's built-in Kotlin, and KGP's own abiValidation
+// is not available for Android libraries yet.
+def apiCompileJar = layout.buildDirectory.file(
+  "intermediates/compile_library_classes_jar/release/bundleLibCompileToJarRelease/classes.jar")
+def apiGenerated = layout.buildDirectory.file("api/bare-host.api")
+def apiCommitted = file("api/bare-host.api")
+
+tasks.register("apiBuild") {
+  description = "Writes the public JVM API of the release compile jar to build/api/bare-host.api."
+  dependsOn "bundleLibCompileToJarRelease"
+  inputs.file(apiCompileJar)
+  outputs.file(apiGenerated)
+  doLast {
+    def jar = apiCompileJar.get().asFile
+    def classes = project.zipTree(jar).matching { include "**/*.class" }.files.collect { f ->
+      def path = f.path.replace(File.separatorChar, '/' as char)
+      path.substring(path.indexOf("to/holepunch/")).replace(".class", "").replace('/', '.')
+    }.findAll { name ->
+      def simple = name.substring(name.lastIndexOf('.') + 1)
+      !(simple == "R" || simple.startsWith('R$'))
+    }.sort()
+    def javap = new File(System.getProperty("java.home"), "bin/javap").absolutePath
+    def out = new ByteArrayOutputStream()
+    project.providers.exec {
+      commandLine([javap, "-protected", "-cp", jar.absolutePath] + classes)
+    }.standardOutput.asText.get().eachLine { out.write((it + "\n").getBytes("UTF-8")) }
+    // One block per class; keep only public/protected classes and drop
+    // compiler-generated accessors.
+    def blocks = []
+    def current = null
+    out.toString("UTF-8").eachLine { line ->
+      if (line.startsWith("Compiled from")) {
+        current = []
+        blocks << current
+      } else if (current != null && !line.contains('access$')) {
+        current << line
+      }
+    }
+    def kept = blocks.findAll { b -> !b.isEmpty() && (b[0].startsWith("public ") || b[0].startsWith("protected ")) }
+    def text = kept.collect { it.join("\n") }.sort().join("\n\n") + "\n"
+    def target = apiGenerated.get().asFile
+    target.parentFile.mkdirs()
+    target.setText(text, "UTF-8")
+  }
+}
+
+tasks.register("apiDump") {
+  description = "Updates the committed public API dump (api/bare-host.api)."
+  dependsOn "apiBuild"
+  doLast {
+    apiCommitted.parentFile.mkdirs()
+    apiCommitted.setText(apiGenerated.get().asFile.getText("UTF-8"), "UTF-8")
+  }
+}
+
+tasks.register("apiCheck") {
+  description = "Fails when the public API differs from api/bare-host.api."
+  group = "verification"
+  dependsOn "apiBuild"
+  inputs.file(apiGenerated)
+  inputs.file(apiCommitted)
+  doLast {
+    def expected = apiCommitted.exists() ? apiCommitted.getText("UTF-8") : ""
+    def actual = apiGenerated.get().asFile.getText("UTF-8")
+    if (expected != actual) {
+      throw new GradleException(
+        "The :bare-host public API changed (stability contract, vision.md). " +
+        "Compare build/api/bare-host.api with api/bare-host.api. If the change " +
+        "is intended and additive, run ./gradlew :bare-host:apiDump and commit it; " +
+        "removing or changing a public signature is a major-version event.")
+    }
+  }
+}
+
+tasks.named("check") { dependsOn "apiCheck" }
 
 // Single source of truth for the version is the root package.json (RELEASING.md).
 rootProject.ext.jsonVersion = {
@@ -89,10 +178,10 @@ rootProject.ext.jsonVersion = {
 }
 
 dependencies {
-  // Bare Kit runtime prebuilt (IPC + Worklet). Compile/runtime for local
-  // project dependents; published consumers get the classes from the AAR's
-  // libs/ (AGP packages this local jar into the AAR).
-  api fileTree(dir: "../prebuilds/android", include: ["bare-kit/classes.jar"])
+  // Bare Kit runtime (IPC + Worklet classes and native libs). Published as
+  // io.github.anderscan.ekrooh:bare-kit-runtime:<lock `maven` pin>, so the
+  // generated POM names it like any other dependency.
+  api project(":bare-kit-runtime")
   // Public API of the host surfaces these types (BareWebViewClient,
   // BarePortMessenger), so they are `api` for consumers.
   api "androidx.webkit:webkit:1.18.0"
@@ -105,8 +194,10 @@ dependencies {
   testImplementation "org.json:json:20260814"
 }
 
-// Publish the AAR to GitHub Packages (Maven format) and Maven Central under
-// the single framework version from the root package.json (see RELEASING.md).
+// The AAR is published (to Maven Central and GitHub Packages) under the single
+// framework version from the root package.json (see RELEASING.md). Gradle only
+// writes it to the local staging repository; publish-maven.sh signs and
+// uploads it.
 afterEvaluate {
   publishing {
     publications {
@@ -123,47 +214,18 @@ afterEvaluate {
         // `releaseJavadocJar` (classifiers `sources`/`javadoc`). Adding custom
         // sources/javadoc artifacts here would duplicate those and make the
         // signed publication fail with "multiple artifacts with the identical
-        // extension and classifier ('jar.asc', 'sources')" (hit on v0.4.0). The
-        // local `api fileTree` bare-kit jar is deliberately absent from the POM
-        // (file deps can't be resolved from a repo) — its classes ship inside
-        // the AAR's libs/.
+        // extension and classifier ('jar.asc', 'sources')" (hit on v0.4.0).
         from components.release
 
         pom {
           name = "io.github.anderscan.ekrooh:bare-host"
           description = "Android host library for the @ekrooh/bare runtime: IPC coordinator, host plugin registry, WebView client."
-          url = "https://github.com/AndersCan/ekrooh"
-          licenses {
-            license {
-              name = "Apache-2.0"
-              url = "https://www.apache.org/licenses/LICENSE-2.0"
-              distribution = "repo"
-            }
-          }
-          developers {
-            developer {
-              id = "AndersCan"
-              name = "Anders Can"
-              email = "anders.can1@gmail.com"
-            }
-          }
-          scm {
-            connection = "scm:git:https://github.com/AndersCan/ekrooh.git"
-            developerConnection = "scm:git:git@github.com:AndersCan/ekrooh.git"
-            url = "https://github.com/AndersCan/ekrooh"
-          }
+          rootProject.ekroohPom(delegate)
         }
       }
     }
     repositories {
-      maven {
-        name = "GitHubPackages"
-        url = uri("https://maven.pkg.github.com/AndersCan/ekrooh")
-        credentials {
-          username = System.getenv("GITHUB_ACTOR") ?: "token"
-          password = System.getenv("GITHUB_TOKEN") ?: ""
-        }
-      }
+      rootProject.ekroohStagingRepo(delegate)
     }
   }
 }
@@ -177,18 +239,3 @@ afterEvaluate {
 // collided with AGP's own artifacts — "multiple artifacts with the identical
 // extension and classifier ('jar.asc', 'sources')" on v0.4.0). The javadoc jar
 // zips the source dirs (an empty-but-present doc jar satisfies the portal).
-
-// GPG-sign every publication. CI provides SIGNING_KEY (ASCII-armored private
-// key) + SIGNING_PASSWORD as secrets; without them the publish task fails but
-// ordinary builds are unaffected. Runs after evaluation so the mavenAar
-// publication (declared in afterEvaluate above) already exists.
-afterEvaluate {
-  signing {
-    def signingKey = providers.environmentVariable("SIGNING_KEY").orNull
-    def signingPassword = providers.environmentVariable("SIGNING_PASSWORD").orNull
-    if (signingKey != null) {
-      useInMemoryPgpKeys(signingKey, signingPassword)
-    }
-    sign publishing.publications.mavenAar
-  }
-}

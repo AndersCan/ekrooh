@@ -21,6 +21,16 @@
 // from `JNI_GetCreatedJavaVMs`. It must be compiled per-ABI so it loads in
 // the classloader namespace next to `libbare-kit.so`; see
 // `CMakeLists.txt` and `android/build.gradle`.
+//
+// Status (security review, Nov 2026): the locally fetched Bare Kit prebuilds
+// for all four ABIs no longer list `libnativehelper.so` in DT_NEEDED and do not
+// import `JNI_GetCreatedJavaVMs` (they keep their own JavaVM from their own
+// `JNI_OnLoad`), so nothing loads this library today. Note also that when it
+// is loaded only as a DT_NEEDED dependency, ART never calls the `JNI_OnLoad`
+// below (it runs only the `JNI_OnLoad` of the library passed to
+// `System.loadLibrary`), so `g_vm` would stay NULL and the function reports no
+// VM. Removing the stub is deferred until that is verified against the pinned
+// release on a device.
 
 #include <jni.h>
 
