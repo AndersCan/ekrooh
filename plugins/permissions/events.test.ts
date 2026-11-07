@@ -8,6 +8,9 @@ describe('permissionEvents builders', () => {
       pluginId: 'core.permissions',
       event: 'permissions.request',
       args: { permission: 'camera' },
+      // User-mediated system prompt: the page waits as long as the media
+      // picker does, not the 5 s default (R-04).
+      timeoutMs: 5 * 60 * 1000,
     });
   });
 

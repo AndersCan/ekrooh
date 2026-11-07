@@ -360,7 +360,8 @@ export interface LoopbackServer {
    * the auth gate (device mode requires the session cookie/token). `path` is
    * normalized like a mount path (decoded, trailing slash dropped). The
    * response starts with `Referrer-Policy`, `X-Content-Type-Options` (and
-   * `Cross-Origin-Resource-Policy` in device mode) already set; a handler that
+   * `Cross-Origin-Resource-Policy` unless extra `allowedOrigins` are configured)
+   * already set; a handler that
    * throws or rejects is answered with a bare 500. Read the body with
    * `collectRequestBody`, passing a byte cap. */
   registerRoute(

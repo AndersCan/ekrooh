@@ -15,8 +15,10 @@ here is the exact flow.
 2. The worklet binds `127.0.0.1` on an **ephemeral** port and writes
    `handoff.json` (`{ origin, port, bootstrap }`) into `storage`. The session
    token is never written.
-3. The host polls for `handoff.json`, injects `bootstrap` (the one-time nonce)
-   into the page **before** any page script runs, and deletes the file:
+3. The host polls for `handoff.json`, deletes it as soon as it has read it
+   (`BareHandoff.consume` on both hosts), and injects `bootstrap` (the
+   one-time nonce) into the page **before** any page script runs, only on the
+   loopback origin and only in the main frame:
 
    ```js
    window.__ekrooh = { bootstrap: '<bootstrap>' };
@@ -27,7 +29,9 @@ here is the exact flow.
    consumer plugin dispatch handler) could otherwise read it and mint
    authorized requests to every other gated resource.
 
-4. The host loads `http://127.0.0.1:<port>/index.html`.
+4. The host loads `http://127.0.0.1:<port>/index.html`. The worklet writes
+   the file atomically with owner-only permissions; an unredeemed nonce
+   expires 120 s after the server binds.
 5. The page's WebSocket transport reads `window.__ekrooh.bootstrap`, calls
    `POST /login` once (the nonce is single-use), gets the `bare_session_<port>`
    cookie, and connects to `ws://127.0.0.1:<port>` — same origin, so
@@ -37,15 +41,25 @@ here is the exact flow.
 
 ## Android (reference)
 
-`examples/android-app/src/main/java/to/holepunch/bare/android/MainActivity.kt`
-shows the full wiring. Key bits: start the worklet with the asset dir, wait
-for the handoff file, inject `window.__ekrooh = { bootstrap }` via
-`addDocumentStartJavaScript`, then `loadUrl("http://127.0.0.1:<port>/index.html")`.
+`examples/android-app/src/main/java/to/holepunch/bare/android/` shows the
+full wiring. The worklet is owned by the `Application` (`BareApplication`,
+`ReferenceHost`), so it survives rotation and a second launch of the
+`singleTask` `MainActivity`. Key bits: start the worklet with
+`[webAssets, noBackupFilesDir/bare, cacheDir/bare-cache]`, read the handoff
+with `BareHandoff.consume(file)`, set `BareWebViewClient.allowedOrigin`, check
+`WebViewFeature.DOCUMENT_START_SCRIPT` and inject
+`window.__ekrooh = { bootstrap }` with
+`addDocumentStartJavaScript(script, setOf(handoff.origin))`, then
+`loadUrl("http://127.0.0.1:<port>/index.html")`.
 
 ## iOS (reference)
 
-`examples/ios-app/app/BareRuntime.swift` does the same with a `WKUserScript`
-injected at `.atDocumentStart`.
+`examples/ios-app/app/BareRuntime.swift` does the same with the library:
+`BareHandoff.consume(at:)` reads and deletes the file, and
+`BareWebHost.load(_:in:delegate:)` injects an origin-guarded, main-frame-only
+`WKUserScript` at `.atDocumentStart`, loads the page, and removes the script
+once the first page has loaded. If the handoff is slow, the host keeps polling
+after showing a timeout message.
 
 ## Security notes
 
@@ -57,3 +71,4 @@ injected at `.atDocumentStart`.
 - Non-browser clients use the `X-Bare-Token` header. There is no `?token=`
   URL fallback.
 - All loopback responses send `Referrer-Policy: no-referrer`.
+- Both hosts confine the WebView to the handoff origin before the first load.

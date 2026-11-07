@@ -22,6 +22,8 @@ With `mode=dev`, `resolveCliConfig()` returns a dev-mode
 CLI equivalent of the hand-rolled options object:
 
 ```ts
+import { createWorkletRuntime } from '@ekrooh/bare/runtime';
+
 const runtime = createWorkletRuntime({
   deviceMode: false, // the dev backend: auth off, port 8080
   storage: './.justus-store', // durable app-sandbox dir
@@ -34,6 +36,7 @@ What you get and what to watch for:
 
 - `deviceMode` defaults to `true`. Only an explicit `deviceMode: false` (or
   `mode=dev`) turns auth off; passing or omitting `storage` does not change it.
+  `auth: false` without `deviceMode: false` throws.
 - Auth off is not an open server: requests must still target the bound
   loopback server, and a page `Origin` must be the server itself or listed in
   `allowedOrigins`, so another site open in the same browser cannot drive the
@@ -46,6 +49,11 @@ What you get and what to watch for:
   after creation:
 
 ```ts
+import type { PluginManifest } from '@ekrooh/bare/core';
+import { createWorkletRuntime } from '@ekrooh/bare/runtime';
+
+declare const photosPlugin: PluginManifest; // your app.photos manifest
+
 const runtime = createWorkletRuntime({
   deviceMode: false,
   storage: './.justus-store',

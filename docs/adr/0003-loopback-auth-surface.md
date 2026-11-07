@@ -1,5 +1,20 @@
 # Loopback auth surface: one explicit bootstrap, cookie + header credentials only
 
+Status: accepted, partly superseded. ADR 0006 superseded two points of this
+decision, and 0.6.0 shipped them:
+
+- `handoff.json` no longer carries `token`: it holds `{ origin, port,
+  bootstrap }`, and a host that needs the token gets it from `runtime.start()`
+  inside the worklet.
+- There is no legacy `token` fallback: the web transport reads only
+  `window.__ekrooh.bootstrap`, and `POST /login` accepts only the bootstrap
+  nonce or a live session, never the raw token.
+
+Later hardening (0.7.0, unreleased at the time of writing) keeps this ADR's
+shape: the nonce expires 120 s after bind, and gated requests with
+`Sec-Fetch-Site: same-site|cross-site` are refused. Everything else below
+still holds.
+
 ## Context
 
 The unified loopback server binds `127.0.0.1` on an ephemeral port and serves the

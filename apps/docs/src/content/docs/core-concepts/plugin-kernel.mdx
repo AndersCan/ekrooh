@@ -8,12 +8,16 @@ add **plugins** with namespaced events and per-runtime handlers.
 
 ## Conventions
 
-- Plugin IDs are `vendor.plugin`; events are plugin-local (`health.ping`).
+- Plugin IDs are namespaced (`app.photos`: two or more dot-separated
+  segments, at most 256 characters); events are plugin-local (`health.ping`).
+  The `core.*` and `vendor.*` namespaces are reserved for the framework's own
+  plugins, and `registry.register` throws on a reserved or malformed id.
 - `DISPATCH` is fire-and-forget; `INVOKE_REQUEST`/`INVOKE_RESPONSE` are
   request/response and timeout-bound, echoing `requestId`.
 - Runtime adapters: `web`, `android`, `ios`, `bare`.
-- Canonical plugins: `core.health`, `core.discovery`, `core.permissions`, and
-  `vendor.media` (the reference for out-of-band binary transfer).
+- Canonical plugins: `core.health`, `core.discovery`, `core.permissions`,
+  `core.logs`, and `vendor.media` (the reference for out-of-band binary
+  transfer).
 
 ## Typed authoring
 
@@ -22,25 +26,54 @@ typed `events.ts` builders from **one spec per event** — no drift between the
 wire contract and the client-side helpers.
 
 ```ts
-import { definePlugin } from '@ekrooh/bare/core';
+import { definePlugin, ok, type EventSpec } from '@ekrooh/bare/core';
 
-const manifest = definePlugin('core.health', healthSpecs, {
-  capabilities: ['health'],
+const echoSpecs = {
+  echo: {
+    pluginId: 'app.echo',
+    name: 'echo.say',
+    args: {} as { text: string },
+    result: {} as { text: string },
+    validate: (args: unknown) =>
+      typeof (args as { text?: unknown } | null)?.text === 'string',
+  },
+} as const satisfies Record<string, EventSpec<any, any>>;
+
+const manifest = definePlugin('app.echo', echoSpecs, {
+  capabilities: ['echo'],
   invoke: {
-    ping: async () => ok({ pong: true }),
+    echo: async (args) => ok({ text: args.text }),
   },
 });
 ```
 
+`args` is a compile-time type only: the page can send any JSON value. The
+optional `validate` hook runs before the handler and answers `PLUGIN_ERROR`
+when it returns false; without it, the handler must check every argument it
+uses (see [Authoring a Plugin](../consumers/authoring-plugins)).
+
 ## Routing
 
-`createPluginRouter` dispatches envelopes to registered handlers;
-`createPluginBus` binds a router to a messenger. Deterministic `ErrorCode`s
-report unsupported or failed behavior — plugins never surface raw platform
-exceptions across the wire.
+`createPluginRouter(registry, runtime, options?)` dispatches envelopes to
+registered handlers; `createPluginBus(messenger)` is the page-side typed
+`invoke`/`dispatch` over a protocol messenger. Deterministic `ErrorCode`s
+report unsupported or failed behavior. A handler that throws is answered with
+a fixed message (`<pluginId>.<event> failed`) and the detail is logged, so raw
+exception text never crosses the wire; return `err(code, message)` to send a
+specific message.
+
+The router bounds concurrent work: at most `maxInflight` calls (64) at once,
+at most three quarters of that from one channel (the page socket or the host
+IPC) and half of it to one plugin. A call over a limit is answered
+`TRANSPORT_ERROR` instead of being queued.
 
 ## Host delegation
 
 A plugin may delegate to the host via `HOST_INVOKE_REQUEST`: the worklet asks
 the native shell to run a handler (pick a file, request a permission) and the
-host answers with the same `pluginId`/`event` the frontend invoked.
+host answers with the same `pluginId`/`event` the frontend invoked. Delegation
+is allowed only for events the host announces in its capabilities. The worklet
+waits 30 seconds for the host unless the event's spec sets `hostTimeoutMs`
+(user-mediated calls such as permission prompts and pickers wait 5 minutes); a
+host that does not answer in time is reported as `TIMEOUT`. Host error codes
+outside the canonical set or the app-scoped form become `HOST_ERROR`.

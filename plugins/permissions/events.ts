@@ -15,10 +15,13 @@ export type PermissionResult = {
 };
 
 /**
- * A permission request shows a system prompt the user answers at their own pace, so
- * the worklet waits as long for the host as the page waits for the worklet (R-04).
+ * A permission request shows a system prompt the user answers at their own pace
+ * (R-04). The page waits five minutes; the worklet waits slightly less for the
+ * host, so a host that never answers fails the call with a `TIMEOUT` the page can
+ * read before the page gives up on its own. Mirrors `vendor.media`.
  */
 const PERMISSION_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+const PERMISSION_HOST_TIMEOUT_MS = PERMISSION_REQUEST_TIMEOUT_MS - 5_000;
 
 export const permissionSpecs = {
   request: {
@@ -26,7 +29,7 @@ export const permissionSpecs = {
     name: 'permissions.request',
     args: {} as { permission: PermissionId },
     result: {} as PermissionResult,
-    hostTimeoutMs: PERMISSION_REQUEST_TIMEOUT_MS,
+    hostTimeoutMs: PERMISSION_HOST_TIMEOUT_MS,
   },
   status: {
     pluginId: 'core.permissions',
@@ -45,7 +48,12 @@ export const permissionEvents = {
       { permission: PermissionId },
       PermissionResult
     > {
-      return invokeEvent(permissionSpecs.request, { permission });
+      return invokeEvent(
+        permissionSpecs.request,
+        { permission },
+        null,
+        PERMISSION_REQUEST_TIMEOUT_MS,
+      );
     },
     status(
       permission: PermissionId,

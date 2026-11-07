@@ -15,6 +15,9 @@ import {
   resolveWorkletConfig,
   type WorkletRuntime,
 } from '@ekrooh/bare/runtime';
+import type { PluginManifest } from '@ekrooh/bare/core';
+
+declare const photosPlugin: PluginManifest; // your app.photos manifest
 
 export function createAppRuntime(): WorkletRuntime {
   const runtime = createWorkletRuntime({
@@ -40,7 +43,12 @@ export function createAppRuntime(): WorkletRuntime {
 - `hostBridge` — the host IPC bridge (null in dev, where there is no host).
 - `config` — `{ webAssets, storage, cache, deviceMode }`.
 - `start()` / `close()` — bind, mount the web app, attach the protocol socket,
-  write the handoff file, and (on `close`) shut down.
+  write the handoff file, and (on `close`) shut down. `start()` is idempotent
+  and rejects if the handoff file cannot be written; `close()` is idempotent
+  and fails pending host calls.
+
+`createWorkletRuntime` is synchronous. Passing `auth: false` without
+`deviceMode: false` throws.
 
 ## Device vs dev mode
 
@@ -77,12 +85,18 @@ exact order, each an **existing directory**:
 | 2        | `cache`     | ephemeral app-sandbox: asset-cache, photo spool, temp       |
 
 The arguments land at `Bare.argv[0..2]`. The Android reference host
-(`MainActivity.kt`) and iOS host (`BareRuntime.swift`) both pass all three:
+(`ReferenceHost.kt`: storage in `noBackupFilesDir/bare`, cache in
+`cacheDir/bare-cache`) and iOS host (`BareRuntime.swift`, via
+`BareStorage.prepare()`: `Application Support/bare` and `Caches/bare-cache`)
+both pass all three:
 
 ```kotlin
 worklet.start("/main.core.bundle", bundleStream,
-    arrayOf(webappDir.absolutePath, storageDir.absolutePath, cacheDir.absolutePath))
+    arrayOf(webappDir.absolutePath, storageDir.absolutePath, bareCacheDir.absolutePath))
 ```
+
+Keep durable storage (the p2p identity, keys) out of any cache directory the
+OS or the user may clear, and out of backups.
 
 If `cache` is missing or not a directory, the runtime falls back to `storage`
 and logs a warning (`[bare] cache dir missing or not a directory...`). The

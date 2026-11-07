@@ -15,5 +15,5 @@ export const MEDIA_INVOKE_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** How long the worklet waits for the host's pick/capture. Slightly under the
  * page timeout, so a host that never answers fails the call with a
- * `HOST_ERROR` the page can read, before the page gives up on its own. */
+ * `TIMEOUT` the page can read, before the page gives up on its own. */
 export const MEDIA_HOST_TIMEOUT_MS = MEDIA_INVOKE_TIMEOUT_MS - 5_000;

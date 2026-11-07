@@ -15,4 +15,4 @@ Android host for `@ekrooh/bare`, published as an AAR. Package `to.holepunch.bare
 
 Reference consumer: `examples/android-app` (`MainActivity.kt`). The Bare Kit prebuilt (`prebuilds/android/bare-kit/`, gitignored, from `npm run prebuilds`) is packaged into the AAR.
 
-Publishing: `io.ekrooh:bare-host` to GitHub Packages via `./gradlew :bare-host:publishMavenAarPublicationToGitHubPackagesRepository`; `.github/workflows/release.yml` runs it on tags.
+Publishing: `io.github.anderscan.ekrooh:bare-host` to Maven Central (`:bare-host:publishToSonatype closeAndReleaseSonatypeStagingRepository`), with GitHub Packages as a fallback (`:bare-host:publishMavenAarPublicationToGitHubPackagesRepository`); the `publish-maven` job of `.github/workflows/release.yml` runs them on tags (see `RELEASING.md`).

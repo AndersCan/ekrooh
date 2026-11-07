@@ -9,12 +9,38 @@
  *          to a real subpath export AND a real named export of the built
  *          package (dist/ — run `npm run build:pkg` first, as `vp check`
  *          requires).
+ * Gate C — Snippets type-check. Every ```ts block in a docs page is written
+ *          out as its own module and type-checked with `tsc` against the
+ *          built package (`@ekrooh/bare/*` mapped through the exports map to
+ *          `dist/*.d.mts`). This catches calls to members that do not exist
+ *          (`transport.invoke`), wrong argument shapes and wrong builder
+ *          paths, not only wrong import names. A snippet must therefore be
+ *          self-contained: declare what it uses but does not build
+ *          (`declare const transport: MessageTransport;`). A snippet that is
+ *          intentionally partial (a type shape, another library's API, a
+ *          fragment of a larger file) is opted out with the MDX comment
+ *          `{/* docs-check: skip *\/}` on the line before the fence.
+ *          Imports of relative or non-ekrooh modules that cannot be resolved
+ *          are tolerated (they type as `any`); everything else is an error.
+ * Gate D — Denylist. Known non-existent or retired APIs never reappear in a
+ *          docs page or a readme, skipped snippets and prose included.
+ *
+ * Gates B and C read dist/, so run this after `npm run build:pkg`; a stale
+ * dist/ gives stale answers.
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, relative, dirname } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const require = createRequire(import.meta.url);
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -178,11 +204,219 @@ for (const page of pages) {
   }
 }
 
+// ── Gate C: snippets type-check ───────────────────────────────────────────
+console.log('Gate C — ts snippets type-check');
+
+const SKIP_MARKER = /\{\/\*\s*docs-check:\s*skip\s*\*\/\}/;
+const FENCE_OPEN = /^(\s*)```ts\s*$/;
+
+/** The ```ts blocks of a page: `{ line, code, skip }`, where `line` is the
+ * 1-based page line of the first code line. Indentation (a block nested in a
+ * list item) is stripped. */
+function tsBlocks(source) {
+  const lines = source.split('\n');
+  const blocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    const open = FENCE_OPEN.exec(lines[i]);
+    if (!open) continue;
+    const indent = open[1];
+    const body = [];
+    let j = i + 1;
+    while (j < lines.length && lines[j].trim() !== '```') {
+      body.push(
+        lines[j].startsWith(indent) ? lines[j].slice(indent.length) : lines[j],
+      );
+      j++;
+    }
+    let prev = i - 1;
+    while (prev >= 0 && lines[prev].trim() === '') prev--;
+    blocks.push({
+      line: i + 2,
+      code: body.join('\n'),
+      skip: prev >= 0 && SKIP_MARKER.test(lines[prev]),
+    });
+    i = j;
+  }
+  return blocks;
+}
+
+const SNIPPET_DIR = join(ROOT, 'node_modules/.cache/docs-check');
+// Every snippet is a module (so top-level await and per-snippet names work).
+const PRELUDE = 'export {};\n';
+const PRELUDE_LINES = 1;
+
+/** `@ekrooh/bare/*` → built declarations, straight from the exports map. */
+const paths = {};
+let distMissing = false;
+for (const key of Object.keys(exportsMap)) {
+  if (key === './package.json') continue;
+  const decl = declFileFor(key);
+  if (!decl) {
+    distMissing = true;
+    continue;
+  }
+  const specifier =
+    key === '.' ? '@ekrooh/bare' : `@ekrooh/bare/${key.slice(2)}`;
+  paths[specifier] = [join(ROOT, decl)];
+}
+
+const snippets = new Map(); // snippet file -> { page, line }
+let skipped = 0;
+rmSync(SNIPPET_DIR, { recursive: true, force: true });
+mkdirSync(SNIPPET_DIR, { recursive: true });
+for (const page of pages) {
+  const rel = relative(DOCS_DIR, page).replace(/\.mdx$/, '');
+  tsBlocks(read(page)).forEach((block, n) => {
+    if (block.skip) {
+      skipped++;
+      return;
+    }
+    const file = join(SNIPPET_DIR, `${rel.replace(/\//g, '__')}__${n + 1}.ts`);
+    writeFileSync(file, PRELUDE + block.code + '\n');
+    snippets.set(file, { page, line: block.line });
+  });
+}
+
+if (distMissing) {
+  fail('dist/ declarations missing — run `npm run build:pkg` first');
+} else if (snippets.size > 0) {
+  writeFileSync(
+    join(SNIPPET_DIR, 'tsconfig.json'),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'ESNext',
+          moduleResolution: 'bundler',
+          lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+          types: ['node'],
+          strict: true,
+          noEmit: true,
+          skipLibCheck: true,
+          isolatedModules: true,
+          paths,
+        },
+        files: [...snippets.keys()],
+      },
+      null,
+      2,
+    ),
+  );
+  // The package's `bin` entry (its `exports` map hides `bin/tsc`).
+  const tscBin = join(
+    dirname(require.resolve('typescript/package.json')),
+    require('typescript/package.json').bin.tsc,
+  );
+  const tsc = spawnSync(
+    process.execPath,
+    [tscBin, '-p', join(SNIPPET_DIR, 'tsconfig.json'), '--pretty', 'false'],
+    { cwd: ROOT, encoding: 'utf8' },
+  );
+  if (tsc.error) fail(`could not run tsc: ${tsc.error.message}`);
+  const diagnostic = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
+  let parsed = 0;
+  for (const raw of (tsc.stdout + tsc.stderr).split('\n')) {
+    const m = diagnostic.exec(raw.trim());
+    if (!m) continue;
+    parsed++;
+    const [, file, line, col, code, message] = m;
+    // An unresolvable relative or third-party import types as `any`: the
+    // snippet stands for a consumer file we do not have. `@ekrooh/bare` must
+    // always resolve (Gate B also checks it).
+    if (
+      (code === 'TS2307' || code === 'TS7016') &&
+      !/'@ekrooh\/bare/.test(message)
+    ) {
+      continue;
+    }
+    const where = snippets.get(join(file.startsWith('/') ? '' : ROOT, file));
+    const location = where
+      ? `${relative(ROOT, where.page)}:${where.line + Number(line) - 1 - PRELUDE_LINES}:${col}`
+      : `${file}(${line},${col})`;
+    fail(`${location} — ${code} ${message}`);
+  }
+  // A non-zero exit with no diagnostic we could read is a tsc failure, not
+  // a clean run with tolerated imports.
+  if (tsc.status !== 0 && parsed === 0) {
+    fail(`tsc exited ${tsc.status}:\n${tsc.stdout}${tsc.stderr}`);
+  }
+}
+
+// ── Gate D: denylist ──────────────────────────────────────────────────────
+console.log('Gate D — retired / non-existent APIs');
+
+/** APIs that do not exist (or no longer exist) but that docs have shown.
+ * Extend this when a review finds another one. */
+const DENYLIST = [
+  [
+    /\btransport\.invoke\(/,
+    'MessageTransport has no invoke(); use a PluginBus (`bus.invoke`)',
+  ],
+  [
+    /discovery(Events)?\.summary\b/,
+    'core.discovery has `discovery.list`, not `summary`',
+  ],
+  [
+    /\bmediaEvents\.(pick|capture)\(/,
+    'builders are `mediaEvents.media.pick(kind)`',
+  ],
+  [
+    /\bpermissionEvents\.(request|status)\(/,
+    'builders are `permissionEvents.permissions.request(id)`',
+  ],
+  [
+    /\bhealthEvents\.(ping|payloadEcho|roundtrip)\(/,
+    'builders are `healthEvents.health.ping()`',
+  ],
+  [
+    /\bawait createWorkletRuntime\(/,
+    'createWorkletRuntime is synchronous; await `runtime.start()`',
+  ],
+  [/\bawait createLoopbackServer\(/, 'createLoopbackServer is synchronous'],
+  [
+    /\bio\.ekrooh:bare-host\b/,
+    'the AAR is `io.github.anderscan.ekrooh:bare-host`',
+  ],
+  [
+    /window\.__ekrooh\.token\b/,
+    'the page gets only `window.__ekrooh.bootstrap`',
+  ],
+  [/\?token=/, 'there is no `?token=` auth path'],
+];
+// `?token=` is only allowed where a page explains that it does not exist.
+const NEGATION = /\b(no|never|removed|not)\b/i;
+
+function readmes(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    if (['build', 'dist', 'prebuilds', 'fastlane'].includes(entry.name))
+      continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...readmes(full));
+    else if (/^readme\.md$/i.test(entry.name)) out.push(full);
+  }
+  return out;
+}
+
+const denyTargets = [...pages, ...readmes(ROOT)];
+for (const file of denyTargets) {
+  read(file)
+    .split('\n')
+    .forEach((text, i) => {
+      for (const [pattern, why] of DENYLIST) {
+        if (!pattern.test(text)) continue;
+        if (pattern.source.includes('token=') && NEGATION.test(text)) continue;
+        fail(`${relative(ROOT, file)}:${i + 1} — ${why}`);
+      }
+    });
+}
+
 console.log('');
 if (failures > 0) {
   console.error(`docs:check FAILED — ${failures} problem(s)`);
   process.exit(1);
 }
 console.log(
-  `docs:check OK — ${pages.length} pages, ${importCount} imports checked`,
+  `docs:check OK — ${pages.length} pages, ${importCount} imports, ${snippets.size} snippets type-checked (${skipped} skipped), ${denyTargets.length} files denylist-checked`,
 );

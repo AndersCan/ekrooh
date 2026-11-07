@@ -7,6 +7,180 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Security and correctness fixes from the November 2026 review. No export was
+removed and the wire `VERSION` is still `1`, but several defaults and error
+paths changed. **Entries marked "Can break" can break a consumer that relied on
+the old behaviour**; read them before upgrading.
+
+### Security
+
+- **Can break — `createWorkletRuntime({ auth: false })` throws** unless
+  `deviceMode: false` is also set. Before, it silently ran device mode without
+  auth.
+- **Can break — Fetch-metadata gate**: with auth on, a gated request or
+  WebSocket upgrade carrying `Sec-Fetch-Site: same-site` or `cross-site` is
+  refused with 403. Session cookies are not port-isolated, so a page on another
+  `127.0.0.1` port could otherwise load gated files with our cookie. Requests
+  without the header (non-browser clients) are unchanged.
+- **Can break — bootstrap nonce TTL**: an unredeemed nonce expires 120 s after
+  the server binds (`BOOTSTRAP_TTL_MS`, override with
+  `LoopbackServerOptions.bootstrapTtlMs`). A `/login` after that is a 401; an
+  existing session cookie keeps working.
+- **Can break — `mountDir` overlap throws**: a public and a gated directory
+  mount whose roots contain each other (real paths, case- and
+  normalization-insensitive) are refused, and the public mount 404s files
+  inside a gated root.
+- **Can break — `registerRoute` paths are normalized** like mount paths
+  (decoded, trailing slash dropped); a path no request could match throws.
+- **Can break — generic error messages**: a plugin or host handler that throws
+  is answered with a fixed message (`<pluginId>.<event> failed`); the detail is
+  logged. Return `err(code, message)` to send a specific message. Host error
+  codes outside the canonical set or the app-scoped form (`ns.x/code`, ≤ 64
+  chars) become `HOST_ERROR`; host messages are capped at 512 chars
+  (`vendor.media`: 500). Oversized-response fallbacks no longer echo the
+  plugin, event or reason.
+- **Can break — plugin id format and reserved namespaces**: `register` rejects
+  an id that is not two or more dot-separated `[A-Za-z0-9_-]` segments (≤ 256
+  chars), and any `core.*`/`vendor.*` id other than the framework's own
+  plugins. Rename consumer plugins to your own namespace (`app.photos`).
+- **Can break — `FRAME_INVALID` behaviour**: `pluginId`/`event`/`requestId`
+  over 256 chars and invalid UTF-8 in a header (was U+FFFD) are
+  `FRAME_INVALID`. A content-invalid frame is skipped and answered
+  `FRAME_INVALID` instead of closing the protocol socket; on the host IPC a bad
+  host response fails its call at once and no longer drops the good frames
+  coalesced with it. iOS and Android answer malformed IPC fields with
+  `FRAME_INVALID` too.
+- **Can break — iOS storage moved**: the reference app and
+  `BareStorage.prepare()` keep storage in `Application Support/bare` (was
+  `Documents/bare`, moved once on first launch) and the cache in
+  `Caches/bare-cache`. Storage exclusion from backup is fatal if it fails.
+- **Can break — Android storage moved**: the reference app keeps durable
+  storage in `noBackupFilesDir/bare` (was `cacheDir/bare`, where "Clear cache"
+  wiped the p2p identity), moved once on upgrade. Backup and device-transfer
+  rules now exclude every domain, `root` and `device_*` included.
+- **Can break — iOS permissions fail closed**: a missing or unknown permission
+  id is `unsupported` (was answered as `storage`, i.e. `granted`).
+- Constant-time credential comparison, the 1024 pending-host-call cap and the
+  forged-`HOST_*_RESPONSE` rule are now pinned by tests.
+- Files are served from a verified descriptor (real path + `dev`/`ino`
+  re-checked after open), so a symlink swapped in after the check is refused;
+  an unreadable file-mount target is a 404.
+- Responses from routes and the framework send `nosniff`, and gated responses
+  `Cross-Origin-Resource-Policy: same-origin` (unless extra `allowedOrigins`
+  are set). An oversized `/login` body is a 413 and closes the connection.
+- Upgrade-rejection logs are rate limited (10 per 10 s) and truncated to 200
+  chars; captured backend console messages are capped at 16 KiB; `logs.view`
+  rejects a non-number `tail` and unknown `level`/`source`, and `LogStore.view`
+  returns nothing for an invalid `tail` (was everything).
+- `handoff.json` is written atomically with mode `0600`.
+- **Android host**: `BareWebViewClient` also blocks off-origin POST
+  navigations (empty 403), opens external links only on a user gesture,
+  refuses userinfo URLs; the reference app declares `CAMERA`, runs the
+  worklet in the `Application` (`singleTask` activity), feature-checks
+  `addDocumentStartJavaScript`, reads the handoff through `BareHandoff` (never
+  logged), and keeps the p2p verify bundle out of the APK.
+  `requireSupportedAbi()` also throws in a 32-bit process.
+- **iOS host**: confinement, bootstrap injection, handoff deletion and backup
+  exclusion move into `BareHost` (`BareNavigationDelegate`, `BareWebHost`,
+  `BareHandoff`, `BareStorage`); a non-JSON handler result is
+  `INVALID_RESPONSE` instead of a crash.
+- **Desktop**: the window is confined to the backend origin, external links
+  open in the system browser, clipboard read is off, and the
+  `EKROOH_TEST_HANDOFF_COPY` hook exists only in `-Dtest-hooks=true` builds.
+- **Dev harness**: the supervisor refuses a non-loopback bind, caps live
+  instances at 32 (429), cleans up a failed allocation and answers a 500 with
+  no detail.
+- **Release pipeline**: `release.yml` is split into a credential-free
+  `build` job (checks the tag equals the version and is on `main`, then runs
+  `build:pkg`, `docs:check`, `vp check`, `vp test` and the Gradle build), an
+  OIDC-only `publish-npm` job that publishes the packed tarball with no
+  checkout or install, and a `publish-maven` job that runs only the Gradle
+  publish tasks. Gradle dependency verification is on. Workflow-level
+  permissions are read-only, every checkout drops its token, and
+  `CODEOWNERS` covers the trust boundaries.
+- **Can break — `npm run prebuilds`** no longer needs `gh` or a token (it
+  fetches the public release URL), replaces `prebuilds/android` and
+  `prebuilds/ios` wholesale, refuses absolute, `..` and symlink archive
+  entries, and a version argument must equal the lockfile's.
+- **Can break — deploy templates**: `DEPLOY_APPROVERS` is removed (it gated
+  nothing). The templates need the environments `android-signing`,
+  `internal`, `production`, `ios-signing`, `testflight`, each limited to the
+  default branch and holding its own secrets.
+
+### Changed
+
+- **Host timeouts**: a host call that misses its deadline is `TIMEOUT` (was
+  `HOST_ERROR`). Event deadlines now reach the host bridge: `vendor.media`
+  waits 4 min 55 s and `permissions.request` 5 min (was a fixed 30 s, which
+  dropped a photo picked after 30 s). iOS and Android hosts honour per-handler
+  timeouts.
+- **Web transport reconnect**: sent invokes fail with `TRANSPORT_ERROR` as soon
+  as the socket is lost (they waited out their timeout). Retries use equal
+  jitter; a never-connected client gives up only after 5 retries **and** 10 s;
+  the retry count resets after 5 s of stable open; a socket stuck connecting is
+  dropped after 10 s; `WAKE` recovers a client that gave up. A socket the
+  server replaced is closed with code 4001 `"replaced"`, and the client waits
+  30 s or a foreground before reconnecting, so two documents no longer evict
+  each other forever. At most 256 requests queue while connecting.
+- Give-up and invoke-timeout errors no longer include server log lines unless
+  `diagnostics: true` is set.
+- The router caps calls per channel (48 of 64) and per plugin (32); over a cap
+  is `TRANSPORT_ERROR`.
+- A declared event with no handler is `UNSUPPORTED_EVENT` (was
+  `PLUGIN_ERROR`).
+- A route handler that rejects is answered with a 500 (it used to abort the
+  worklet).
+- `runtime.start()` is idempotent and rejects when the handoff cannot be
+  written or after `close()`. `close()` is idempotent, detaches the IPC
+  listener, fails pending host calls, and the console is restored when the
+  last runtime closes.
+- The mock transport runs the real plugin kernel and manifests: unknown
+  permission ids are `unsupported`, unknown media kinds are refused,
+  discovery lists `core.logs`, and it warns inside an app shell.
+- IPv6 hosts are bracketed in the origin.
+
+### Added
+
+- `EventSpec.validate` (runtime args check), `EventSpec.hostTimeoutMs`,
+  `PluginManifest.hostTimeoutsMs`, the `timeoutMs` argument of
+  `delegateToHost`, router `maxInflightPerChannel`/`maxInflightPerPlugin`, and
+  the same two options on `WorkletRuntimeOptions`.
+- `MessageTransport.close()` (optional) and the `createWebSocketTransport`
+  options `minBootWindowMs`, `openTimeoutMs`, `maxQueued`, `diagnostics`;
+  `diagnostics` on `createProtocolMessenger`.
+- `LoopbackServerOptions.bootstrapTtlMs`.
+- Swift: `BareStorage`, `BareStorageDirectories`, `BareStorageError`,
+  `BareHandoff`, `BareNavigationPolicy`, `BareNavigationDecision`,
+  `BareNavigationDelegate`, `BareWebHost`, `HostIpcRouter`,
+  `HostPluginRegistry.register(…timeout:…)`, `invokeTimeout`,
+  `defaultInvokeTimeout`, `userMediatedInvokeTimeout`,
+  `BareProtocol.buildErrorResponse(…type:)`.
+- Kotlin: `BareHandoff`, `HostIpcCoordinator.Port` (+ constructor and
+  `stop()`), `HostPluginRegistry` timeout overload, `timeoutFor`,
+  `DEFAULT_TIMEOUT_MS`, `INTERACTIVE_TIMEOUT_MS`, `FrameDecoder(onInvalidFrame)`,
+  `BareHostAbi.isSupportedRuntime`, `BareWebViewClient.shouldOpenExternally`,
+  `shouldBlockMainFrameRequest`, `onRenderProcessGone`; `BareWebViewClient` is
+  now `open`.
+- API snapshots: the JS type surface (`api/public-api.d.mts.snap`,
+  `npm run api:snapshot`), the Kotlin API (`android/api/bare-host.api`,
+  `apiDump`/`apiCheck`) and the Swift API (`ios/public-api.swift.snap`). The
+  `exports` keys are frozen.
+- `security.android.test.ts`, `security.apple.test.ts` and
+  `error-codes-parity.test.ts`; `docs:check` type-checks every docs snippet
+  against `dist/` and rejects known retired APIs.
+
+### Removed
+
+- `web/transport-log.ts` (dead code) and the mock-only handlers module.
+
+### Docs
+
+- Fixed snippets that called APIs that do not exist (`transport.invoke`,
+  `discovery.summary`, flat builder paths), the frame layout (`payloadLen`),
+  the AAR coordinates, the iOS embedding steps, and the media guide (CSPRNG
+  mount ids, no native `path` in results). ADRs 0005 and 0006 are marked
+  accepted; 0003 notes what 0006 superseded.
+
 ## [0.6.2] - 2026-11-07
 
 ### Fixed

@@ -109,8 +109,11 @@ void runtime.start();
 ```
 
 `resolveWorkletConfig()` reads the host-supplied configuration (device assets,
-dev flags); under the bare CLI it resolves to `{}` (dev mode). Plugins that depend
-on the loopback socket are created after the runtime exists.
+dev flags). Without host arguments or CLI tokens it resolves to `{}`, which is
+**device mode** (auth on, ephemeral port); the dev backend needs an explicit
+`mode=dev` token. `createWorkletRuntime` is synchronous; `start()` binds the
+server and resolves to the credentials. Plugins that depend on the loopback
+socket are created after the runtime exists.
 
 ## 4. Call it from the web
 
@@ -123,29 +126,34 @@ import {
   createPluginBus,
   createProtocolMessenger,
 } from '@ekrooh/bare/core';
+import { createWebSocketTransport } from '@ekrooh/bare/transports';
 import { helloEvents } from '../shared/hello-events';
-import { transport } from './transport';
 
+const transport = createWebSocketTransport();
 const messenger = createProtocolMessenger((request, payload) => {
   transport.send(MessageType.ENVELOPE, request, payload);
 });
+// Let the messenger match INVOKE_RESPONSE requestIds back to `bus.invoke`.
+transport.subscribe((message) => messenger.handleIncoming(message.header));
 const bus = createPluginBus(messenger);
 
 const [err, result] = await bus.invoke(helloEvents.greet('consumer'));
 // result?.reply === 'hello, consumer'
 ```
 
-`createProtocolMessenger` hands request/response bytes to `transport.send`; the
-messenger matches the `INVOKE_RESPONSE` requestId back to `bus.invoke`. The raw
-`transport.invoke(envelope)` form is available too (see
-[Authoring a Plugin](../consumers/authoring-plugins.mdx)) — the plugin bus is the
-typed convenience over it.
+`createProtocolMessenger` hands request bytes to `transport.send`, and
+`handleIncoming` matches each `INVOKE_RESPONSE` requestId back to `bus.invoke`.
+`MessageTransport` itself only has `send`, `subscribe` and an optional
+`close`; the plugin bus is how a page calls a plugin. `bus.invoke` never
+throws: it resolves to `[error, null]` or `[null, result]`.
 
 ## Beyond request/response: backend → web push
 
 Not every update is a reply to an invoke. A server-initiated update — a progress
 tick, a notification — uses a `DISPATCH` (no requestId). The `app.basic` example
 pushes a `basic.beep` on every ping via `LoopbackPush`:
+
+{/* docs-check: skip */}
 
 ```ts
 // in the worklet handler

@@ -12,6 +12,11 @@ frontend.
 - `createDefaultPlugins(deps)` — wires `core.health`, `core.discovery`,
   `core.permissions`, `vendor.media`, and `core.logs` with the runtime's
   loopback server and host IPC bridge.
+
+The `core.*` and `vendor.*` namespaces are reserved for these framework
+plugins: registering any other id there throws. Name your plugins in your own
+namespace (`app.photos`).
+
 - Types: `DefaultPluginsDeps`, `DiscoveryPluginDeps`, `MediaPluginDeps`,
   `LogsPluginDeps`.
 
@@ -20,7 +25,7 @@ frontend.
 | Plugin             | Events                                       | Purpose                               |
 | ------------------ | -------------------------------------------- | ------------------------------------- |
 | `core.health`      | `health.ping`                                | liveness for the web layer            |
-| `core.discovery`   | `discovery.summary`                          | runtime/capability discovery          |
+| `core.discovery`   | `discovery.list`                             | runtime/capability discovery          |
 | `core.permissions` | `permissions.request` / `permissions.status` | storage/camera permission abstraction |
 | `vendor.media`     | `media.pick` / `media.capture`               | out-of-band binary (photos/video)     |
 | `core.logs`        | `logs.view` / `logs.clear`                   | bounded worklet + web log collection  |
@@ -41,20 +46,39 @@ import { discoveryEvents } from '@ekrooh/bare/plugins/discovery/events';
 import { logEvents } from '@ekrooh/bare/plugins/logs/events';
 ```
 
+Builders are grouped by plugin namespace (`mediaEvents.media.pick`), and a
+page sends them through a `PluginBus`, which resolves to `[error, result]`:
+
 ```ts
-const res = await transport.invoke(mediaEvents.pick({ kind: 'image' }));
-const summary = await transport.invoke(discoveryEvents.summary());
-const granted = await transport.invoke(permissionEvents.request('camera'));
-const logs = await transport.invoke(
+import type { PluginBus } from '@ekrooh/bare/core';
+import { discoveryEvents } from '@ekrooh/bare/plugins/discovery/events';
+import { logEvents } from '@ekrooh/bare/plugins/logs/events';
+import { mediaEvents } from '@ekrooh/bare/plugins/media/events';
+import { permissionEvents } from '@ekrooh/bare/plugins/permissions/events';
+
+declare const bus: PluginBus; // createPluginBus(messenger), see Transports
+
+const [mediaErr, media] = await bus.invoke(mediaEvents.media.pick('image'));
+const [, discovery] = await bus.invoke(discoveryEvents.discovery.list());
+const [, permission] = await bus.invoke(
+  permissionEvents.permissions.request('camera'),
+);
+const [, logs] = await bus.invoke(
   logEvents.logs.view({ tail: 20, level: 'warn' }),
 );
 ```
+
+Event args are untrusted page input. The canonical plugins check what they
+use: `vendor.media` allowlists `kind`, `core.logs` rejects a non-number `tail`
+or an unknown `level`/`source` with `PLUGIN_ERROR`, and the hosts allowlist
+permission ids (unknown ids are `unsupported`).
 
 ## Result types
 
 - `MediaResult` — `{ url }` (the on-device path never leaves the host/worklet).
 - `PermissionResult` — `{ permission, status }` with
   `granted | denied | notDetermined | unsupported`.
-- `DiscoveryListResult` — runtime/capability summary.
+- `DiscoveryListResult` — `{ schemaVersion: 1, capabilities }`, the
+  worklet's and the host's capability rows.
 - `LogsViewResult` — `{ entries: LogEntry[] }` where `LogEntry` is
   `{ seq, ts, level, source, tag?, message }`.

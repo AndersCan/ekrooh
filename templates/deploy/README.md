@@ -10,11 +10,25 @@ platform, both dispatch-only: a human clicks **Run workflow** and picks a target
 | `ios-app-store.yml`      | `testflight` | TestFlight (internal testers) |
 | `ios-app-store.yml`      | `appstore`   | App Store review submission   |
 
-Only `DEPLOY_APPROVERS` (GitHub usernames, checked against `github.actor` by the
-`authorize` job) can trigger a run. Production and App Store submission also need
-approval from the `production` environment's required reviewers. Fail-closed: no
-run is possible until `DEPLOY_APPROVERS` is set. A single username makes that
-person the sole deployer.
+The security boundary is **GitHub environments**, not the workflow files.
+Anyone with write access can dispatch a workflow from a branch where they
+edited it, so a check inside the file (an allowlist of usernames) cannot gate
+anything. Every secret therefore lives in an environment whose deployment
+policy allows only the default branch:
+
+| Environment       | Holds                                                         | Reviewers |
+| ----------------- | ------------------------------------------------------------- | --------- |
+| `android-signing` | the upload keystore                                           | none      |
+| `internal`        | a Play service account limited to testing tracks              | none      |
+| `production`      | a Play service account with production rights / the App Store | required  |
+| `ios-signing`     | `match` access for read-only certificate sync                 | none      |
+| `testflight`      | an App Store Connect API key for TestFlight uploads           | none      |
+
+Production and App Store submission wait for the `production` environment's
+required reviewers. Do not store these secrets at repository level: any
+workflow on any branch could read them. Actions are pinned to full commit
+SHAs and dependencies install with `--ignore-scripts`; keep both when you edit
+the files.
 
 Costs: fastlane is free (MIT). Apple $99/yr, Google one-time $25.
 
@@ -33,7 +47,7 @@ templates/deploy/
 1. Copy the files above. In the repo root `bundle install` and commit `Gemfile.lock`.
 2. Edit the placeholders at the top of each workflow: `APPLICATION_ID`,
    `ANDROID_MODULE`, `AAB_PATH` (Android); `APP_IDENTIFIER`, scheme, plist paths
-   (iOS); and `DEPLOY_APPROVERS`.
+   (iOS).
 3. Signing config (once per platform):
    - Android: in the app module `build.gradle`, add a `release` signingConfig reading
      `ANDROID_KEYSTORE_*` env vars; read `versionCode`/`versionName` from `-P`
@@ -42,19 +56,23 @@ templates/deploy/
      appstore` once on a Mac. CI syncs certs read-only.
 4. Store access (once per platform):
    - Android: create the app and upload the first release manually in Play
-     Console. Opt into Play App Signing, create an upload keystore, and invite the
-     service account with track and production-release permissions.
-   - iOS: create an App Store Connect API key (App Manager role) and save the `.p8`.
-5. Secrets and variables:
+     Console. Opt into Play App Signing and create an upload keystore. Use two
+     least-privilege service accounts: one that can release to testing tracks
+     only (`internal`), one with production-release rights (`production`).
+   - iOS: create App Store Connect API keys with the narrowest role that can
+     upload (TestFlight) and submit (App Store), and save the `.p8` files.
+5. Create the environments above (GitHub > Settings > Environments). For each,
+   set the deployment branch policy to the default branch only; give
+   `production` required reviewers. Then add the secrets **to the
+   environment** that uses them (signing secrets to `*-signing`, store
+   credentials to `internal`/`testflight`/`production`) and the variables:
 
    | Platform | Secrets                                                                                                                     | Variables                                                                                                                                                                              |
    | -------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
    | Android  | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `SERVICE_ACCOUNT_JSON` | `PLAY_ROLLOUT_FRACTION` (optional, e.g. `0.1` for staged rollout)                                                                                                                      |
    | iOS      | `APP_STORE_CONNECT_API_KEY`, `MATCH_GIT_URL`, `MATCH_GIT_BASIC_AUTHORIZATION`, `MATCH_PASSWORD`                             | `APPLE_TEAM_ID`, `APP_STORE_CONNECT_API_KEY_ID`, `APP_STORE_CONNECT_API_ISSUER_ID`, `IOS_EXPORT_COMPLIANCE_USES_ENCRYPTION`, `DELIVER_LANGUAGES` (e.g. `en-US`, release notes locales) |
 
-6. Create the `production` environment (GitHub > Settings > Environments) with
-   required reviewers set to the `DEPLOY_APPROVERS` users. This is the final gate.
-7. Deploy: Run workflow, pick a target. Test tracks ship immediately; production
+6. Deploy: Run workflow, pick a target. Test tracks ship immediately; production
    waits for approval.
 
 ## Versioning

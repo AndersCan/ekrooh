@@ -13,11 +13,17 @@ where `permission` is `'storage' | 'camera'` and `status` is
 `granted | denied | notDetermined | unsupported`.
 
 ```ts
+import type { PluginBus } from '@ekrooh/bare/core';
+import { mediaEvents } from '@ekrooh/bare/plugins/media/events';
 import { permissionEvents } from '@ekrooh/bare/plugins/permissions/events';
 
-const { status } = await transport.invoke(permissionEvents.request('camera'));
-if (status === 'granted') {
-  await transport.invoke(mediaEvents.capture({ kind: 'image' }));
+declare const bus: PluginBus; // createPluginBus(messenger), see Transports
+
+const [err, result] = await bus.invoke(
+  permissionEvents.permissions.request('camera'),
+);
+if (!err && result.status === 'granted') {
+  await bus.invoke(mediaEvents.media.capture('image'));
 }
 ```
 
@@ -27,3 +33,10 @@ if (status === 'granted') {
 - The native hosts answer with real system permissions
   (e.g. `AVCaptureDevice.requestAccess` on iOS).
 - Shared UI code never branches on the runtime — it reads the plugin result.
+
+## Untrusted ids
+
+The permission id is page input. Hosts allowlist it: a missing or unknown id is
+answered `unsupported` on both Android and iOS, never `granted`. A permission
+prompt waits for the user, so the worklet waits up to 5 minutes for the host
+(`hostTimeoutMs` on the `permissions.request` spec).

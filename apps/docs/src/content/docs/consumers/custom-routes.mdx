@@ -9,31 +9,45 @@ upload route, a status page, or any custom API.
 
 ## registerRoute
 
-```ts
-import { createLoopbackPush, collectRequestBody } from '@ekrooh/bare/runtime';
-```
-
-`registerRoute(method, path, handler)` registers an exact
-`METHOD path` route. The handler receives the raw `(req, res)`; read a POST
-body with `collectRequestBody(req)`:
+`registerRoute(method, path, handler)` registers an exact `METHOD path`
+route. The handler receives the raw `(req, res)`; read a POST body with
+`collectRequestBody(req, maxBytes)`, always passing a byte cap:
 
 ```ts
+import { collectRequestBody, type WorkletRuntime } from '@ekrooh/bare/runtime';
+
+declare const runtime: WorkletRuntime;
+
 runtime.server.registerRoute('POST', '/upload', async (req, res) => {
-  const body = await collectRequestBody(req);
+  const body = await collectRequestBody(req, 1024 * 1024); // rejects past 1 MiB
   res.writeHead(201, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ received: body }));
+  res.end(JSON.stringify({ received: body.length }));
 });
 ```
 
-Routes run **before** mount resolution, **after** the auth gate: in device
-mode the request must carry the session cookie/token (401 otherwise); dev mode
-is open. The method and path are matched exactly.
+- Routes run **before** mount resolution, **after** the auth gate: in device
+  mode the request must carry the session cookie/token (401 otherwise) and
+  pass the `Sec-Fetch-Site` check (403 for `same-site`/`cross-site`); dev mode
+  is open, but the origin rule still applies.
+- The path is normalized like a mount path (percent-decoded, trailing slash
+  dropped), so `/api/` and `/a%20b` are reachable; a path no request could
+  match throws. The method is upper-cased at registration.
+- Async handlers are supported. A handler that throws or rejects is answered
+  with a bare `500 Internal Server Error`; the cause goes to the log.
+- The response starts with `Referrer-Policy: no-referrer` and
+  `X-Content-Type-Options: nosniff` already set, plus
+  `Cross-Origin-Resource-Policy: same-origin` when no extra `allowedOrigins`
+  are configured. Set your own `Content-Type`.
 
 ## File mounts
 
 For serving static bytes, the mount API still applies:
 
 ```ts
+import type { WorkletRuntime } from '@ekrooh/bare/runtime';
+
+declare const runtime: WorkletRuntime;
+
 runtime.server.mount('/photos/1.jpg', '/absolute/path/to/photo.jpg');
 runtime.server.mountDir('/photos', '/absolute/path/to/photos');
 ```
@@ -48,6 +62,12 @@ Files from a gated mount are served as content, not app code: they carry the
 same `sandbox` Content-Security-Policy as file mounts, so an HTML or SVG file in
 a mounted folder (user files, a peer-synced folder) never runs script in the
 app origin. Ship app code only in the public mount.
+
+A public and a gated directory mount must not contain each other: `mountDir`
+throws when one root lies inside the other (real paths, compared case- and
+normalization-insensitively). Keep gated **file** mounts out of the public web
+app directory too; that layout is not detected, and such a file would be
+reachable before login through its public URL.
 
 ## Bytes from the browser → worklet
 

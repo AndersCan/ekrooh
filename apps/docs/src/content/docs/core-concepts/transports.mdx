@@ -4,26 +4,27 @@ description: MessageTransport — WebSocket and mock.
 ---
 
 A `MessageTransport` is the UI-facing boundary. It has `send(type, header,
-payload?)` and `subscribe(handler)`, and it does not know about worklets, Bare,
-or host IPC.
+payload?)`, `subscribe(handler)` and an optional `close()`, and it does not
+know about worklets, Bare, or host IPC. A page does not call plugins on the
+transport directly: it wraps it in a protocol messenger and a plugin bus.
 
 ```ts
+import {
+  MessageType,
+  createPluginBus,
+  createProtocolMessenger,
+} from '@ekrooh/bare/core';
+import { healthEvents } from '@ekrooh/bare/plugins/health/events';
 import { createWebSocketTransport } from '@ekrooh/bare/transports';
 
 const transport = createWebSocketTransport();
-
-transport.subscribe((message) => {
-  if (message.header.type === 'INVOKE_RESPONSE') {
-    console.log(message.header.pluginId, message.header.result);
-  }
+const messenger = createProtocolMessenger((request, payload) => {
+  transport.send(MessageType.ENVELOPE, request, payload);
 });
+transport.subscribe((message) => messenger.handleIncoming(message.header));
+const bus = createPluginBus(messenger);
 
-transport.send('INVOKE_REQUEST', {
-  type: 'INVOKE_REQUEST',
-  pluginId: 'core.health',
-  event: 'health.ping',
-  requestId: 'req-1',
-});
+const [err, pong] = await bus.invoke(healthEvents.health.ping('hello'));
 ```
 
 ## WebSocket transport
@@ -33,8 +34,30 @@ transport.send('INVOKE_REQUEST', {
 - **Cookie bootstrap**: when the shell injected `window.__ekrooh = { bootstrap }`
   (a one-time nonce — never the raw token), the transport exchanges it for a
   `bare_session_<port>` cookie via `POST /login` before opening the socket.
-- **Reconnect**: exponential backoff (250ms → 2s), 5 tries. No `?token=` URL
-  fallback — a credential is never placed in a URL.
+- **Reconnect**: backoff from 250 ms doubling to a 2 s cap, with equal jitter
+  (half fixed, half random) so many WebViews do not reconnect in lockstep.
+  - A client that has **never connected** gives up after 5 retries, but only
+    once at least 10 s (`minBootWindowMs`) have passed since its first attempt.
+  - Once it has connected, a lost socket is retried **forever** at the capped
+    backoff. The retry count resets only after a socket has stayed open for
+    5 s, so a socket that opens and drops at once keeps backing off.
+  - A socket stuck connecting is dropped after 10 s (`openTimeoutMs`).
+  - Returning to the foreground (`WAKE`) retries at once, and also recovers a
+    client that had given up.
+  - When the server **replaces** this socket because another document took the
+    session (close code 4001, `"replaced"`), the client does not reconnect at
+    once: it waits 30 s or until the page returns to the foreground, so two
+    documents cannot evict each other forever.
+- **Failing fast**: invokes already sent fail with `TRANSPORT_ERROR` as soon
+  as their socket is lost (they no longer wait out their timeout). While
+  connecting, up to 256 requests (`maxQueued`) are held; past that, new
+  requests fail at once.
+- **`close()`** drops the socket for good, stops reconnecting, and fails every
+  pending and later request with `TRANSPORT_ERROR`.
+- **`diagnostics: true`** folds the server's recent `[loopback]` rejection log
+  lines into the give-up error text. It is off by default: log lines are for a
+  diagnostic harness, not for a shipped UI.
+- No `?token=` URL fallback — a credential is never placed in a URL.
 - Browser dev is cross-origin — pass an explicit URL (`VITE_BARE_WS_URL`).
 
 The connection lifecycle is modeled as a mantaq `Actor` (see
@@ -43,5 +66,12 @@ of the public surface.
 
 ## Mock transport
 
-`createMockTransport` is deterministic and in-process, used by unit and e2e
-tests. `VITE_TRANSPORT_MODE=mock` selects it at runtime.
+`createMockTransport()` is deterministic and in-process, used by unit and e2e
+tests and browser dev. `VITE_TRANSPORT_MODE=mock` selects it in the reference
+app. It routes requests through the **real** plugin kernel and the real
+`core.health`, `core.discovery`, `core.logs` and `core.permissions` manifests,
+so argument checks, unsupported-event errors and discovery match the worklet.
+Only the host is stubbed: known permission ids are granted (unknown or missing
+ids are `unsupported`), and `vendor.media` returns a fixed `data:` image after
+the same `kind` check as the real plugin. It never reconnects. It warns once if
+it runs inside an app shell, and must never ship in a production bundle.

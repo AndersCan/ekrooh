@@ -14,8 +14,9 @@ loopback server and protocol codec. `createWorkletRuntime` already exposes
 both (`runtime.server`, `runtime.protocol`):
 
 ```ts
-import { createLoopbackPush } from '@ekrooh/bare/runtime';
-import { MessageType } from '@ekrooh/bare/core';
+import { createLoopbackPush, type WorkletRuntime } from '@ekrooh/bare/runtime';
+
+declare const runtime: WorkletRuntime;
 
 const push = createLoopbackPush(runtime.server, runtime.protocol);
 

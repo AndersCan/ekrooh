@@ -25,7 +25,7 @@ internal structure; this is the "make it mine" path.
 your-app/
 ├── web/            # Vite app (frontend) — imports @ekrooh/bare/transports
 ├── worklet/        # Bare worklet entry — imports @ekrooh/bare/runtime
-└── android/        # Android app — consumes io.ekrooh:bare-host
+└── android/        # Android app — consumes io.github.anderscan.ekrooh:bare-host
 ```
 
 The frontend is a normal Vite page. The backend is a Bare worklet that runs
@@ -59,7 +59,8 @@ const runtime = createWorkletRuntime(resolveWorkletConfig());
 const { origin, port, token, bootstrap } = await runtime.start();
 ```
 
-`resolveWorkletConfig()` reads the host-provided config from `Bare.argv`
+`createWorkletRuntime` is synchronous and throws on `auth: false` unless
+`deviceMode: false` is set too. `resolveWorkletConfig()` reads the host-provided config from `Bare.argv`
 (`[webAssets, storage, cache]`). Under the bare CLI it parses labeled tokens;
 dev mode (auth off) needs an explicit `mode=dev`.
 
@@ -85,16 +86,34 @@ cookie automatically — the raw token is never given to page JS. In browser
 dev, pass the backend URL explicitly:
 
 ```ts
+import { createWebSocketTransport } from '@ekrooh/bare/transports';
+
 const transport = createWebSocketTransport({ url: 'ws://localhost:8080' });
 ```
 
 ## 4. Talk to plugins
 
 ```ts
+import {
+  MessageType,
+  createPluginBus,
+  createProtocolMessenger,
+} from '@ekrooh/bare/core';
 import { healthEvents } from '@ekrooh/bare/plugins/health/events';
+import type { MessageTransport } from '@ekrooh/bare/transports';
 
-const result = await transport.invoke(healthEvents.ping());
+declare const transport: MessageTransport; // from step 3
+
+const messenger = createProtocolMessenger((request, payload) => {
+  transport.send(MessageType.ENVELOPE, request, payload);
+});
+transport.subscribe((message) => messenger.handleIncoming(message.header));
+const bus = createPluginBus(messenger);
+
+const [err, pong] = await bus.invoke(healthEvents.health.ping());
 ```
+
+`bus.invoke` resolves to `[error, null]` or `[null, result]`; it never throws.
 
 ## 5. Native side
 

@@ -43,8 +43,11 @@ Run from the repo root. **GitHub CI is the authority on whether a change works**
 hint, never proof: do not report a change as verified from a local run, and do not
 add test steps that only work on one machine. Push and read the CI result. The CI
 gate is `npm run build:pkg` (compiles the package to `dist/`, which `vp check`,
-`vp test`, and the web build resolve through the `exports` map) followed by
-`vp check` + `vp test`, plus the e2e, emulator and simulator jobs.
+`vp test`, `docs:check` and the web build resolve through the `exports` map)
+followed by `npm run docs:check`, `vp check` + `vp test`, plus the e2e,
+emulator and simulator jobs. A release tag is gated again by the `build` job of
+`release.yml` (tag equals the version and is on `main`, then the same JS gates
+and the Gradle build) before either publish job runs.
 
 | Command                                         | Meaning                                                                                                 |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -59,7 +62,11 @@ gate is `npm run build:pkg` (compiles the package to `dist/`, which `vp check`,
 | `npm run build:web`                             | Build the reference web app into `examples/android-app/src/main/assets`                                 |
 | `npm run dev`                                   | Vite dev server + Bare backend (watch + restart)                                                        |
 | `./gradlew :examples:android-app:assembleDebug` | Build the Android APK                                                                                   |
-| `npm run prebuilds`                             | Fetch Bare Kit prebuilds (Android + iOS) for the pinned release                                         |
+| `npm run prebuilds`                             | Fetch Bare Kit prebuilds (Android + iOS) for the pinned release (SHA-256 checked, no token)             |
+| `npm run docs:check`                            | Docs links, imports, ts snippet type-check against `dist/`, retired-API denylist (after `build:pkg`)    |
+| `npm run api:snapshot`                          | Regenerate `api/public-api.d.mts.snap` after a reviewed type-surface change (after `build:pkg`)         |
+| `./gradlew :bare-host:apiDump`                  | Regenerate `android/api/bare-host.api` after a reviewed Kotlin API change (`apiCheck` runs in `check`)  |
+| `vp test security.apple.test.ts -u`             | Regenerate `ios/public-api.swift.snap` after a reviewed Swift API change                                |
 | `npm run build:ios`                             | Build iOS reference app inputs (`bare-link`, `bare-pack`, web assets)                                   |
 | `npm run test:ios`                              | Run the Swift host XCTest + UI tests on the iOS simulator                                               |
 
@@ -103,9 +110,16 @@ tooling, internals) can change freely.
 - **Do** read `vision.md` before deciding what belongs here.
 - **Do** keep `vp check` and `vp test` green before finishing a change.
 - **Do** co-locate unit tests as `*.test.ts` next to the source they cover.
-- **Do** fetch Bare Kit prebuilds via the documented script before Android or
-  iOS work (never commit them): `gh release download --repo holepunchto/bare-kit
-  <version>` then unzip `android/*` and `ios/*` into `prebuilds/`.
+- **Do** fetch Bare Kit prebuilds with `npm run prebuilds` before Android or
+  iOS work (never commit them). It needs only Node and `unzip` (no `gh`, no
+  token), checks the SHA-256 pinned in `scripts/prebuilds.lock.json`, and
+  replaces `prebuilds/android` and `prebuilds/ios` wholesale.
+- **Do** regenerate `gradle/verification-metadata.xml` after any Gradle
+  dependency or plugin bump (the command is in the root `build.gradle`) and
+  review the diff.
+- **Do** treat a diff in any API snapshot (`api/public-api.d.mts.snap`,
+  `android/api/bare-host.api`, `ios/public-api.swift.snap`) as a
+  stability-boundary change: review it, then regenerate.
 - **Don't** commit build output: `core/main.core.gen.js`, `dist/`, web assets
   under `examples/android-app/src/main/assets/`, `prebuilds/`,
   `examples/ios-app/addons/`, `examples/ios-app/Resources/`, `.playwright-browsers/`.

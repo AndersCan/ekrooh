@@ -9,7 +9,7 @@ Agents also read [`AGENTS.md`](AGENTS.md), the operating manual.
 ```bash
 vp install
 npm run playwright:install   # once, for e2e
-npm run prebuilds            # once, for the Android build (needs gh)
+npm run prebuilds            # once, for the Android build (Node + unzip, no token)
 ```
 
 The repo is a Vite+ (npm) workspace plus a Gradle multi-module build. `vp` is a local dependency.
@@ -29,10 +29,27 @@ The repo is a Vite+ (npm) workspace plus a Gradle multi-module build. `vp` is a 
    vp test
    ```
 
-   For integration changes, also run `npm run test:e2e:web`.
+   For integration changes, also run `npm run test:e2e:web`. For docs changes,
+   run `npm run docs:check` (after `build:pkg`): every ```ts snippet in
+   `apps/docs` is type-checked against `dist/`, so declare what a snippet uses
+   (`declare const bus: PluginBus;`) or mark an intentionally partial one with
+   `{/* docs-check: skip */}` on the line before the fence.
 
-4. For Android changes, run `./gradlew build`.
-5. Push and open a PR to `main`. CI runs the JS gate, the Playwright suite, and the Android build.
+4. For Android changes, run `./gradlew build` (it runs `:bare-host:apiCheck`).
+   - A changed Kotlin public API fails `apiCheck`. If the change is intended
+     and reviewed, run `./gradlew :bare-host:apiDump` and commit
+     `android/api/bare-host.api`.
+   - Gradle dependency verification is on. After bumping a Gradle dependency
+     or plugin, regenerate `gradle/verification-metadata.xml` with the command
+     in the root `build.gradle` and review the diff.
+   - A changed JS type surface fails `contract.test.ts`: after review, run
+     `npm run build:pkg && npm run api:snapshot`. A changed Swift API fails
+     `security.apple.test.ts`: after review, `vp test security.apple.test.ts -u`.
+5. Push and open a PR to `main`. CI runs the JS gate (including `docs:check`), the
+   Playwright suite, the Android, iOS, desktop and p2p jobs, and the security scans.
+   `main` requires those checks, one approval and a code-owner review
+   (`.github/CODEOWNERS`). A docs-only change (Markdown, `docs/`, `LICENSE`) skips
+   the heavy jobs; they report as skipped, which counts as passing.
 
 ## Commits
 
