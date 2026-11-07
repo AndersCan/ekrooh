@@ -1,0 +1,55 @@
+plugins {
+  id "com.android.application"
+}
+
+android {
+  namespace = "com.example.vote"
+  compileSdk = 36
+
+  defaultConfig {
+    applicationId = "com.example.vote"
+    minSdk = 29
+    targetSdk = 35
+    versionCode = 1
+    versionName = "1.0"
+  }
+
+  compileOptions {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+  }
+
+  sourceSets {
+    main {
+      jniLibs.srcDirs "src/main/addons"
+    }
+  }
+
+  packaging {
+    jniLibs {
+      useLegacyPackaging = true
+    }
+  }
+}
+
+kotlin {
+  compilerOptions {
+    jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+  }
+}
+
+// "npm run sync" produces the bundle and the native addons; Gradle only compiles.
+def syncedBundle = file("src/main/assets/main.core.bundle")
+tasks.register("checkSynced") {
+  doLast {
+    if (!syncedBundle.exists()) {
+      throw new GradleException('Web build not found. Run "npm run sync" in the project folder (the one with package.json), then press Run again.')
+    }
+  }
+}
+preBuild.dependsOn "checkSynced"
+
+dependencies {
+  implementation "io.github.anderscan.ekrooh:bare-host:0.6.1"
+  implementation "androidx.appcompat:appcompat:1.8.0"
+}

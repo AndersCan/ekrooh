@@ -1,0 +1,118 @@
+name: Starter
+on:
+  push:
+    branches:
+      - main
+    paths: &starter_paths
+      - 'examples/vote/**'
+      - .github/workflows/starter.yml
+  pull_request:
+    branches:
+      - main
+    paths: *starter_paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# The starter is copied out of the repo (degit on main, cp on pull requests)
+# and built from the published npm package and Maven Central AAR, with no token.
+jobs:
+  web:
+    name: Starter / web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20.19.0
+
+      - name: Get the starter
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            cp -R examples/vote "$RUNNER_TEMP/my-app"
+          else
+            npx --yes degit@3.10.1 AndersCan/ekrooh/examples/vote#main "$RUNNER_TEMP/my-app"
+          fi
+          echo "STARTER_DIR=$RUNNER_TEMP/my-app" >> "$GITHUB_ENV"
+
+      - name: Install, typecheck, build
+        run: |
+          cd "$STARTER_DIR"
+          npm ci
+          npm run typecheck
+          npm run build
+
+      - name: Dev server answers
+        run: |
+          cd "$STARTER_DIR"
+          npm run dev > dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:5173 > /dev/null; then
+              echo "dev server is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat dev.log
+          echo "npm run dev did not answer on http://localhost:5173" >&2
+          exit 1
+
+  android:
+    name: Starter / android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
+
+      - name: Remove preinstalled NDKs
+        # The starter must build without an NDK (prebuilt .so files only).
+        run: |
+          sudo rm -rf "$ANDROID_HOME/ndk" "$ANDROID_HOME/ndk-bundle" "$ANDROID_SDK_ROOT/ndk" || true
+          sudo rm -rf /usr/local/lib/android/sdk/ndk || true
+
+      - name: Get the starter
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            cp -R examples/vote "$RUNNER_TEMP/my-app"
+          else
+            npx --yes degit@3.10.1 AndersCan/ekrooh/examples/vote#main "$RUNNER_TEMP/my-app"
+          fi
+          echo "STARTER_DIR=$RUNNER_TEMP/my-app" >> "$GITHUB_ENV"
+
+      - name: Sync
+        run: |
+          cd "$STARTER_DIR"
+          npm ci
+          npm run sync
+
+      - name: Build the debug APK
+        run: cd "$STARTER_DIR/android" && ./gradlew assembleDebug
+
+      - name: APK carries the bundle, the page and the native libraries
+        run: |
+          cd "$STARTER_DIR/android"
+          unzip -l app/build/outputs/apk/debug/app-debug.apk > apk.txt
+          grep -q 'assets/main.core.bundle' apk.txt || { echo "APK has no assets/main.core.bundle" >&2; exit 1; }
+          grep -q 'assets/web/index.html' apk.txt || { echo "APK has no assets/web/index.html" >&2; exit 1; }
+          grep -q 'lib/arm64-v8a/libbare-kit.so' apk.txt || { echo "APK has no lib/arm64-v8a/libbare-kit.so" >&2; exit 1; }
+          grep 'lib/arm64-v8a/lib.*\.so' apk.txt | grep -qv 'libbare-kit.so' || { echo "APK has no native addon besides libbare-kit.so" >&2; exit 1; }

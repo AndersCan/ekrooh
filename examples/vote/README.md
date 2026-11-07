@@ -24,7 +24,16 @@ Edit `src/render.ts`. The browser reloads on save.
 | `src/vote-events.ts` | The messages                                                                                           |
 | `worklet/`           | The app backend. It runs in Node's sibling runtime Bare on your computer and inside the app on a phone |
 
-Android and iOS: coming in this folder soon.
+## Run on Android
+
+1. Install [Android Studio](https://developer.android.com/studio).
+2. In the project folder, run `npm run sync`. Run it again after every edit: the phone shows the built page, not the dev server.
+3. In Android Studio, open the `android/` folder and wait for Gradle sync to finish.
+4. Pick a device: Device Manager > Create Device > any Pixel with API 35, or a USB phone with debugging on. Press Run.
+
+The app shows the same vote page. If Gradle says "Web build not found", run `npm run sync` first.
+
+iOS: coming in this folder soon.
 
 ## Package manager
 
