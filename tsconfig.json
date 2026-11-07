@@ -13,5 +13,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
+  "exclude": ["examples/vote"],
   "include": ["core", "plugins", "web", "examples", "e2e", "scripts", "*.ts"]
 }
