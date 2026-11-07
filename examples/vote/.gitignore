@@ -1,3 +1,9 @@
 node_modules/
 dist/
 worklet/app.core.gen.js
+android/app/src/main/assets/
+android/app/src/main/addons/
+android/.gradle/
+android/local.properties
+**/build/
+.kotlin/

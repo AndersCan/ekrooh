@@ -5,6 +5,7 @@
  */
 import { context } from 'esbuild';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +15,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outfile = path.join(root, 'worklet', 'app.core.gen.js');
 const require = createRequire(import.meta.url);
 const bareExecutable = require('bare-runtime')();
+// npm ci can leave the prebuilt runtime without its execute bit.
+if (process.platform !== 'win32') fs.chmodSync(bareExecutable, 0o755);
 
 // `mode=dev` selects the dev backend (auth off). The origins let the Vite dev
 // server (pinned to 5173 in vite.config.ts) open the protocol socket.
