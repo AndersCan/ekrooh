@@ -93,6 +93,7 @@ export default defineConfig({
               label: 'P2P Folder Stack',
               slug: 'consumers/p2p-folder-stack',
             },
+            { label: 'P2P Sync', slug: 'consumers/p2p-sync' },
             {
               label: 'Backend → Web Push',
               slug: 'consumers/backend-push',

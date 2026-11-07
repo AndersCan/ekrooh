@@ -56,6 +56,7 @@ vi.mock('bare-ws', async () => ({
 const FRAMEWORK_CORE_ROOTS = [
   'core/messages',
   'core/lib',
+  'core/sync',
   'core/server',
   'core/logs',
   'core/harness',
@@ -65,6 +66,8 @@ const FRAMEWORK_CORE_ROOTS = [
 ];
 
 const EXEMPT: Record<string, string> = {
+  'core/sync/create-sync.ts':
+    'thin Hyperswarm wiring; logic tested in sync-engine, real peers in smoke:sync',
   'core/messages/index.ts': 'barrel re-export',
   'core/messages/protocol.ts': 'barrel re-export',
   'core/messages/constants.ts':
@@ -163,6 +166,10 @@ const PUBLIC_SURFACES: Record<string, { entry: string; exports: string[] }> = {
   transports: {
     entry: './web/transports/index.ts',
     exports: ['createMockTransport', 'createWebSocketTransport'],
+  },
+  sync: {
+    entry: './core/sync/create-sync.ts',
+    exports: ['createSync'],
   },
   runtime: {
     entry: './core/runtime.ts',
