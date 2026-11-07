@@ -39,15 +39,18 @@ function code(rel: string): string {
     .replace(/^\s*\/\/.*$/gm, '');
 }
 
-/** XML with comments removed. */
+/** XML with comments removed (an unterminated comment drops the rest). */
 function xml(rel: string): string {
   let src = read(rel);
-  let prev = '';
-  while (src !== prev) {
-    prev = src;
-    src = src.replace(/<!--[\s\S]*?-->/g, '');
+  let out = '';
+  for (;;) {
+    const start = src.indexOf('<!--');
+    if (start === -1) return out + src;
+    out += src.slice(0, start);
+    const end = src.indexOf('-->', start + 4);
+    if (end === -1) return out;
+    src = src.slice(end + 3);
   }
-  return src.replace(/<!--/g, '');
 }
 
 const shipped = [...kotlinFiles(`${APP}/java`), ...kotlinFiles(HOST)];
