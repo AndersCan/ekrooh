@@ -11,6 +11,9 @@ on:
     branches:
       - main
       - master
+  # A merge queue runs the required checks on the queued merge commit; without
+  # this trigger they never report and every queued PR times out.
+  merge_group:
 
 permissions:
   contents: read
@@ -36,6 +39,7 @@ jobs:
         run: node .github/scripts/changed-code.mjs
         env:
           BEFORE_SHA: ${{ github.event.before }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
 
   gradle-wrapper:
     name: Gradle wrapper validation

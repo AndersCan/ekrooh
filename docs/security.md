@@ -335,7 +335,10 @@ All hosts: `ErrorCodes` in Kotlin and Swift match `core/messages`
 - `CODEOWNERS` covers workflows, the prebuild fetcher and lockfile,
   `Package.swift`, the security tests and docs, the Gradle builds and the
   deploy templates. Required checks keep their names and report on every PR
-  (docs-only PRs skip the heavy jobs but still report).
+  (docs-only PRs skip the heavy jobs but still report), and the workflows that
+  hold them also run on `merge_group`, so a merge queue can be turned on.
+  `Dependency review (PR)` is skipped (passes) in the queue: it already ran on
+  the PR.
 - The deploy templates (`templates/deploy/`) keep every secret in a GitHub
   environment limited to the default branch; production needs reviewers.
 - `release-bare-kit-runtime.yml` (`bare-kit-v*` tags) uses the same protected
@@ -420,8 +423,7 @@ behavior test next to the code when it cannot.
   check as passing. This is a repository setting the owner handles.
 - **Deploy templates**: the signing jobs build the app with the keystore
   present, so build-time dependency code runs next to it.
-- Deferred: `examples/vote` has no Android Gradle verification metadata; the
-  workflows have no `merge_group` trigger (needed before a merge queue);
+- Deferred: `examples/vote` has no Android Gradle verification metadata;
   `npm run prebuilds` needs `unzip` (no Windows path). Vendored agent-skill hashes are unverified (no reproducible
   algorithm); the dead Android `libnativehelper.so` stub stays until removal is
   verified on a device; the Android decoder does not resync after a framing

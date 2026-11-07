@@ -764,7 +764,12 @@ describe('CI and release invariants (docs/security.md §6)', () => {
       const { wf } = workflowFiles().find(
         (w) => w.file === `.github/workflows/${file}`,
       )!;
-      for (const ev of ['push', 'pull_request']) {
+      // A merge queue only runs workflows that listen for `merge_group`;
+      // without it the required checks never report on a queued PR.
+      if (!('merge_group' in ((wf.on ?? {}) as object))) {
+        bad.push(`${file}: no merge_group trigger`);
+      }
+      for (const ev of ['push', 'pull_request', 'merge_group']) {
         const cfg = (
           (wf.on ?? {}) as Record<string, Record<string, unknown> | null>
         )[ev];
@@ -874,6 +879,9 @@ describe('CI and release invariants (docs/security.md §6)', () => {
       expect(run({ GITHUB_EVENT_NAME: 'pull_request' })).toMatch(
         /^code=true$/m,
       );
+      expect(
+        run({ GITHUB_EVENT_NAME: 'merge_group', MERGE_GROUP_BASE_SHA: base }),
+      ).toMatch(/^code=true$/m);
       // Control: a pure docs change is skipped.
       const docsBase = git('rev-parse', 'HEAD');
       fs.writeFileSync(path.join(dir, 'Host.md'), 'docs\n');
@@ -881,6 +889,14 @@ describe('CI and release invariants (docs/security.md §6)', () => {
       expect(run({ GITHUB_EVENT_NAME: 'push', BEFORE_SHA: docsBase })).toMatch(
         /^code=false$/m,
       );
+      expect(
+        run({
+          GITHUB_EVENT_NAME: 'merge_group',
+          MERGE_GROUP_BASE_SHA: docsBase,
+        }),
+      ).toMatch(/^code=false$/m);
+      // No base sha: fail-safe, run everything.
+      expect(run({ GITHUB_EVENT_NAME: 'merge_group' })).toMatch(/^code=true$/m);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

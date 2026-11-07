@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Decide whether a push or pull request touches anything but docs, for the
- * `changes` job in test.yml and playwright.yml.
+ * Decide whether a push, pull request or merge-queue group touches anything
+ * but docs, for the `changes` job in test.yml and playwright.yml.
  *
  * Required status checks must report on every PR, so the workflows always run
  * (no workflow-level `paths-ignore`, whose skipped workflow never reports).
@@ -41,6 +41,13 @@ function changedFiles() {
     // actions/checkout checks out the PR merge commit: its first parent is the
     // base branch, so this is exactly what the PR changes.
     return git('diff', '--name-only', '--no-renames', 'HEAD^1', 'HEAD');
+  }
+  // A merge queue checks out the group's merge commit; the group changes
+  // everything between the base branch head and it (all PRs ahead in the
+  // queue too, so the diff is never narrower than one PR's).
+  const base = process.env.MERGE_GROUP_BASE_SHA ?? '';
+  if (event === 'merge_group' && /^[0-9a-f]{40}$/.test(base)) {
+    return git('diff', '--name-only', '--no-renames', base, 'HEAD');
   }
   const before = process.env.BEFORE_SHA ?? '';
   if (

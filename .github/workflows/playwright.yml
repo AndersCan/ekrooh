@@ -7,6 +7,7 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  merge_group: # required check `test` must report in a merge queue
 
 permissions:
   contents: read
@@ -32,6 +33,7 @@ jobs:
         run: node .github/scripts/changed-code.mjs
         env:
           BEFORE_SHA: ${{ github.event.before }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
 
   test:
     needs: changes
