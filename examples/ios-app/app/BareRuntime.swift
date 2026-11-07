@@ -19,13 +19,18 @@ final class BareRuntime {
   /// Debug builds (CI) get a longer handoff window for slow cold simulator
   /// boots; release keeps 15s, matching the Android host. A timeout renders a
   /// visible message so UI tests can tell this stage from a blank page. Debug
-  /// builds accept `-ekroohHandoffTimeoutSeconds N` to force the timeout path.
+  /// builds accept `-ekroohHandoffTimeoutSeconds N` to force the timeout path,
+  /// and `-ekroohHandoffStopAfterTimeout YES` to stop polling once the message
+  /// shows (so a UI test can observe it before the late handoff replaces it).
   #if DEBUG
   private static let handoffTimeout: TimeInterval =
     UserDefaults.standard.object(forKey: "ekroohHandoffTimeoutSeconds") != nil
     ? UserDefaults.standard.double(forKey: "ekroohHandoffTimeoutSeconds") : 45
+  private static let stopPollingAfterTimeout =
+    UserDefaults.standard.bool(forKey: "ekroohHandoffStopAfterTimeout")
   #else
   private static let handoffTimeout: TimeInterval = 15
+  private static let stopPollingAfterTimeout = false
   #endif
 
   init() {
@@ -147,6 +152,8 @@ final class BareRuntime {
             "<p>Worklet handoff timed out after \(Int(Self.handoffTimeout))s</p>",
             baseURL: nil
           )
+          // Test hook only (debug builds): keep the message on screen.
+          if Self.stopPollingAfterTimeout { break }
         }
         try? await Task.sleep(nanoseconds: timedOut ? 500_000_000 : 100_000_000)
       }
