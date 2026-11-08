@@ -7,7 +7,6 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-<<<<<<< HEAD
 **This release must be 0.7.0.** It changes behaviour at stability-contract
 boundaries (plugin id rules, error codes and messages, `FRAME_INVALID`
 handling, option meanings, Kotlin host behaviour), and in 0.x a breaking change
@@ -195,6 +194,10 @@ the old behaviour**; read them before upgrading.
 
 ### Added
 
+- **`@ekrooh/bare/sync`**: peer-to-peer sync of one JSON value per device.
+  `createSync` returns invite/join/publish/values/onChange; devices that share
+  an invite code see each other's latest value. `hyperswarm` is now a runtime
+  dependency.
 - `EventSpec.validate` (runtime args check), `EventSpec.hostTimeoutMs`,
   `PluginManifest.hostTimeoutsMs`, the `timeoutMs` argument of
   `delegateToHost`, router `maxInflightPerChannel`/`maxInflightPerPlugin`, and
@@ -245,14 +248,6 @@ the old behaviour**; read them before upgrading.
   the AAR coordinates, the iOS embedding steps, and the media guide (CSPRNG
   mount ids, no native `path` in results). ADRs 0005 and 0006 are marked
   accepted; 0003 notes what 0006 superseded.
-=======
-### Added
-
-- **`@ekrooh/bare/sync`**: peer-to-peer sync of one JSON value per device.
-  `createSync` returns invite/join/publish/values/onChange; devices that share
-  an invite code see each other's latest value. `hyperswarm` is now a runtime
-  dependency.
->>>>>>> 0c50061 (feat(sync): add @ekrooh/bare/sync for sharing one value per device over p2p)
 
 ## [0.6.2] - 2026-11-07
 
