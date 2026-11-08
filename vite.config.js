@@ -66,6 +66,8 @@ export default defineConfig({
         // tests, not unit tests.
         'core/p2p-verify.core.ts',
         'core/p2p-verify.core.gen.js',
+        'core/sync-smoke.core.ts',
+        'core/sync-smoke.core.gen.js',
       ],
       reporter: ['text'],
       // No-regress floor: the measured values (2026-11-07, statements 93.75,
@@ -92,6 +94,7 @@ export default defineConfig({
       'plugins-media-events': 'plugins/media/events.ts',
       'plugins-logs-events': 'plugins/logs/events.ts',
       transports: 'web/transports/index.ts',
+      sync: 'core/sync/create-sync.ts',
     },
   },
 });

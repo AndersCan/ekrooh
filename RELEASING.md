@@ -146,7 +146,7 @@ To republish the same bare-kit version (a packaging fix), set the pin to
    allows only tags `v*` and `bare-kit-v*` (the runtime release, ADR 0007).
 
 The `@ekrooh/bare` exports map is frozen at first publish (beta): `core`, `runtime`,
-`plugins`, `plugins/*/events`, and `transports` (WebSocket and mock only). Every
+`plugins`, `plugins/*/events`, `sync`, and `transports` (WebSocket and mock only). Every
 entry points at compiled `dist/` output.
 
 ## 4. Announce

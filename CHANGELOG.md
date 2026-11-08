@@ -194,6 +194,10 @@ the old behaviour**; read them before upgrading.
 
 ### Added
 
+- **`@ekrooh/bare/sync`**: peer-to-peer sync of one JSON value per device.
+  `createSync` returns invite/join/publish/values/onChange; devices that share
+  an invite code see each other's latest value. `hyperswarm` is now a runtime
+  dependency.
 - `EventSpec.validate` (runtime args check), `EventSpec.hostTimeoutMs`,
   `PluginManifest.hostTimeoutsMs`, the `timeoutMs` argument of
   `delegateToHost`, router `maxInflightPerChannel`/`maxInflightPerPlugin`, and

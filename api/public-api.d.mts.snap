@@ -2,132 +2,7 @@
 // Generated; do not edit. Regenerate: npm run build:pkg && node scripts/api-snapshot.mjs --update
 
 // ==== index-<chunk>.d.mts
-declare const VERSION = 1;
-declare const MessageType: {
-readonly ENVELOPE: 1;
-};
-type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];
-declare const ErrorCode: {
-readonly UNSUPPORTED_CAPABILITY: 'UNSUPPORTED_CAPABILITY';
-readonly UNSUPPORTED_EVENT: 'UNSUPPORTED_EVENT';
-readonly HOST_ERROR: 'HOST_ERROR';
-readonly TRANSPORT_ERROR: 'TRANSPORT_ERROR';
-readonly PLUGIN_ERROR: 'PLUGIN_ERROR';
-readonly INVALID_RESPONSE: 'INVALID_RESPONSE';
-readonly FRAME_TOO_LARGE: 'FRAME_TOO_LARGE';
-readonly FRAME_INVALID: 'FRAME_INVALID';
-readonly TIMEOUT: 'TIMEOUT';
-};
-type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
-declare const MAX_HEADER_BYTES = 65535;
-declare const MAX_FRAME_BYTES: number;
-interface WireMessage {
-type: MessageTypeValue;
-header: MessageHeader;
-payload: Uint8Array;
-}
-type HeaderBase = {
-type: string;
-requestId?: string;
-};
-type ErrorCodeOrString = ErrorCode | (string & {});
-declare class CoreError extends Error {
-code: ErrorCodeOrString;
-constructor(code: ErrorCodeOrString, message: string);
-}
-type CoreErrorWire = {
-code: string;
-message: string;
-};
-type RuntimeTarget = 'web' | 'android' | 'ios' | 'bare';
-type Either<E, A> = [E, null] | [null, A];
-type DispatchEnvelope<TEvent extends string = string, TArgs extends Record<string, unknown> = Record<string, unknown>> = {
-kind: 'dispatch';
-pluginId: string;
-event: TEvent;
-args: TArgs;
-payload?: Uint8Array | ArrayBuffer | string | null;
-};
-type InvokeEnvelope<TEvent extends string = string, TArgs extends Record<string, unknown> = Record<string, unknown>, TResult = unknown> = {
-kind: 'invoke';
-pluginId: string;
-event: TEvent;
-args: TArgs;
-payload?: Uint8Array | ArrayBuffer | string | null;
-timeoutMs?: number;
-__result?: TResult;
-};
-type PluginInvokeRequestHeader = HeaderBase & {
-type: 'INVOKE_REQUEST';
-pluginId: string;
-event: string;
-args?: Record<string, unknown>;
-};
-type PluginInvokeResponseHeader = HeaderBase & {
-type: 'INVOKE_RESPONSE';
-pluginId: string;
-event: string;
-result?: unknown;
-error?: CoreErrorWire;
-};
-type PluginDispatchHeader = HeaderBase & {
-type: 'DISPATCH';
-pluginId: string;
-event: string;
-args?: Record<string, unknown>;
-};
-type PluginHeader = PluginInvokeRequestHeader | PluginInvokeResponseHeader | PluginDispatchHeader;
-type HostCapabilitiesQueryHeader = {
-type: 'HOST_CAPABILITIES_QUERY';
-requestId: string;
-};
-type HostCapabilitiesResponseHeader = {
-type: 'HOST_CAPABILITIES_RESPONSE';
-requestId: string;
-capabilities: CapabilityDescriptor[];
-error?: CoreErrorWire;
-};
-type HostInvokeRequestHeader = {
-type: 'HOST_INVOKE_REQUEST';
-requestId: string;
-pluginId: string;
-event: string;
-args?: Record<string, unknown>;
-};
-type HostInvokeResponseHeader = {
-type: 'HOST_INVOKE_RESPONSE';
-requestId: string;
-pluginId: string;
-event: string;
-result?: unknown;
-error?: CoreErrorWire;
-};
-type CapabilityDescriptor = {
-pluginId: string;
-capabilities: string[];
-events: string[];
-runtimes: RuntimeTarget[];
-};
-type MessageHeader = PluginHeader | HostCapabilitiesQueryHeader | HostCapabilitiesResponseHeader | HostInvokeRequestHeader | HostInvokeResponseHeader;
-interface PluginContext {
-runtime: RuntimeTarget;
-payload: Uint8Array;
-sender?: {
-pluginId: string;
-};
-}
-interface PluginRuntimeAdapter {
-dispatch?: (event: string, args: Record<string, unknown> | undefined, context: PluginContext) => void | Promise<void>;
-invoke?: (event: string, args: Record<string, unknown> | undefined, context: PluginContext) => Either<CoreError, unknown> | Promise<Either<CoreError, unknown>>;
-}
-interface PluginManifest {
-id: string;
-version?: string;
-capabilities?: string[];
-events?: string[];
-hostTimeoutsMs?: Readonly<Record<string, number>>;
-runtimes: Partial<Record<RuntimeTarget, PluginRuntimeAdapter>>;
-}
+import { CapabilityDescriptor, CoreError, DispatchEnvelope, Either, ErrorCode, ErrorCodeOrString, InvokeEnvelope, MessageHeader, MessageTypeValue, PluginContext, PluginDispatchHeader, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, RuntimeTarget, WireMessage } from "./types-<chunk>.mjs";
 declare function ok<T>(result: T): [null, T];
 declare function err(code: ErrorCodeOrString, message: string): [CoreError, null];
 declare function coerceErrorCode(code: string | undefined): ErrorCode;
@@ -270,14 +145,15 @@ flush(): void;
 restore(): void;
 };
 declare function installWebConsoleCapture(options?: WebConsoleCaptureOptions): WebConsoleCapture;
-export { BareRuntimeContext, CapabilityDescriptor, CoreError, CoreErrorWire, Decoder, DispatchEnvelope, DispatchHandler, DispatchRequest, Either, Encoder, Err, ErrorCode, ErrorCodeOrString, EventSpec, HostCapabilitiesQueryHeader, HostCapabilitiesResponseHeader, HostInvokeRequestHeader, HostInvokeResponseHeader, InvokeEnvelope, InvokeHandler, InvokeRequest, LogEntry, LogLevel, LogSource, LogStore, MAX_FRAME_BYTES, MAX_HEADER_BYTES, MessageHeader, MessageProtocol, MessageType, MessageTypeValue, Ok, Platform, PluginBus, PluginContext, PluginDispatchHeader, PluginHeader, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, PluginRegistry, PluginResult, PluginRouter, PluginRouterOptions, PluginRuntimeAdapter, ProtocolMessenger, ProtocolOptions, RuntimeTarget, VERSION, WireMessage, coerceErrorCode, createBareRuntimeContext, createPluginBus, createPluginRegistry, createPluginRouter, createProtocolMessenger, definePlugin, dispatchEvent, err, installWebConsoleCapture, invokeEvent, ok };
+export { BareRuntimeContext, Decoder, DispatchHandler, DispatchRequest, Encoder, Err, EventSpec, InvokeHandler, InvokeRequest, LogEntry, LogLevel, LogSource, LogStore, MessageProtocol, Ok, Platform, PluginBus, PluginRegistry, PluginResult, PluginRouter, PluginRouterOptions, ProtocolMessenger, ProtocolOptions, coerceErrorCode, createBareRuntimeContext, createPluginBus, createPluginRegistry, createPluginRouter, createProtocolMessenger, definePlugin, dispatchEvent, err, installWebConsoleCapture, invokeEvent, ok };
 
 // ==== index.d.mts
-import { BareRuntimeContext, CapabilityDescriptor, CoreError, CoreErrorWire, Decoder, DispatchEnvelope, DispatchHandler, DispatchRequest, Either, Encoder, Err, ErrorCode, ErrorCodeOrString, EventSpec, HostCapabilitiesQueryHeader, HostCapabilitiesResponseHeader, HostInvokeRequestHeader, HostInvokeResponseHeader, InvokeEnvelope, InvokeHandler, InvokeRequest, MAX_FRAME_BYTES, MAX_HEADER_BYTES, MessageHeader, MessageProtocol, MessageType, MessageTypeValue, Ok, Platform, PluginBus, PluginContext, PluginDispatchHeader, PluginHeader, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, PluginRegistry, PluginResult, PluginRouter, PluginRouterOptions, PluginRuntimeAdapter, ProtocolMessenger, ProtocolOptions, RuntimeTarget, VERSION, WireMessage, coerceErrorCode, createBareRuntimeContext, createPluginBus, createPluginRegistry, createPluginRouter, createProtocolMessenger, definePlugin, dispatchEvent, err, installWebConsoleCapture, invokeEvent, ok } from "./index-<chunk>.mjs";
+import { CapabilityDescriptor, CoreError, CoreErrorWire, DispatchEnvelope, Either, ErrorCode, ErrorCodeOrString, HostCapabilitiesQueryHeader, HostCapabilitiesResponseHeader, HostInvokeRequestHeader, HostInvokeResponseHeader, InvokeEnvelope, MAX_FRAME_BYTES, MAX_HEADER_BYTES, MessageHeader, MessageType, MessageTypeValue, PluginContext, PluginDispatchHeader, PluginHeader, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, PluginRuntimeAdapter, RuntimeTarget, VERSION, WireMessage } from "./types-<chunk>.mjs";
+import { BareRuntimeContext, Decoder, DispatchHandler, DispatchRequest, Encoder, Err, EventSpec, InvokeHandler, InvokeRequest, MessageProtocol, Ok, Platform, PluginBus, PluginRegistry, PluginResult, PluginRouter, PluginRouterOptions, ProtocolMessenger, ProtocolOptions, coerceErrorCode, createBareRuntimeContext, createPluginBus, createPluginRegistry, createPluginRouter, createProtocolMessenger, definePlugin, dispatchEvent, err, installWebConsoleCapture, invokeEvent, ok } from "./index-<chunk>.mjs";
 export { BareRuntimeContext, CapabilityDescriptor, CoreError, CoreErrorWire, Decoder, DispatchEnvelope, DispatchHandler, DispatchRequest, Either, Encoder, Err, ErrorCode, ErrorCodeOrString, EventSpec, HostCapabilitiesQueryHeader, HostCapabilitiesResponseHeader, HostInvokeRequestHeader, HostInvokeResponseHeader, InvokeEnvelope, InvokeHandler, InvokeRequest, MAX_FRAME_BYTES, MAX_HEADER_BYTES, MessageHeader, MessageProtocol, MessageType, MessageTypeValue, Ok, PluginBus, PluginContext, PluginDispatchHeader, PluginHeader, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, PluginRegistry, PluginResult, PluginRouter, PluginRouterOptions, PluginRuntimeAdapter, ProtocolMessenger, ProtocolOptions, RuntimeTarget, VERSION, WireMessage, coerceErrorCode, createBareRuntimeContext, createPluginBus, createPluginRegistry, createPluginRouter, createProtocolMessenger, definePlugin, dispatchEvent, err, installWebConsoleCapture, invokeEvent, ok, type Platform };
 
 // ==== plugins-discovery-events.d.mts
-import { CapabilityDescriptor, InvokeEnvelope } from "./index-<chunk>.mjs";
+import { CapabilityDescriptor, InvokeEnvelope } from "./types-<chunk>.mjs";
 export type DiscoveryListResult = {
 schemaVersion: 1;
 capabilities: CapabilityDescriptor[];
@@ -297,7 +173,7 @@ list(): InvokeEnvelope<"discovery.list", Record<string, never>, DiscoveryListRes
 };
 
 // ==== plugins-health-events.d.mts
-import { InvokeEnvelope } from "./index-<chunk>.mjs";
+import { InvokeEnvelope } from "./types-<chunk>.mjs";
 export declare const healthSpecs: {
 readonly ping: {
 readonly pluginId: 'core.health';
@@ -353,7 +229,8 @@ ts: number;
 };
 
 // ==== plugins-logs-events.d.mts
-import { InvokeEnvelope, LogEntry, LogLevel, LogSource } from "./index-<chunk>.mjs";
+import { InvokeEnvelope } from "./types-<chunk>.mjs";
+import { LogEntry, LogLevel, LogSource } from "./index-<chunk>.mjs";
 export type LogsViewArgs = {
 tail?: number;
 level?: LogLevel;
@@ -388,7 +265,7 @@ clear(): InvokeEnvelope<'logs.clear', Record<string, never>, LogsClearResult>;
 export type { LogEntry, LogLevel, LogSource };
 
 // ==== plugins-media-events.d.mts
-import { InvokeEnvelope } from "./index-<chunk>.mjs";
+import { InvokeEnvelope } from "./types-<chunk>.mjs";
 export type MediaKind = 'image' | 'video';
 export type MediaResult = {
 url: string;
@@ -423,7 +300,7 @@ kind?: MediaKind;
 };
 
 // ==== plugins-permissions-events.d.mts
-import { InvokeEnvelope } from "./index-<chunk>.mjs";
+import { InvokeEnvelope } from "./types-<chunk>.mjs";
 export type PermissionId = 'storage' | 'camera';
 export type PermissionStatus = 'granted' | 'denied' | 'notDetermined' | 'unsupported';
 export type PermissionResult = {
@@ -461,7 +338,8 @@ permission: PermissionId;
 };
 
 // ==== plugins.d.mts
-import { CapabilityDescriptor, LogStore, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, RuntimeTarget } from "./index-<chunk>.mjs";
+import { CapabilityDescriptor, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, RuntimeTarget } from "./types-<chunk>.mjs";
+import { LogStore } from "./index-<chunk>.mjs";
 import { LoopbackServer } from "./static-file-server-<chunk>.mjs";
 type DiscoveryPluginDeps = {
 listBareCapabilities: () => Array<{
@@ -484,7 +362,8 @@ export declare function createDefaultPlugins(deps: DefaultPluginsDeps): PluginMa
 export type { DiscoveryPluginDeps, LogsPluginDeps, MediaPluginDeps };
 
 // ==== runtime.d.mts
-import { BareRuntimeContext, CapabilityDescriptor, MessageHeader, MessageProtocol, Platform, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, WireMessage, createPluginRegistry, createPluginRouter } from "./index-<chunk>.mjs";
+import { CapabilityDescriptor, MessageHeader, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, WireMessage } from "./types-<chunk>.mjs";
+import { BareRuntimeContext, MessageProtocol, Platform, createPluginRegistry, createPluginRouter } from "./index-<chunk>.mjs";
 import { LoopbackRouteHandler, LoopbackServer, collectRequestBody, createLoopbackServer } from "./static-file-server-<chunk>.mjs";
 type BareIpcLike = {
 write(data: Uint8Array | string): boolean;
@@ -617,8 +496,31 @@ close(cb?: (err?: Error | null) => void): void;
 declare function createLoopbackServer(options?: LoopbackServerOptions): LoopbackServer;
 export { LoopbackRouteHandler, LoopbackServer, collectRequestBody, createLoopbackServer };
 
+// ==== sync.d.mts
+import { CoreError, Either } from "./types-<chunk>.mjs";
+type SyncOptions<T> = {
+storage?: string;
+parse: (raw: unknown) => T | undefined;
+};
+type SyncValue<T> = {
+peer: string;
+self: boolean;
+value: T;
+};
+interface Sync<T> {
+invite(): string;
+join(code: string): Either<CoreError, true>;
+publish(value: T): Either<CoreError, true>;
+values(): SyncValue<T>[];
+connected(): number;
+onChange(listener: () => void): () => void;
+close(): Promise<void>;
+}
+export declare function createSync<T>(options: SyncOptions<T>): Either<CoreError, Sync<T>>;
+export type { Sync, SyncOptions, SyncValue };
+
 // ==== transports.d.mts
-import { MessageHeader, MessageTypeValue, WireMessage } from "./index-<chunk>.mjs";
+import { MessageHeader, MessageTypeValue, WireMessage } from "./types-<chunk>.mjs";
 declare global {
 interface Window {
 __ekrooh?: {
@@ -647,3 +549,132 @@ close?(): void;
 export declare function createWebSocketTransport(urlOrOptions?: string | CreateWebSocketTransportOptions): MessageTransport;
 export declare function createMockTransport(): MessageTransport;
 export type { MessageTransport };
+
+// ==== types-<chunk>.d.mts
+declare const VERSION = 1;
+declare const MessageType: {
+readonly ENVELOPE: 1;
+};
+type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];
+declare const ErrorCode: {
+readonly UNSUPPORTED_CAPABILITY: 'UNSUPPORTED_CAPABILITY';
+readonly UNSUPPORTED_EVENT: 'UNSUPPORTED_EVENT';
+readonly HOST_ERROR: 'HOST_ERROR';
+readonly TRANSPORT_ERROR: 'TRANSPORT_ERROR';
+readonly PLUGIN_ERROR: 'PLUGIN_ERROR';
+readonly INVALID_RESPONSE: 'INVALID_RESPONSE';
+readonly FRAME_TOO_LARGE: 'FRAME_TOO_LARGE';
+readonly FRAME_INVALID: 'FRAME_INVALID';
+readonly TIMEOUT: 'TIMEOUT';
+};
+type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+declare const MAX_HEADER_BYTES = 65535;
+declare const MAX_FRAME_BYTES: number;
+interface WireMessage {
+type: MessageTypeValue;
+header: MessageHeader;
+payload: Uint8Array;
+}
+type HeaderBase = {
+type: string;
+requestId?: string;
+};
+type ErrorCodeOrString = ErrorCode | (string & {});
+declare class CoreError extends Error {
+code: ErrorCodeOrString;
+constructor(code: ErrorCodeOrString, message: string);
+}
+type CoreErrorWire = {
+code: string;
+message: string;
+};
+type RuntimeTarget = 'web' | 'android' | 'ios' | 'bare';
+type Either<E, A> = [E, null] | [null, A];
+type DispatchEnvelope<TEvent extends string = string, TArgs extends Record<string, unknown> = Record<string, unknown>> = {
+kind: 'dispatch';
+pluginId: string;
+event: TEvent;
+args: TArgs;
+payload?: Uint8Array | ArrayBuffer | string | null;
+};
+type InvokeEnvelope<TEvent extends string = string, TArgs extends Record<string, unknown> = Record<string, unknown>, TResult = unknown> = {
+kind: 'invoke';
+pluginId: string;
+event: TEvent;
+args: TArgs;
+payload?: Uint8Array | ArrayBuffer | string | null;
+timeoutMs?: number;
+__result?: TResult;
+};
+type PluginInvokeRequestHeader = HeaderBase & {
+type: 'INVOKE_REQUEST';
+pluginId: string;
+event: string;
+args?: Record<string, unknown>;
+};
+type PluginInvokeResponseHeader = HeaderBase & {
+type: 'INVOKE_RESPONSE';
+pluginId: string;
+event: string;
+result?: unknown;
+error?: CoreErrorWire;
+};
+type PluginDispatchHeader = HeaderBase & {
+type: 'DISPATCH';
+pluginId: string;
+event: string;
+args?: Record<string, unknown>;
+};
+type PluginHeader = PluginInvokeRequestHeader | PluginInvokeResponseHeader | PluginDispatchHeader;
+type HostCapabilitiesQueryHeader = {
+type: 'HOST_CAPABILITIES_QUERY';
+requestId: string;
+};
+type HostCapabilitiesResponseHeader = {
+type: 'HOST_CAPABILITIES_RESPONSE';
+requestId: string;
+capabilities: CapabilityDescriptor[];
+error?: CoreErrorWire;
+};
+type HostInvokeRequestHeader = {
+type: 'HOST_INVOKE_REQUEST';
+requestId: string;
+pluginId: string;
+event: string;
+args?: Record<string, unknown>;
+};
+type HostInvokeResponseHeader = {
+type: 'HOST_INVOKE_RESPONSE';
+requestId: string;
+pluginId: string;
+event: string;
+result?: unknown;
+error?: CoreErrorWire;
+};
+type CapabilityDescriptor = {
+pluginId: string;
+capabilities: string[];
+events: string[];
+runtimes: RuntimeTarget[];
+};
+type MessageHeader = PluginHeader | HostCapabilitiesQueryHeader | HostCapabilitiesResponseHeader | HostInvokeRequestHeader | HostInvokeResponseHeader;
+interface PluginContext {
+runtime: RuntimeTarget;
+payload: Uint8Array;
+sender?: {
+pluginId: string;
+};
+}
+interface PluginRuntimeAdapter {
+dispatch?: (event: string, args: Record<string, unknown> | undefined, context: PluginContext) => void | Promise<void>;
+invoke?: (event: string, args: Record<string, unknown> | undefined, context: PluginContext) => Either<CoreError, unknown> | Promise<Either<CoreError, unknown>>;
+}
+interface PluginManifest {
+id: string;
+version?: string;
+capabilities?: string[];
+events?: string[];
+hostTimeoutsMs?: Readonly<Record<string, number>>;
+runtimes: Partial<Record<RuntimeTarget, PluginRuntimeAdapter>>;
+}
+export { CapabilityDescriptor, CoreError, CoreErrorWire, DispatchEnvelope, Either, ErrorCode, ErrorCodeOrString, HostCapabilitiesQueryHeader, HostCapabilitiesResponseHeader, HostInvokeRequestHeader, HostInvokeResponseHeader, InvokeEnvelope, MAX_FRAME_BYTES, MAX_HEADER_BYTES, MessageHeader, MessageType, MessageTypeValue, PluginContext, PluginDispatchHeader, PluginHeader, PluginInvokeRequestHeader, PluginInvokeResponseHeader, PluginManifest, PluginRuntimeAdapter, RuntimeTarget, VERSION, WireMessage };
