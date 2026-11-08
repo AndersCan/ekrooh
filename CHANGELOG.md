@@ -7,7 +7,9 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-**This release must be 0.7.0.** It changes behaviour at stability-contract
+## [0.7.0] - 2026-11-08
+
+This release changes behaviour at stability-contract
 boundaries (plugin id rules, error codes and messages, `FRAME_INVALID`
 handling, option meanings, Kotlin host behaviour), and in 0.x a breaking change
 bumps the minor version (as ADR 0006 did with 0.6.0).
