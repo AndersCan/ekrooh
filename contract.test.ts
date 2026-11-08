@@ -93,6 +93,7 @@ const EXPORT_KEYS = [
   './plugins/media/events',
   './plugins/logs/events',
   './transports',
+  './sync',
   './package.json',
 ];
 
