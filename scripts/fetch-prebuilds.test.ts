@@ -77,3 +77,61 @@ describe('fetch-prebuilds archive checks', () => {
     expect(() => mod.extractRoots(['../x'])).toThrow(/Bad extract/);
   });
 });
+
+describe('fetch-prebuilds download', () => {
+  const args = { repo: 'o/r', version: 'v1', assetName: 'a.zip' };
+  const direct = 'https://github.com/o/r/releases/download/v1/a.zip';
+  const api = 'https://api.github.com/repos/o/r/releases/tags/v1';
+  const assetApi = 'https://api.github.com/repos/o/r/releases/assets/7';
+  const bytes = (text: string) => ({
+    ok: true,
+    status: 200,
+    arrayBuffer: async () => new TextEncoder().encode(text).buffer,
+  });
+  const status = (code: number) => ({ ok: false, status: code });
+  const run = (answers: Record<string, unknown[]>) => {
+    const calls: string[] = [];
+    const fetchImpl = async (url: string) => {
+      calls.push(url);
+      const next = answers[url]?.shift();
+      if (next instanceof Error) throw next;
+      return next ?? status(404);
+    };
+    const result = mod.downloadAsset({
+      ...args,
+      fetchImpl,
+      sleep: async () => {},
+      log: () => {},
+    });
+    return { calls, result };
+  };
+
+  it('retries the download URL on 5xx and network errors', async () => {
+    const { calls, result } = run({
+      [direct]: [status(504), new Error('fetch failed'), bytes('zip')],
+    });
+    expect((await result).toString()).toBe('zip');
+    expect(calls).toEqual([direct, direct, direct]);
+  });
+
+  it('falls back to the API asset when the download URL keeps failing', async () => {
+    const { calls, result } = run({
+      [direct]: [status(504), status(504), status(504), status(504)],
+      [api]: [
+        bytes(JSON.stringify({ assets: [{ name: 'a.zip', url: assetApi }] })),
+      ],
+      [assetApi]: [bytes('zip')],
+    });
+    expect((await result).toString()).toBe('zip');
+    expect(calls.slice(-2)).toEqual([api, assetApi]);
+  });
+
+  it('does not retry a 404 and fails when the API has no such asset', async () => {
+    const { calls, result } = run({
+      [direct]: [status(404)],
+      [api]: [bytes(JSON.stringify({ assets: [] }))],
+    });
+    await expect(result).rejects.toThrow(/no asset a\.zip/);
+    expect(calls).toEqual([direct, api]);
+  });
+});
