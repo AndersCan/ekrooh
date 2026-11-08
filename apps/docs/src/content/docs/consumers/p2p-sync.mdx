@@ -17,6 +17,9 @@ import { createSync } from '@ekrooh/bare/sync';
 
 type Counts = Record<string, number>;
 
+declare const runtime: { config: { storage: string } };
+declare function refreshUi(): void;
+
 const [error, sync] = createSync<Counts>({
   storage: runtime.config.storage,
   parse: (raw) =>
