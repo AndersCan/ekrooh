@@ -8,7 +8,8 @@
  *   node scripts/fetch-prebuilds.mjs <version>  # must equal the lockfile version
  *
  * Needs only Node built-ins and `unzip`, and no token: the asset is fetched
- * from the public release download URL (so CI runs it with no credential).
+ * from the public release download URL (so CI runs it with no credential),
+ * with retries and a fallback to the public REST API asset endpoint.
  *
  * Supply-chain integrity (issue #55): `scripts/prebuilds.lock.json` is the
  * single source for the upstream `repo`, the pinned `version`, each release
@@ -102,6 +103,70 @@ export function findSymlinks(dir) {
   return out;
 }
 
+const RETRY_DELAYS_MS = [2000, 5000, 10000];
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** GET `url` as bytes; retries network errors and 5xx/429 answers. */
+async function fetchBytes(url, headers, { fetchImpl, sleep, log }) {
+  let lastError;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    if (attempt > 0) {
+      const ms = RETRY_DELAYS_MS[attempt - 1];
+      log(`  ${lastError.message}; retrying in ${ms / 1000} s`);
+      await sleep(ms);
+    }
+    let res;
+    try {
+      res = await fetchImpl(url, { headers });
+    } catch (err) {
+      lastError = new Error(`GET ${url} -> ${err.message}`);
+      continue;
+    }
+    if (res.ok) return Buffer.from(await res.arrayBuffer());
+    lastError = new Error(`GET ${url} -> HTTP ${res.status}`);
+    if (res.status < 500 && res.status !== 429) throw lastError;
+  }
+  throw lastError;
+}
+
+/**
+ * Download a release asset. The public download URL is tried first; if it
+ * keeps failing (github.com release downloads sometimes 504 from CI runners
+ * while the API serves the same file), the asset is fetched through the
+ * REST API instead. Either way the caller checks the SHA-256 pinned in
+ * the lockfile, so the source does not change what is trusted.
+ */
+export async function downloadAsset({
+  repo,
+  version,
+  assetName,
+  fetchImpl = fetch,
+  sleep = wait,
+  log = console.log,
+}) {
+  const io = { fetchImpl, sleep, log };
+  const url = `https://github.com/${repo}/releases/download/${version}/${assetName}`;
+  log(`Fetching ${url} ...`);
+  let directError;
+  try {
+    return await fetchBytes(url, {}, io);
+  } catch (err) {
+    directError = err;
+  }
+  const api = `https://api.github.com/repos/${repo}/releases/tags/${version}`;
+  log(`${directError.message}; trying the GitHub API (${api}) ...`);
+  const json = { Accept: 'application/vnd.github+json' };
+  const release = JSON.parse(
+    (await fetchBytes(api, json, io)).toString('utf8'),
+  );
+  const asset = (release.assets ?? []).find((a) => a.name === assetName);
+  if (!asset || typeof asset.url !== 'string') {
+    throw new Error(`Release ${version} of ${repo} has no asset ${assetName}`);
+  }
+  return fetchBytes(asset.url, { Accept: 'application/octet-stream' }, io);
+}
+
 /** Top-level directories named by `extract` patterns (`android/*` → android). */
 export function extractRoots(patterns) {
   const roots = patterns.map((p) => p.split('/')[0]);
@@ -148,11 +213,11 @@ async function main() {
       if (!/^[\w.-]+$/.test(assetName)) {
         throw new Error(`Bad asset name in prebuilds.lock.json: ${assetName}`);
       }
-      const url = `https://github.com/${lock.repo}/releases/download/${version}/${assetName}`;
-      console.log(`Fetching ${url} ...`);
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`GET ${url} -> HTTP ${res.status}`);
-      const bytes = Buffer.from(await res.arrayBuffer());
+      const bytes = await downloadAsset({
+        repo: lock.repo,
+        version,
+        assetName,
+      });
       const archive = path.join(tmp, assetName);
       writeFileSync(archive, bytes);
 
