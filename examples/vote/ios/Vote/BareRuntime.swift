@@ -45,7 +45,7 @@ final class BareRuntime {
   private static let devServerPort = 5173
   private static let devServerURL = "http://\(devServerHost):\(devServerPort)"
   private static let devBackendPort = 8082
-  // Public so the CI job can print which page the app loaded.
+  // Logged with `privacy: .public` so the CI job can print which page the app loaded.
   private static let log = Logger(subsystem: "com.example.vote", category: "dev")
   #endif
 
@@ -203,7 +203,7 @@ final class BareRuntime {
   private static func devServerAnswers() async -> Bool {
     guard let url = URL(string: "\(devServerURL)/@vite/client") else { return false }
     let configuration = URLSessionConfiguration.ephemeral
-    configuration.timeoutIntervalForRequest = 2
+    configuration.timeoutIntervalForRequest = 10
     let session = URLSession(configuration: configuration)
     return await withCheckedContinuation { continuation in
       session.dataTask(with: url) { _, response, error in
