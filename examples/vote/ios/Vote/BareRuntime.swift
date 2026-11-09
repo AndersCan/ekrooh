@@ -1,6 +1,7 @@
 import BareHost
 import BareKit
 import SafariServices
+import os
 import WebKit
 
 /// Owns the full host lifecycle: the Bare worklet, the IPC channel, the host
@@ -44,6 +45,8 @@ final class BareRuntime {
   private static let devServerPort = 5173
   private static let devServerURL = "http://\(devServerHost):\(devServerPort)"
   private static let devBackendPort = 8082
+  // Public so the CI job can print which page the app loaded.
+  private static let log = Logger(subsystem: "com.example.vote", category: "dev")
   #endif
 
   init() {
@@ -131,7 +134,9 @@ final class BareRuntime {
     #if DEBUG
     probeTask = Task { @MainActor in
       if Task.isCancelled { return }
-      if await Self.devServerAnswers() {
+      let answered = await Self.devServerAnswers()
+      Self.log.notice("vote page source: \(answered ? "vite" : "bundled", privacy: .public)")
+      if answered {
         startDev(webView: webView)
       } else {
         startBundled(webView: webView)
@@ -202,6 +207,9 @@ final class BareRuntime {
     let session = URLSession(configuration: configuration)
     return await withCheckedContinuation { continuation in
       session.dataTask(with: url) { _, response, error in
+        if let error {
+          Self.log.notice("dev server probe failed: \(error.localizedDescription, privacy: .public)")
+        }
         continuation.resume(
           returning: error == nil && (response as? HTTPURLResponse)?.statusCode == 200
         )

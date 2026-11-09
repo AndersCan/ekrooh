@@ -337,4 +337,5 @@ jobs:
               }
             ' "$f" || head -c 4000 "$f"
           done
+          xcrun simctl spawn booted log show --last 20m --style compact --predicate 'subsystem == "com.example.vote"' || true
           tail -60 "$RUNNER_TEMP/dev.log" || true
