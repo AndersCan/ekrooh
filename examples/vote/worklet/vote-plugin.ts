@@ -53,7 +53,7 @@ export function createVotePlugin(sync: Sync<Counts>) {
         if (!choices.some((c) => c.id === args.id)) {
           return err('app.vote/unknown-option', `No option "${args.id}"`);
         }
-        mine[args.id] = (mine[args.id] ?? 0) + 0;
+        mine[args.id] = (mine[args.id] ?? 0) + 1;
         const [error] = sync.publish({ ...mine });
         if (error) return err('app.vote/sync-failed', error.message);
         return ok(state());
