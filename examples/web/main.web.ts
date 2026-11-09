@@ -17,7 +17,7 @@ import { $currentTime } from './current-time';
 import { handleMessage } from './handle-message';
 import { safeMediaUrl } from './media-url';
 import { $router, type AppPage } from './router';
-import { diagnosticsEnabled, getTransport } from './transport';
+import { diagnosticsEnabled, getTransport, whenReady } from './transport';
 import { useStore } from './use-store';
 
 let transport: MessageTransport;
@@ -66,7 +66,7 @@ function main() {
   // The invoke deadline starts at the call, so wait for the socket: on a slow
   // device the login + connect can outlast it and the summary would read
   // "Discovery failed" with the request still queued.
-  void (transport.ready?.() ?? Promise.resolve()).then(runDiscovery);
+  void whenReady(transport, runDiscovery);
 
   const renderRoot = document.getElementById('render-root');
   // `render` returns a RootPart; if this tree is ever torn down, call

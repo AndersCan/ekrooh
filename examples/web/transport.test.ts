@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { getTransport } from './transport';
+import { getTransport, whenReady } from './transport';
 
 describe('getTransport', () => {
   it('throws in production when mock mode is requested (mock must not ship)', async () => {
@@ -38,5 +38,31 @@ describe('diagnosticsEnabled (adv-E-1)', () => {
       false,
     );
     expect(diagnosticsEnabled({ PROD: true, DEV: false })).toBe(false);
+  });
+});
+
+describe('whenReady', () => {
+  it('starts only after the transport is ready', async () => {
+    let open!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const calls: string[] = [];
+    const done = whenReady({ ready: () => ready }, () => {
+      calls.push('start');
+    });
+    await Promise.resolve();
+    expect(calls).toEqual([]);
+    open();
+    await done;
+    expect(calls).toEqual(['start']);
+  });
+
+  it('starts at once when the transport has no ready()', async () => {
+    const calls: string[] = [];
+    await whenReady({}, () => {
+      calls.push('start');
+    });
+    expect(calls).toEqual(['start']);
   });
 });
