@@ -9,5 +9,7 @@ import {
  * Vite, so point at the dev backend (scripts/dev.mjs starts it on 8080).
  */
 export const transport: MessageTransport = createWebSocketTransport(
-  import.meta.env.DEV ? { url: 'ws://localhost:8080' } : {},
+  import.meta.env.DEV
+    ? { url: `ws://localhost:${import.meta.env.VITE_BACKEND_PORT ?? 8080}` }
+    : {},
 );

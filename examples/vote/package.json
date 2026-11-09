@@ -8,12 +8,13 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:second": "node scripts/dev.mjs --second",
     "build": "vite build",
     "sync": "node scripts/sync.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ekrooh/bare": "0.6.1"
+    "@ekrooh/bare": "0.7.0"
   },
   "devDependencies": {
     "bare-link": "^3.3.0",

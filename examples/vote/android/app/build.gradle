@@ -50,6 +50,6 @@ tasks.register("checkSynced") {
 preBuild.dependsOn "checkSynced"
 
 dependencies {
-  implementation "io.github.anderscan.ekrooh:bare-host:0.6.1"
+  implementation "io.github.anderscan.ekrooh:bare-host:0.7.0"
   implementation "androidx.appcompat:appcompat:1.8.0"
 }

@@ -1,11 +1,14 @@
 import {
+  type CoreError,
+  type Either,
   MessageType,
   createPluginBus,
   createProtocolMessenger,
 } from '@ekrooh/bare/core';
-import { render, type View } from './render';
+import { createJoinWait } from './join-wait';
+import { pageView, render } from './render';
 import { transport } from './transport';
-import { voteEvents } from './vote-events';
+import { type VoteState, voteEvents } from './vote-events';
 
 const messenger = createProtocolMessenger((request, payload) => {
   transport.send(MessageType.ENVELOPE, request, payload);
@@ -19,27 +22,46 @@ const root = document.getElementById('app');
 if (!root) throw new Error('index.html needs <div id="app">');
 const app = root;
 
-function show(view: View) {
-  render(app, view, { vote });
+let state: VoteState | undefined;
+let message = '';
+const joinWait = createJoinWait();
+
+function show() {
+  const view = pageView(state, message, joinWait);
+  render(app, view, { vote, join });
 }
 
-async function load() {
-  const [err, result] = await bus.invoke(voteEvents.list());
-  if (err || !result) {
-    console.error('vote.list failed', err);
-    return;
-  }
-  show({ kind: 'ready', options: result.options });
+/** An action's failure shows its message; its result updates the page. */
+async function act(
+  call: Promise<Either<CoreError, VoteState>>,
+): Promise<boolean> {
+  const [error, result] = await call;
+  message =
+    error || !result
+      ? (error?.message ?? 'Something went wrong. Try again.')
+      : '';
+  if (result) state = result;
+  show();
+  return !error && !!result;
 }
 
-async function vote(id: string) {
-  const [err, result] = await bus.invoke(voteEvents.cast(id));
-  if (err || !result) {
-    console.error('vote.cast failed', err);
-    return;
-  }
-  show({ kind: 'ready', options: result.options });
+/** The once-a-second poll updates the counts but leaves any message alone. */
+async function refresh() {
+  const [error, result] = await bus.invoke(voteEvents.list());
+  if (error || !result) return;
+  state = result;
+  show();
 }
 
-show({ kind: 'loading' });
-void load();
+const vote = (id: string) => act(bus.invoke(voteEvents.cast(id)));
+const join = async (code: string) => {
+  const ok = await act(bus.invoke(voteEvents.join(code)));
+  joinWait.joined(ok);
+  show();
+  return ok;
+};
+
+show();
+void refresh();
+// Votes from other devices arrive in the backend; ask for them once a second.
+setInterval(() => void refresh(), 1000);

@@ -13,16 +13,29 @@ npx degit AndersCan/ekrooh/examples/vote my-app && cd my-app && npm install && n
 
 You should see `vote ready: http://localhost:5173 ...`. Open it: three buttons, Tea (0), Coffee (0), Water (0). Click one and its count goes up.
 
+## Vote from two devices
+
+Votes are shared over p2p (`@ekrooh/bare/sync`). Each device counts its own votes and the page shows the sum.
+
+1. On one device, open the page and copy the invite code.
+2. On the other device, paste it in the box and press Join. The status line says "1 other device connected".
+3. Vote on either: the count goes up on both.
+
+On one computer, run `npm run dev:second` in a second terminal and open http://localhost:5174 as the second device.
+
+Votes start from zero when the app restarts. If the status still says "Looking for the other device" after a minute, wait a little, then restart both apps: the first connection over the public network can be slow. A device that crashed can still show as connected until it comes back.
+
 ## Change the page
 
 Edit `src/render.ts`. The browser reloads on save.
 
-| File                 | What it is                                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------------------------ |
-| `src/render.ts`      | What you see                                                                                           |
-| `src/main.ts`        | Connects the page to the app backend                                                                   |
-| `src/vote-events.ts` | The messages                                                                                           |
-| `worklet/`           | The app backend. It runs in Node's sibling runtime Bare on your computer and inside the app on a phone |
+| File                     | What it is                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `src/render.ts`          | What you see                                                                                           |
+| `src/main.ts`            | Connects the page to the app backend                                                                   |
+| `src/vote-events.ts`     | The messages                                                                                           |
+| `worklet/vote-plugin.ts` | Counts votes and shares them with `createSync`                                                         |
+| `worklet/`               | The app backend. It runs in Node's sibling runtime Bare on your computer and inside the app on a phone |
 
 ## Run on Android
 
