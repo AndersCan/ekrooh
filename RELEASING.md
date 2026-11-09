@@ -171,4 +171,5 @@ entry points at compiled `dist/` output.
    `framework:` entries in `ios/project.yml`, run `xcodegen generate`, and commit the
    regenerated `ios/Vote.xcodeproj`.
 4. Open a PR titled `chore: bump examples/vote to vX.Y.Z`. The Starter workflow builds
-   web, Android and iOS from the published packages.
+   Android and iOS from the published packages; on pull requests its web job runs on
+   the PR's own `@ekrooh/bare`, and on `main` on the published one.

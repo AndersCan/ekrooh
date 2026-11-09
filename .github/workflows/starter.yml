@@ -3,13 +3,24 @@ on:
   push:
     branches:
       - main
-    paths: &starter_paths
+    paths:
       - 'examples/vote/**'
       - .github/workflows/starter.yml
+      - .github/scripts/starter-vote-journey.mjs
   pull_request:
     branches:
       - main
-    paths: *starter_paths
+    paths:
+      - 'examples/vote/**'
+      - .github/workflows/starter.yml
+      - .github/scripts/starter-vote-journey.mjs
+      # The web job installs this PR's @ekrooh/bare, so package changes run it too.
+      - 'core/**'
+      - 'plugins/**'
+      - 'web/**'
+      - package.json
+      - package-lock.json
+      - vite.config.js
   workflow_dispatch:
 
 permissions:
@@ -19,9 +30,33 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# The starter is copied out of the repo (degit on main, cp on pull requests)
-# and built from the published npm package and Maven Central AAR, with no token.
+# The starter is copied out of the repo (degit on main, cp on pull requests).
+# Pull requests install the PR's packed @ekrooh/bare in the web job; main and the
+# Android/iOS jobs use the published npm package and Maven Central AAR, with no token.
 jobs:
+  changes:
+    name: Starter / changes
+    runs-on: ubuntu-latest
+    outputs:
+      starter: ${{ steps.diff.outputs.starter }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: diff
+        id: diff
+        # Android and iOS test only the published package: skip them when a pull
+        # request leaves the starter alone. Any git error falls through to true.
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] \
+            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml; then
+            echo "starter=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "starter=true" >> "$GITHUB_OUTPUT"
+          fi
+
   web:
     name: Starter / web
     runs-on: ubuntu-latest
@@ -30,6 +65,26 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Node for the repo (Playwright, packing)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install the repo
+        run: npm ci
+
+      - name: Pack this PR's @ekrooh/bare
+        if: github.event_name == 'pull_request'
+        run: |
+          # npm 11.20's `npm pack` crashes here (Cannot read properties of null (reading 'edgesOut')), so pack with npm 10.
+          npx --yes npm@10.9.9 pack --pack-destination "$RUNNER_TEMP"
+          echo "EKROOH_TARBALL=$(ls "$RUNNER_TEMP"/ekrooh-bare-*.tgz)" >> "$GITHUB_ENV"
+
+      - name: Install Playwright Chromium
+        run: npm run playwright:install -- --with-deps
+
+      # The starter runs on its Node floor.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 20.19.0
@@ -47,26 +102,22 @@ jobs:
         run: |
           cd "$STARTER_DIR"
           npm ci
+          if [ -n "${EKROOH_TARBALL:-}" ]; then
+            npm install --no-save "$EKROOH_TARBALL"
+            diff -rq "$GITHUB_WORKSPACE/dist" node_modules/@ekrooh/bare/dist \
+              || { echo "the starter is not using this PR's @ekrooh/bare" >&2; exit 1; }
+          fi
           npm run typecheck
           npm run build
 
-      - name: Dev server answers
-        run: |
-          cd "$STARTER_DIR"
-          npm run dev > dev.log 2>&1 &
-          for i in $(seq 1 60); do
-            if curl -sf http://localhost:5173 > /dev/null; then
-              echo "dev server is up"
-              exit 0
-            fi
-            sleep 1
-          done
-          cat dev.log
-          echo "npm run dev did not answer on http://localhost:5173" >&2
-          exit 1
+      - name: Two devices vote
+        timeout-minutes: 6
+        run: node .github/scripts/starter-vote-journey.mjs "$STARTER_DIR"
 
   android:
     name: Starter / android
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.starter != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -123,6 +174,8 @@ jobs:
 
   ios:
     name: Starter / ios
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.starter != 'false' }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
