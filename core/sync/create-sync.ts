@@ -18,6 +18,6 @@ export function createSync<T>(
 ): Either<CoreError, Sync<T>> {
   return createSyncWith(options, {
     createSwarm: (seed) =>
-      new Hyperswarm({ seed, maxPeers: 16 }) as unknown as SwarmPort,
+      new Hyperswarm({ seed, maxPeers: 0 }) as unknown as SwarmPort,
   });
 }
