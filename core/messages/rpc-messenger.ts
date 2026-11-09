@@ -226,14 +226,18 @@ async function serverLogTail(): Promise<string | null> {
     return null;
   }
   try {
-    const response = await Promise.race([
-      fetch('/logs?tail=50&format=text'),
+    // The deadline covers the body read too: a `/logs` response that sends
+    // headers and then stalls would otherwise leave the invoke promise (and,
+    // through the shared in-flight fetch, every later timeout) pending forever.
+    const text = await Promise.race([
+      fetch('/logs?tail=50&format=text').then((response) =>
+        response.ok ? response.text() : null,
+      ),
       new Promise<null>((resolve) =>
         setTimeout(() => resolve(null), INVOKE_TAIL_TIMEOUT_MS),
       ),
     ]);
-    if (response === null || !response.ok) return null;
-    const text = await response.text();
+    if (text === null) return null;
     const lines = text
       .split('\n')
       .map((line) => line.trim())
