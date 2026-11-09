@@ -303,6 +303,52 @@ describe('createWebSocketTransport messaging', () => {
     expect(socket.sent).toHaveLength(1);
   });
 
+  it('ready() waits for the socket to open, then resolves at once', async () => {
+    const transport = createWebSocketTransport('ws://test');
+    await nextTick();
+    let ready = false;
+    void transport.ready?.().then(() => {
+      ready = true;
+    });
+    await nextTick();
+    expect(ready).toBe(false);
+
+    lastSocket().open();
+    await nextTick();
+    expect(ready).toBe(true);
+    await expect(transport.ready?.()).resolves.toBeUndefined();
+  });
+
+  it('ready() resolves when the transport gives up, so callers see the error', async () => {
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+      minBootWindowMs: 0,
+    });
+    await nextTick();
+    let ready = false;
+    void transport.ready?.().then(() => {
+      ready = true;
+    });
+    lastSocket().close();
+    await vi.waitFor(() => {
+      expect(ready).toBe(true);
+    });
+  });
+
+  it('ready() resolves when the transport is closed', async () => {
+    const transport = createWebSocketTransport('ws://test');
+    await nextTick();
+    let ready = false;
+    void transport.ready?.().then(() => {
+      ready = true;
+    });
+    transport.close?.();
+    await nextTick();
+    expect(ready).toBe(true);
+    await expect(transport.ready?.()).resolves.toBeUndefined();
+  });
+
   it('delivers decoded frames to subscribers', async () => {
     const transport = createWebSocketTransport('ws://test');
     await nextTick();

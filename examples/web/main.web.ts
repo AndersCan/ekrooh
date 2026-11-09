@@ -63,7 +63,10 @@ function main() {
     $router.open('/', true);
   }
 
-  void runDiscovery();
+  // The invoke deadline starts at the call, so wait for the socket: on a slow
+  // device the login + connect can outlast it and the summary would read
+  // "Discovery failed" with the request still queued.
+  void (transport.ready?.() ?? Promise.resolve()).then(runDiscovery);
 
   const renderRoot = document.getElementById('render-root');
   // `render` returns a RootPart; if this tree is ever torn down, call
