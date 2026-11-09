@@ -265,6 +265,67 @@ describe('createProtocolMessenger', () => {
     }
   });
 
+  it('rejects the timeout even when the log body never arrives', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('window', { location: { host: '127.0.0.1:4321' } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        text: () => new Promise<string>(() => {}),
+      })),
+    );
+    try {
+      const messenger = createProtocolMessenger(vi.fn(), { diagnostics: true });
+      const promise = messenger.invoke(
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          args: {},
+        },
+        null,
+        1000,
+      );
+      const assertion = expect(promise).rejects.toThrow(
+        /^invoke timeout[^;]*$/,
+      );
+      await vi.advanceTimersByTimeAsync(3500);
+      await assertion;
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('leaves the timeout bare when the log route answers not ok', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('window', { location: { host: '127.0.0.1:4321' } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, text: async () => 'not found' })),
+    );
+    try {
+      const messenger = createProtocolMessenger(vi.fn(), { diagnostics: true });
+      const promise = messenger.invoke(
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          args: {},
+        },
+        null,
+        1000,
+      );
+      const assertion = expect(promise).rejects.toThrow(
+        /^invoke timeout[^;]*$/,
+      );
+      await vi.advanceTimersByTimeAsync(1001);
+      await assertion;
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('does not delay a timeout rejection when no tail is available', async () => {
     vi.useFakeTimers();
     const messenger = createProtocolMessenger(vi.fn());
