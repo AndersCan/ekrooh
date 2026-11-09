@@ -305,7 +305,7 @@ jobs:
           trap 'kill $dev 2>/dev/null || true' EXIT
           ready=
           for _ in $(seq 300); do
-            if grep -q 'vote ready:' "$RUNNER_TEMP/dev.log"; then ready=1; break; fi
+            if grep -q 'vote ready:' "$RUNNER_TEMP/dev.log" && grep -q 'backend ready on http://127.0.0.1:8080' "$RUNNER_TEMP/dev.log"; then ready=1; break; fi
             kill -0 $dev || { cat "$RUNNER_TEMP/dev.log"; exit 1; }
             sleep 1
           done
@@ -313,7 +313,7 @@ jobs:
           # Only the app's own backend (8082) may serve the page: stop the
           # computer's 8080 backend so a page that ignores ?backend= stays on
           # "Connecting…" and the test fails.
-          kill $(lsof -tiTCP:8080 -sTCP:LISTEN) || true
+          kill $(lsof -tiTCP:8080 -sTCP:LISTEN)
           cd ios
           TEST_RUNNER_VOTE_RENDER_TS="$STARTER_DIR/src/render.ts" \
             xcodebuild test-without-building -project VoteReload.xcodeproj -scheme VoteReload \

@@ -1,5 +1,5 @@
 import { expect, test } from 'vite-plus/test';
-import { backendPort } from './backend-port';
+import { backendPort } from './src/backend-port';
 
 test('uses the port from ?backend=', () => {
   expect(backendPort('?backend=8082', 8080)).toBe('8082');
