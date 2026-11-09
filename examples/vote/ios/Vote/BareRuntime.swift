@@ -37,7 +37,9 @@ final class BareRuntime {
   // With `npm run dev` running, the debug app loads the page from Vite and runs
   // its backend in dev mode. The page port must match scripts/dev.mjs; the
   // backend port must stay free of the Mac's dev backends (8080, 8081).
-  private static let devServerURL = "http://127.0.0.1:5173"
+  private static let devServerHost = "127.0.0.1"
+  private static let devServerPort = 5173
+  private static let devServerURL = "http://\(devServerHost):\(devServerPort)"
   private static let devBackendPort = 8082
   #endif
 
@@ -181,8 +183,8 @@ final class BareRuntime {
         "mode=dev", "port=\(Self.devBackendPort)", "origin=\(Self.devServerURL)",
       ])
     else { return }
-    navigationDelegate?.allowedHost = "127.0.0.1"
-    navigationDelegate?.allowedPort = 5173
+    navigationDelegate?.allowedHost = Self.devServerHost
+    navigationDelegate?.allowedPort = Self.devServerPort
     if let url = URL(string: "\(Self.devServerURL)/?backend=\(Self.devBackendPort)") {
       webView.load(URLRequest(url: url))
     }
