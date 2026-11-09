@@ -9,6 +9,7 @@ on:
       - .github/scripts/starter-vote-journey.mjs
       - .github/scripts/starter-android-reload.mjs
       - .github/scripts/starter-android-attach.mjs
+      - '.github/scripts/starter-ios-reload/**'
   pull_request:
     branches:
       - main
@@ -18,6 +19,7 @@ on:
       - .github/scripts/starter-vote-journey.mjs
       - .github/scripts/starter-android-reload.mjs
       - .github/scripts/starter-android-attach.mjs
+      - '.github/scripts/starter-ios-reload/**'
       # The web job installs this PR's @ekrooh/bare, so package changes run it too.
       - 'core/**'
       - 'plugins/**'
@@ -55,7 +57,7 @@ jobs:
         # request leaves the starter alone. Any git error falls through to true.
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ] \
-            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml .github/scripts/starter-android-reload.mjs; then
+            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml .github/scripts/starter-android-reload.mjs .github/scripts/starter-ios-reload; then
             echo "starter=false" >> "$GITHUB_OUTPUT"
           else
             echo "starter=true" >> "$GITHUB_OUTPUT"
@@ -280,3 +282,31 @@ jobs:
           cd "$STARTER_DIR"
           xcodebuild -project ios/Vote.xcodeproj -scheme Vote -configuration Debug \
             -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Edit render.ts, wait for the Simulator to reload
+        run: |
+          cd "$STARTER_DIR/ios"
+          cp "$GITHUB_WORKSPACE/.github/scripts/starter-ios-reload/project.yml" reload-ci.yml
+          mkdir ReloadUITests
+          cp "$GITHUB_WORKSPACE/.github/scripts/starter-ios-reload/ReloadUITests.swift" ReloadUITests/
+          xcodegen generate --spec reload-ci.yml
+          udid=$(xcrun simctl list devices available --json | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8")).devices;console.log(Object.values(d).flat().find(x=>x.name.startsWith("iPhone")).udid)')
+          xcrun simctl boot "$udid" || true
+          xcrun simctl bootstatus "$udid" -b
+          xcodebuild build-for-testing -project VoteReload.xcodeproj -scheme VoteReload \
+            -destination "id=$udid" -quiet
+          cd ..
+          node scripts/dev.mjs > "$RUNNER_TEMP/dev.log" 2>&1 &
+          dev=$!
+          trap 'kill $dev 2>/dev/null || true' EXIT
+          until grep -q 'vote ready:' "$RUNNER_TEMP/dev.log"; do
+            kill -0 $dev || { cat "$RUNNER_TEMP/dev.log"; exit 1; }
+            sleep 1
+          done
+          cd ios
+          TEST_RUNNER_VOTE_RENDER_TS="$STARTER_DIR/src/render.ts" \
+            xcodebuild test-without-building -project VoteReload.xcodeproj -scheme VoteReload \
+            -destination "id=$udid" || { tail -60 "$RUNNER_TEMP/dev.log"; exit 1; }

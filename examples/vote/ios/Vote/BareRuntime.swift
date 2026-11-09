@@ -10,6 +10,10 @@ final class BareRuntime {
   private var ipc: IPC?
   private var coordinator: HostIpcCoordinator?
   private var handoffTask: Task<Void, Never>?
+  private var probeTask: Task<Void, Never>?
+  private var webAssetsPath = ""
+  private var storagePath = ""
+  private var cachePath = ""
   private var attached = false
   private var terminated = false
   private var ready = true
@@ -27,6 +31,14 @@ final class BareRuntime {
     ? UserDefaults.standard.double(forKey: "ekroohHandoffTimeoutSeconds") : 45
   #else
   private static let handoffTimeout: TimeInterval = 15
+  #endif
+
+  #if DEBUG
+  // With `npm run dev` running, the debug app loads the page from Vite and runs
+  // its backend in dev mode. The page port must match scripts/dev.mjs; the
+  // backend port must stay free of the Mac's dev backends (8080, 8081).
+  private static let devServerURL = "http://127.0.0.1:5173"
+  private static let devBackendPort = 8082
   #endif
 
   init() {
@@ -91,28 +103,10 @@ final class BareRuntime {
       ready = false
       return
     }
-    worklet.start(
-      name: "main.core",
-      ofType: "bundle",
-      inBundle: .main,
-      // On-device argv contract: [webAssets, storage, cache] (see
-      // `resolveWorkletConfig()`). All three must be directories; a
-      // missing/absent cache falls back to storage with a warning, so pass a
-      // real cache dir to keep boots quiet.
-      arguments: [webAssetsURL.path, storageDir.path, bareCacheDir.path]
-    )
     self.worklet = worklet
-
-    do {
-      self.ipc = try IPC(worklet: worklet)
-    } catch {
-      BareHostLogger.log("Failed to initialize Bare IPC")
-      worklet.terminate()
-      self.worklet = nil
-      self.ipc = nil
-      ready = false
-      return
-    }
+    self.webAssetsPath = webAssetsURL.path
+    self.storagePath = storageDir.path
+    self.cachePath = bareCacheDir.path
   }
 
   /// Attaches the web layer once the WKWebView exists. The coordinator handles
@@ -120,7 +114,7 @@ final class BareRuntime {
   /// over the loopback WebSocket socket. Also installs a navigation delegate
   /// that confines the WebView to the loopback origin.
   func attach(webView: WKWebView) {
-    guard let ipc, attached == false, ready else { return }
+    guard worklet != nil, attached == false, ready else { return }
     attached = true
 
     let navDelegate = BareNavigationDelegate()
@@ -129,14 +123,86 @@ final class BareRuntime {
     self.webView = webView
     webView.navigationDelegate = navDelegate
 
+    #if DEBUG
+    probeTask = Task { @MainActor in
+      if Task.isCancelled { return }
+      if await Self.devServerAnswers() {
+        startDev(webView: webView)
+      } else {
+        startBundled(webView: webView)
+      }
+    }
+    #else
+    startBundled(webView: webView)
+    #endif
+  }
+
+  /// Starts the worklet, the IPC channel and the host plugin coordinator.
+  /// Returns false (and leaves no worklet) when the IPC channel cannot start.
+  private func startWorklet(_ arguments: [String]) -> Bool {
+    guard let worklet else { return false }
+    worklet.start(
+      name: "main.core",
+      ofType: "bundle",
+      inBundle: .main,
+      arguments: arguments
+    )
+    do {
+      self.ipc = try IPC(worklet: worklet)
+    } catch {
+      BareHostLogger.log("Failed to initialize Bare IPC")
+      worklet.terminate()
+      self.worklet = nil
+      self.ipc = nil
+      return false
+    }
+    guard let ipc else { return false }
     let hostPlugins = HostPluginRegistry()
     registerDefaultHostPlugins(hostPlugins)
-
     coordinator = HostIpcCoordinator(ipc: ipc, hostPlugins: hostPlugins)
     coordinator?.start()
+    return true
+  }
 
+  private func startBundled(webView: WKWebView) {
+    // On-device argv contract: [webAssets, storage, cache] (see
+    // `resolveWorkletConfig()`). All three must be directories; a
+    // missing/absent cache falls back to storage with a warning, so pass a
+    // real cache dir to keep boots quiet.
+    guard startWorklet([webAssetsPath, storagePath, cachePath]) else { return }
     waitForHandoffAndLoad(webView: webView)
   }
+
+  #if DEBUG
+  private func startDev(webView: WKWebView) {
+    guard
+      startWorklet([
+        "webassets=\(webAssetsPath)", "storage=\(storagePath)", "cache=\(cachePath)",
+        "mode=dev", "port=\(Self.devBackendPort)", "origin=\(Self.devServerURL)",
+      ])
+    else { return }
+    navigationDelegate?.allowedHost = "127.0.0.1"
+    navigationDelegate?.allowedPort = 5173
+    if let url = URL(string: "\(Self.devServerURL)/?backend=\(Self.devBackendPort)") {
+      webView.load(URLRequest(url: url))
+    }
+  }
+
+  /// True when `npm run dev` answers on the dev server URL.
+  private static func devServerAnswers() async -> Bool {
+    guard let url = URL(string: "\(devServerURL)/@vite/client") else { return false }
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.timeoutIntervalForRequest = 2
+    let session = URLSession(configuration: configuration)
+    return await withCheckedContinuation { continuation in
+      session.dataTask(with: url) { _, response, error in
+        continuation.resume(
+          returning: error == nil && (response as? HTTPURLResponse)?.statusCode == 200
+        )
+      }.resume()
+    }
+  }
+  #endif
 
   /// Polls the worklet's `handoff.json` (written once the loopback server is
   /// up), injects the one-time bootstrap nonce + shell marker, then loads the
@@ -227,6 +293,8 @@ final class BareRuntime {
     terminated = true
     handoffTask?.cancel()
     handoffTask = nil
+    probeTask?.cancel()
+    probeTask = nil
     coordinator = nil
     // `close()` is asynchronous on the IPC actor; capture the reference so the
     // in-flight read loop observes the close instead of a torn-down channel.
