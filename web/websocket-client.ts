@@ -165,6 +165,12 @@ export interface MessageTransport {
    * `TRANSPORT_ERROR`. Later sends fail the same way. Optional so existing
    * custom transports still satisfy the interface. */
   close?(): void;
+  /** Resolves once the transport is open, or has stopped trying (gave up,
+   * closed, replaced). A request's timeout starts when the caller invokes, so
+   * a request queued behind a slow connect can time out before it was ever
+   * sent; awaiting this first starts that clock at the socket. Optional so
+   * existing custom transports still satisfy the interface. */
+  ready?(): Promise<void>;
 }
 
 export function createWebSocketTransport(
@@ -188,6 +194,10 @@ export function createWebSocketTransport(
     credential.length > 0;
 
   const listeners = new Set<(message: WireMessage) => void>();
+  const readyWaiters: Array<() => void> = [];
+  const releaseReady = () => {
+    for (const release of readyWaiters.splice(0)) release();
+  };
   const queued: QueuedMessage[] = [];
   let socket: WebSocket | null = null;
   /** Invokes sent on the current socket and not yet answered, by requestId.
@@ -312,6 +322,7 @@ export function createWebSocketTransport(
       if (socket !== current) return;
       machine.sendOpen();
       flushQueued();
+      releaseReady();
     };
 
     current.onmessage = (event) => {
@@ -356,6 +367,9 @@ export function createWebSocketTransport(
   // The machine drives the shell: entering `opening` means a socket should
   // exist (first connect, or a retry after backoff); `gaveUp` fails the queue.
   machine.onChange((state) => {
+    if (state === 'gaveUp' || state === 'closed' || machine.isReplaced()) {
+      releaseReady();
+    }
     // Leaving `opening`/`connected` without the socket's own close (open
     // timeout, a stale socket on foreground, close()) still loses it.
     if (state !== 'opening' && state !== 'connected' && socket) {
@@ -524,6 +538,19 @@ export function createWebSocketTransport(
       // still owes its callers an answer.
       dropSocket(CLOSED_MESSAGE);
       failQueuedMessages(CLOSED_MESSAGE);
+    },
+    ready() {
+      if (
+        closed ||
+        machine.isGaveUp() ||
+        machine.isReplaced() ||
+        (machine.isConnected() && socket?.readyState === WebSocket.OPEN)
+      ) {
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        readyWaiters.push(resolve);
+      });
     },
     subscribe(handler) {
       listeners.add(handler);

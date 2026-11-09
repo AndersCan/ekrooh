@@ -19,7 +19,7 @@ class FakeWebSocket {
   binaryType = '';
   readyState: number = FakeWebSocket.CONNECTING;
   onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event?: { code?: number }) => void) | null = null;
   onerror: (() => void) | null = null;
   onmessage: ((event: { data?: Uint8Array | ArrayBuffer }) => void) | null =
     null;
@@ -40,9 +40,9 @@ class FakeWebSocket {
     this.onopen?.();
   }
 
-  close(): void {
+  close(code?: number): void {
     this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.();
+    this.onclose?.(code === undefined ? undefined : { code });
   }
 
   message(data: Uint8Array | ArrayBuffer): void {
@@ -301,6 +301,95 @@ describe('createWebSocketTransport messaging', () => {
 
     socket.open();
     expect(socket.sent).toHaveLength(1);
+  });
+
+  it('ready() waits for the socket to open, then resolves at once', async () => {
+    const transport = createWebSocketTransport('ws://test');
+    await nextTick();
+    let ready = false;
+    void transport.ready?.().then(() => {
+      ready = true;
+    });
+    await nextTick();
+    expect(ready).toBe(false);
+
+    lastSocket().open();
+    await nextTick();
+    expect(ready).toBe(true);
+    await expect(transport.ready?.()).resolves.toBeUndefined();
+  });
+
+  it('ready() resolves when the transport gives up, so callers see the error', async () => {
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+      minBootWindowMs: 0,
+    });
+    await nextTick();
+    let ready = false;
+    void transport.ready?.().then(() => {
+      ready = true;
+    });
+    lastSocket().close();
+    await vi.waitFor(() => {
+      expect(ready).toBe(true);
+    });
+  });
+
+  it('ready() resolves when the transport is closed', async () => {
+    const transport = createWebSocketTransport('ws://test');
+    await nextTick();
+    let ready = false;
+    void transport.ready?.().then(() => {
+      ready = true;
+    });
+    transport.close?.();
+    await nextTick();
+    expect(ready).toBe(true);
+    await expect(transport.ready?.()).resolves.toBeUndefined();
+  });
+
+  it('ready() keeps waiting while connected but the socket is not open, then resolves when replaced', async () => {
+    const transport = createWebSocketTransport('ws://test');
+    await nextTick();
+    const socket = lastSocket();
+    socket.open();
+    await nextTick();
+    socket.readyState = 2; // CLOSING: the machine still says connected
+    let ready = false;
+    void transport.ready?.().then(() => {
+      ready = true;
+    });
+    await nextTick();
+    expect(ready).toBe(false);
+
+    socket.close(4001);
+    await nextTick();
+    expect(ready).toBe(true);
+  });
+
+  it('ready() resolves at once after a give-up', async () => {
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+      minBootWindowMs: 0,
+    });
+    await nextTick();
+    lastSocket().close();
+    await nextTick();
+    await nextTick();
+    await expect(transport.ready?.()).resolves.toBeUndefined();
+  });
+
+  it('ready() resolves at once when the connection was replaced', async () => {
+    const transport = createWebSocketTransport('ws://test');
+    await nextTick();
+    const socket = lastSocket();
+    socket.open();
+    await nextTick();
+    socket.close(4001);
+    await nextTick();
+    await expect(transport.ready?.()).resolves.toBeUndefined();
   });
 
   it('delivers decoded frames to subscribers', async () => {

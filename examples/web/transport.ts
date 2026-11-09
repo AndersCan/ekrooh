@@ -20,6 +20,16 @@ export function diagnosticsEnabled(
   return env?.VITE_BARE_DIAGNOSTICS === 'true' || env?.DEV === true;
 }
 
+/** Run `start` once the transport is open (or gave up). The invoke deadline
+ * starts at the call, so a call made before the socket opens can time out
+ * while still queued. Transports without `ready` (mock) start at once. */
+export function whenReady(
+  transport: Pick<MessageTransport, 'ready'>,
+  start: () => void | Promise<void>,
+): Promise<void> {
+  return (transport.ready?.() ?? Promise.resolve()).then(start);
+}
+
 export async function getTransport(
   forcedEnv?: Record<string, string | boolean | undefined>,
 ): Promise<MessageTransport> {

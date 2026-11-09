@@ -545,6 +545,7 @@ interface MessageTransport {
 send(type: MessageTypeValue, header: MessageHeader, payload?: Uint8Array | ArrayBuffer | string | null): void;
 subscribe(handler: (message: WireMessage) => void): () => void;
 close?(): void;
+ready?(): Promise<void>;
 }
 export declare function createWebSocketTransport(urlOrOptions?: string | CreateWebSocketTransportOptions): MessageTransport;
 export declare function createMockTransport(): MessageTransport;
