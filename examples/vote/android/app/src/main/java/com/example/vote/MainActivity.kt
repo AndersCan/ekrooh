@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Log
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.webkit.WebViewCompat
@@ -19,6 +20,8 @@ import to.holepunch.bare.android.registerDefaultHostPlugins
 import to.holepunch.bare.kit.IPC
 import to.holepunch.bare.kit.Worklet
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : AppCompatActivity() {
     private lateinit var worklet: Worklet
@@ -50,32 +53,6 @@ class MainActivity : AppCompatActivity() {
 
         BareHostAbi.requireSupportedAbi()
 
-        worklet = Worklet(
-            Worklet.Options()
-                .memoryLimit(128 * 1024 * 1024)
-                .assets(File(storageDir, "asset-cache").absolutePath),
-        )
-
-        try {
-            assets.open("main.core.bundle").use { bundleStream ->
-                worklet.start(
-                    "/main.core.bundle",
-                    bundleStream,
-                    // argv contract: [webAssets, storage, cache]
-                    arrayOf(
-                        webappDir.absolutePath,
-                        storageDir.absolutePath,
-                        bareCacheDir.absolutePath,
-                    ),
-                )
-            }
-            ipc = IPC(worklet)
-            registerDefaultHostPlugins(hostPlugins, this)
-            HostIpcCoordinator(ipc, hostPlugins).start()
-        } catch (e: Exception) {
-            Log.e("BARE_KOTLIN", "Failed to start worklet", e)
-        }
-
         webView = WebView(this)
         setContentView(webView)
         webView.settings.javaScriptEnabled = true
@@ -85,7 +62,19 @@ class MainActivity : AppCompatActivity() {
         webView.settings.allowContentAccess = false
         webView.webViewClient = webViewClient
 
-        waitForHandoffAndLoad()
+        if (BuildConfig.DEV_SERVER_URL.isEmpty()) {
+            startBundled(showNote = false)
+        } else {
+            // Debug build: use the page from "npm run dev" when it answers.
+            Thread {
+                val up = devServerAnswers(BuildConfig.DEV_SERVER_URL)
+                mainHandler.post {
+                    if (!isDestroyed) {
+                        if (up) startDev() else startBundled(showNote = true)
+                    }
+                }
+            }.start()
+        }
 
         onBackPressedDispatcher.addCallback(
             this,
@@ -101,6 +90,78 @@ class MainActivity : AppCompatActivity() {
                 }
             },
         )
+    }
+
+    /** The page from the last "npm run sync", served by the worklet. */
+    private fun startBundled(showNote: Boolean) {
+        startWorklet(
+            // argv contract: [webAssets, storage, cache]
+            arrayOf(
+                webappDir.absolutePath,
+                storageDir.absolutePath,
+                bareCacheDir.absolutePath,
+            ),
+        )
+        if (showNote) {
+            Log.i("BARE_KOTLIN", "npm run dev not reachable at ${BuildConfig.DEV_SERVER_URL}; loading the built page")
+            Toast.makeText(
+                this,
+                "npm run dev is not running: showing the page from the last \"npm run sync\". " +
+                    "Start npm run dev and press Run again.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+        waitForHandoffAndLoad()
+    }
+
+    /** Debug only: backend in dev mode (no login, like "npm run dev" on the
+     * computer), page loaded from the dev server. */
+    private fun startDev() {
+        val url = BuildConfig.DEV_SERVER_URL
+        Log.i("BARE_KOTLIN", "Loading the page from $url (npm run dev)")
+        startWorklet(
+            arrayOf(
+                "webassets=${webappDir.absolutePath}",
+                "storage=${storageDir.absolutePath}",
+                "cache=${bareCacheDir.absolutePath}",
+                "mode=dev",
+                "origin=$url",
+            ),
+        )
+        webViewClient.allowedOrigin = url
+        webView.loadUrl("$url/")
+    }
+
+    private fun startWorklet(argv: Array<String>) {
+        worklet = Worklet(
+            Worklet.Options()
+                .memoryLimit(128 * 1024 * 1024)
+                .assets(File(storageDir, "asset-cache").absolutePath),
+        )
+        try {
+            assets.open("main.core.bundle").use { bundleStream ->
+                worklet.start("/main.core.bundle", bundleStream, argv)
+            }
+            ipc = IPC(worklet)
+            registerDefaultHostPlugins(hostPlugins, this)
+            HostIpcCoordinator(ipc, hostPlugins).start()
+        } catch (e: Exception) {
+            Log.e("BARE_KOTLIN", "Failed to start worklet", e)
+        }
+    }
+
+    private fun devServerAnswers(base: String): Boolean {
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = URL("$base/@vite/client").openConnection() as HttpURLConnection
+            conn.connectTimeout = 1000
+            conn.readTimeout = 2000
+            conn.responseCode == 200
+        } catch (e: java.io.IOException) {
+            false
+        } finally {
+            conn?.disconnect()
+        }
     }
 
     /** Polls the worklet's `handoff.json` (written once the loopback server is
