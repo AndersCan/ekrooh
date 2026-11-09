@@ -77,9 +77,8 @@ jobs:
       - name: Pack this PR's @ekrooh/bare
         if: github.event_name == 'pull_request'
         run: |
-          # --ignore-scripts: npm 11's prepare step after prepack crashes (edgesOut), so build first.
-          npm run build:pkg
-          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
+          # npm 11.20's `npm pack` crashes here (Cannot read properties of null (reading 'edgesOut')), so pack with npm 10.
+          npx --yes npm@10.9.9 pack --pack-destination "$RUNNER_TEMP"
           echo "EKROOH_TARBALL=$(ls "$RUNNER_TEMP"/ekrooh-bare-*.tgz)" >> "$GITHUB_ENV"
 
       - name: Install Playwright Chromium
