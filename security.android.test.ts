@@ -79,6 +79,12 @@ describe('Android WebView', () => {
     }
   });
 
+  it('opens web debugging only when the build has a dev server', () => {
+    expect(activity).toMatch(
+      /setWebContentsDebuggingEnabled\(BuildConfig\.DEV_SERVER_URL\.isNotEmpty\(\)\)/,
+    );
+  });
+
   it('injects the bootstrap only into the handoff origin, once, after a feature check', () => {
     expect(activity).toMatch(
       /WebViewFeature\.isFeatureSupported\(WebViewFeature\.DOCUMENT_START_SCRIPT\)/,

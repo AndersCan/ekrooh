@@ -23,6 +23,7 @@ const VOTE = 15;
 const RELOAD = 20;
 const OVERALL = 430; // the budgets above add up to 425 s
 const KILL_GRACE_MS = 5000;
+const ATTEMPT_MS = 15000; // one attach try; a hung adb call must not eat the budget
 const LOG_LINES = 60;
 const PKG = 'com.example.vote';
 
@@ -101,6 +102,16 @@ async function stopServer() {
 const adb = (...args) =>
   execFileSync('adb', args, { encoding: 'utf8', timeout: INSTALL * 1000 });
 let page = null;
+let attachError = '(no attempt finished)';
+
+// Rejects when a call hangs, so the next attach try starts on a fresh call.
+function within(ms, promise) {
+  let timer;
+  const cap = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`no answer in ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, cap]).finally(() => clearTimeout(timer));
+}
 
 async function buttonShown(name) {
   return page
@@ -128,12 +139,19 @@ async function run() {
   let device;
   const attached = await until(async () => {
     try {
-      [device] = await _android.devices();
-      if (!device) return false;
-      const webView = await device.webView({ pkg: PKG }, { timeout: 2000 });
-      page = await webView.page();
+      [device] = await within(ATTEMPT_MS, _android.devices());
+      if (!device) {
+        attachError = 'Playwright sees no device';
+        return false;
+      }
+      const webView = await within(
+        ATTEMPT_MS,
+        device.webView({ pkg: PKG }, { timeout: 2000 }),
+      );
+      page = await within(ATTEMPT_MS, webView.page());
       return true;
-    } catch {
+    } catch (error) {
+      attachError = String(error.message).split('\n')[0];
       return false;
     }
   }, ATTACH);
@@ -194,15 +212,28 @@ if (result) {
       .catch(() => '(page not readable)');
   }
   let logcat = '(adb logcat failed)';
+  let adbState = '(adb not answering)';
+  try {
+    const sockets = adb('shell', 'cat', '/proc/net/unix')
+      .split('\n')
+      .filter((line) => line.includes('devtools_remote'));
+    adbState = `${adb('devices').trim()}\ndevtools sockets: ${sockets.length}`;
+  } catch (error) {
+    adbState += ` ${String(error.message).split('\n')[0]}`;
+  }
   try {
     logcat = adb('logcat', '-d', '-s', 'BARE_KOTLIN:*', 'chromium:*', '*:E')
       .split('\n')
       .slice(-LOG_LINES)
       .join('\n');
-  } catch {}
+  } catch (error) {
+    logcat += ` ${String(error.message).split('\n')[0]}`;
+  }
   console.error(
     `starter android reload: FAIL at ${stage} after ${seconds()} s: ${wanted}\n` +
       `page: ${pageText}\n` +
+      (stage === 'attach' ? `last attach error: ${attachError}\n` : '') +
+      `--- adb ---\n${adbState}\n` +
       `--- logcat (last ${LOG_LINES} lines) ---\n${logcat}\n` +
       `--- node scripts/dev.mjs (last ${LOG_LINES} lines) ---\n${lines.slice(-LOG_LINES).join('\n')}`,
   );

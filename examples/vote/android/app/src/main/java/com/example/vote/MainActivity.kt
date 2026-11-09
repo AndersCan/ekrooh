@@ -61,6 +61,10 @@ class MainActivity : AppCompatActivity() {
         webView.settings.allowContentAccess = false
         webView.webViewClient = webViewClient
 
+        // Debug build only (DEV_SERVER_URL is empty in release): open the devtools
+        // socket so the reload check can read the page, not left to the default.
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEV_SERVER_URL.isNotEmpty())
+
         if (BuildConfig.DEV_SERVER_URL.isEmpty()) {
             startBundled()
         } else {
