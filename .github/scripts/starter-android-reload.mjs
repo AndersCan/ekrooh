@@ -9,10 +9,10 @@
  * `node .github/scripts/starter-android-reload.mjs <starter dir>`.
  * It reads the starter's button names: renaming them means updating this file.
  */
-import { execFileSync, spawn } from "node:child_process";
-import fs from "node:fs";
-import readline from "node:readline";
-import path from "node:path";
+import { execFileSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import readline from 'node:readline';
+import path from 'node:path';
 
 // Budgets in seconds. Every wait is on what the page shows, never a sleep.
 const DEV = 90;
@@ -24,8 +24,9 @@ const RELOAD = 20;
 const OVERALL = 430; // the budgets above add up to 425 s
 const KILL_GRACE_MS = 5000;
 const ATTEMPT_MS = 15000; // one attach try; a hung adb call must not eat the budget
+const REPORT_ADB_MS = 20000;
 const LOG_LINES = 60;
-const PKG = "com.example.vote";
+const PKG = 'com.example.vote';
 
 function usage(message) {
   console.error(message);
@@ -33,16 +34,16 @@ function usage(message) {
 }
 
 const dir = process.argv[2];
-if (!dir || !fs.existsSync(path.join(dir, "package.json"))) {
-  usage("usage: node .github/scripts/starter-android-reload.mjs <starter-dir>");
+if (!dir || !fs.existsSync(path.join(dir, 'package.json'))) {
+  usage('usage: node .github/scripts/starter-android-reload.mjs <starter-dir>');
 }
-const apk = path.join(dir, "android/app/build/outputs/apk/debug/app-debug.apk");
+const apk = path.join(dir, 'android/app/build/outputs/apk/debug/app-debug.apk');
 if (!fs.existsSync(apk)) usage(`${apk} not found: run assembleDebug first`);
 let _android;
 try {
-  ({ _android } = await import("@playwright/test"));
+  ({ _android } = await import('@playwright/test'));
 } catch {
-  usage("Playwright not found: run npm ci at the repo root");
+  usage('Playwright not found: run npm ci at the repo root');
 }
 
 const startedAt = Date.now();
@@ -76,35 +77,48 @@ async function until(check, budget) {
 // would leave the dev server and Bare running after the check.
 const lines = [];
 const server = { exited: /** @type {string | null} */ (null), ready: false };
-const child = spawn("node", ["scripts/dev.mjs"], {
+const child = spawn('node', ['scripts/dev.mjs'], {
   cwd: dir,
-  stdio: ["ignore", "pipe", "pipe"],
+  stdio: ['ignore', 'pipe', 'pipe'],
 });
 for (const stream of [child.stdout, child.stderr]) {
-  readline.createInterface({ input: stream }).on("line", (line) => {
+  readline.createInterface({ input: stream }).on('line', (line) => {
     lines.push(line);
-    if (line.includes("vote ready:")) server.ready = true;
+    if (line.includes('vote ready:')) server.ready = true;
   });
 }
-child.on("exit", (code, signal) => {
+child.on('exit', (code, signal) => {
   server.exited = `exit code ${code ?? signal}`;
 });
 
 async function stopServer() {
   if (server.exited) return;
-  const done = new Promise((resolve) => child.once("exit", resolve));
-  child.kill("SIGTERM");
-  const timer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+  const done = new Promise((resolve) => child.once('exit', resolve));
+  child.kill('SIGTERM');
+  const timer = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
   await done;
   clearTimeout(timer);
 }
 
 const adb = (...args) =>
-  execFileSync("adb", args, { encoding: "utf8", timeout: INSTALL * 1000 });
+  execFileSync('adb', args, {
+    encoding: 'utf8',
+    timeout: INSTALL * 1000,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+// The failure report must print even when adb is wedged.
+const adbQuick = (...args) =>
+  execFileSync('adb', args, {
+    encoding: 'utf8',
+    timeout: REPORT_ADB_MS,
+    maxBuffer: 64 * 1024 * 1024,
+  });
 let page = null;
-let attachError = "(no attempt finished)";
+let attachError = '(no attempt finished)';
 
-// Rejects when a call hangs, so the next attach try starts on a fresh call.
+// Rejects when a call hangs. Playwright keeps a hung webView().page() attempt
+// and returns it on every later call, so a failed try also resets the app
+// (see resetAttach): a retry on the same objects would wait on the same attempt.
 function within(ms, promise) {
   let timer;
   const cap = new Promise((_, reject) => {
@@ -113,15 +127,27 @@ function within(ms, promise) {
   return Promise.race([promise, cap]).finally(() => clearTimeout(timer));
 }
 
+async function resetAttach(device) {
+  // A new app process opens a new devtools socket and so a new webview object;
+  // closing the device makes the next devices() build a fresh one.
+  await within(ATTEMPT_MS, device.close()).catch(() => {});
+  try {
+    adbQuick('shell', 'am', 'force-stop', PKG);
+    adbQuick('shell', 'am', 'start', '-n', `${PKG}/.MainActivity`);
+  } catch (error) {
+    attachError += `; restart failed: ${String(error.message).split('\n')[0]}`;
+  }
+}
+
 async function buttonShown(name) {
   return page
-    .getByRole("button", { name, exact: true })
+    .getByRole('button', { name, exact: true })
     .isVisible()
     .catch(() => false);
 }
 
 async function run() {
-  begin("dev", '"npm run dev" to print "vote ready:"');
+  begin('dev', '"npm run dev" to print "vote ready:"');
   const up = await until(() => server.ready || server.exited, DEV);
   if (server.exited) {
     wanted = `the dev server to keep running (${server.exited})`;
@@ -130,18 +156,18 @@ async function run() {
   if (!up) return false;
   passed();
 
-  begin("install", "the debug APK to install and start");
-  adb("install", "-r", apk);
-  adb("shell", "am", "start", "-n", `${PKG}/.MainActivity`);
+  begin('install', 'the debug APK to install and start');
+  adb('install', '-r', apk);
+  adb('shell', 'am', 'start', '-n', `${PKG}/.MainActivity`);
   passed();
 
-  begin("attach", "Playwright to read the debug WebView");
-  let device;
+  begin('attach', 'Playwright to read the debug WebView');
   const attached = await until(async () => {
+    let device;
     try {
       [device] = await within(ATTEMPT_MS, _android.devices());
       if (!device) {
-        attachError = "Playwright sees no device";
+        attachError = 'Playwright sees no device';
         return false;
       }
       const webView = await within(
@@ -151,42 +177,43 @@ async function run() {
       page = await within(ATTEMPT_MS, webView.page());
       return true;
     } catch (error) {
-      attachError = String(error.message).split("\n")[0];
+      attachError = String(error.message).split('\n')[0];
+      if (device) await resetAttach(device);
       return false;
     }
   }, ATTACH);
   if (!attached) return false;
   passed();
 
-  begin("devpage", "the page from http://10.0.2.2:5173/ showing Tea (0)");
+  begin('devpage', 'the page from http://10.0.2.2:5173/ showing Tea (0)');
   const shown = await until(
     async () =>
-      page.url().startsWith("http://10.0.2.2:5173/") &&
-      (await buttonShown("Tea (0)")),
+      page.url().startsWith('http://10.0.2.2:5173/') &&
+      (await buttonShown('Tea (0)')),
     DEVPAGE,
   );
   if (!shown) return false;
   passed();
 
-  begin("vote", "Tea (1) after one click");
-  await page.getByRole("button", { name: "Tea (0)", exact: true }).click();
-  if (!(await until(() => buttonShown("Tea (1)"), VOTE))) return false;
+  begin('vote', 'Tea (1) after one click');
+  await page.getByRole('button', { name: 'Tea (0)', exact: true }).click();
+  if (!(await until(() => buttonShown('Tea (1)'), VOTE))) return false;
   passed();
 
-  begin("reload", "Tea [1] on the emulator after saving src/render.ts");
-  const file = path.join(dir, "src/render.ts");
-  const before = "`${option.label} (${option.votes})`";
-  const source = fs.readFileSync(file, "utf8");
+  begin('reload', 'Tea [1] on the emulator after saving src/render.ts');
+  const file = path.join(dir, 'src/render.ts');
+  const before = '`${option.label} (${option.votes})`';
+  const source = fs.readFileSync(file, 'utf8');
   if (source.split(before).length !== 2) {
     wanted = `${before} exactly once in src/render.ts`;
     return false;
   }
   fs.writeFileSync(
     file,
-    source.replace(before, () => "`${option.label} [${option.votes}]`"),
+    source.replace(before, () => '`${option.label} [${option.votes}]`'),
   );
   // Fresh read of the page each poll: a full reload replaces the document.
-  if (!(await until(() => buttonShown("Tea [1]"), RELOAD))) return false;
+  if (!(await until(() => buttonShown('Tea [1]'), RELOAD))) return false;
   passed();
   return true;
 }
@@ -194,48 +221,55 @@ async function run() {
 // Overall cap: fail at whatever stage is current.
 const result = await Promise.race([
   run().catch((error) => {
-    wanted = `${wanted} (${error.message.split("\n")[0]})`;
+    wanted = `${wanted} (${error.message.split('\n')[0]})`;
     return false;
   }),
   new Promise((resolve) => setTimeout(() => resolve(false), OVERALL * 1000)),
 ]);
 
 if (result) {
-  console.log("starter android reload: PASS");
+  console.log('starter android reload: PASS');
 } else {
-  let pageText = "(no page yet)";
+  let pageText = '(no page yet)';
   if (page) {
     pageText = await page
-      .locator("#app")
+      .locator('#app')
       .innerText({ timeout: 2000 })
-      .then((text) => text.replace(/\s*\n\s*/g, " | "))
-      .catch(() => "(page not readable)");
+      .then((text) => text.replace(/\s*\n\s*/g, ' | '))
+      .catch(() => '(page not readable)');
   }
-  let logcat = "(adb logcat failed)";
-  let adbState = "(adb not answering)";
+  let logcat = '(adb logcat failed)';
+  let adbState = '(adb not answering)';
   try {
-    const sockets = adb("shell", "cat", "/proc/net/unix")
-      .split("\n")
-      .filter((line) => line.includes("devtools_remote"));
-    adbState = `${adb("devices").trim()}\ndevtools sockets: ${sockets.length}`;
+    const sockets = adbQuick('shell', 'cat', '/proc/net/unix')
+      .split('\n')
+      .filter((line) => line.includes('devtools_remote'));
+    adbState = `${adbQuick('devices').trim()}\ndevtools sockets: ${sockets.length}`;
   } catch (error) {
-    adbState += ` ${String(error.message).split("\n")[0]}`;
+    adbState += ` ${String(error.message).split('\n')[0]}`;
   }
   try {
-    logcat = adb("logcat", "-d", "-s", "BARE_KOTLIN:*", "chromium:*", "*:E")
-      .split("\n")
+    logcat = adbQuick(
+      'logcat',
+      '-d',
+      '-s',
+      'BARE_KOTLIN:*',
+      'chromium:*',
+      '*:E',
+    )
+      .split('\n')
       .slice(-LOG_LINES)
-      .join("\n");
+      .join('\n');
   } catch (error) {
-    logcat += ` ${String(error.message).split("\n")[0]}`;
+    logcat += ` ${String(error.message).split('\n')[0]}`;
   }
   console.error(
     `starter android reload: FAIL at ${stage} after ${seconds()} s: ${wanted}\n` +
       `page: ${pageText}\n` +
-      (stage === "attach" ? `last attach error: ${attachError}\n` : "") +
+      (stage === 'attach' ? `last attach error: ${attachError}\n` : '') +
       `--- adb ---\n${adbState}\n` +
       `--- logcat (last ${LOG_LINES} lines) ---\n${logcat}\n` +
-      `--- node scripts/dev.mjs (last ${LOG_LINES} lines) ---\n${lines.slice(-LOG_LINES).join("\n")}`,
+      `--- node scripts/dev.mjs (last ${LOG_LINES} lines) ---\n${lines.slice(-LOG_LINES).join('\n')}`,
   );
 }
 
