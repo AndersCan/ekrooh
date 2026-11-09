@@ -8,7 +8,7 @@ import {
 } from './worklet/vote-plugin';
 import type { VoteState } from './src/vote-events';
 import { createJoinWait, submitJoin } from './src/join-wait';
-import { connectionText } from './src/render';
+import { connectionText, pageView } from './src/render';
 
 type Fake = Sync<Counts> & { published: Counts[]; peers: SyncValue<Counts>[] };
 
@@ -159,11 +159,38 @@ describe('join wait', () => {
     let t = 1000;
     const wait = createJoinWait(() => t);
     expect(wait.seconds(0)).toBeUndefined();
-    wait.joined();
+    wait.joined(true);
     t += 61_500;
     expect(wait.seconds(0)).toBe(61);
     expect(wait.seconds(1)).toBeUndefined();
     expect(wait.seconds(0)).toBeUndefined();
+  });
+
+  it('a failed join does not start the wait', () => {
+    let t = 0;
+    const wait = createJoinWait(() => t);
+    wait.joined(false);
+    t += 5000;
+    expect(wait.seconds(0)).toBeUndefined();
+  });
+
+  it('pageView passes the connected count to the wait', () => {
+    const seen: number[] = [];
+    const wait = {
+      seconds: (c: number) => {
+        seen.push(c);
+        return c === 0 ? 7 : undefined;
+      },
+    };
+    const state = { connected: 2 } as VoteState;
+    expect(pageView(undefined, '', wait)).toEqual({ kind: 'loading' });
+    expect(pageView(state, 'hi', wait)).toEqual({
+      kind: 'ready',
+      state,
+      message: 'hi',
+      waiting: undefined,
+    });
+    expect(seen).toEqual([2]);
   });
 
   it('a good join clears the box, a failed one keeps the text', async () => {

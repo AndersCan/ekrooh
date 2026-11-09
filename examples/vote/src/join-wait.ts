@@ -2,8 +2,9 @@
 export function createJoinWait(now: () => number = Date.now) {
   let joinedAt: number | undefined;
   return {
-    joined() {
-      joinedAt = now();
+    /** Starts the wait only when the join worked. */
+    joined(ok: boolean) {
+      if (ok) joinedAt = now();
     },
     seconds(connected: number): number | undefined {
       if (connected > 0) joinedAt = undefined;

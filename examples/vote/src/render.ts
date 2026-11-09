@@ -120,3 +120,18 @@ function build(root: HTMLElement, actions: Actions): Page {
   );
   return { buttons, invite, status, message, optionIds: '' };
 }
+
+/** What to show for the current state; the wait only counts while no peer is connected. */
+export function pageView(
+  state: VoteState | undefined,
+  message: string,
+  wait: { seconds(connected: number): number | undefined },
+): View {
+  if (!state) return { kind: 'loading' };
+  return {
+    kind: 'ready',
+    state,
+    message,
+    waiting: wait.seconds(state.connected),
+  };
+}

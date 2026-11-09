@@ -6,7 +6,7 @@ import {
   createProtocolMessenger,
 } from '@ekrooh/bare/core';
 import { createJoinWait } from './join-wait';
-import { render, type View } from './render';
+import { pageView, render } from './render';
 import { transport } from './transport';
 import { type VoteState, voteEvents } from './vote-events';
 
@@ -27,14 +27,7 @@ let message = '';
 const joinWait = createJoinWait();
 
 function show() {
-  const view: View = state
-    ? {
-        kind: 'ready',
-        state,
-        message,
-        waiting: joinWait.seconds(state.connected),
-      }
-    : { kind: 'loading' };
+  const view = pageView(state, message, joinWait);
   render(app, view, { vote, join });
 }
 
@@ -63,7 +56,7 @@ async function refresh() {
 const vote = (id: string) => act(bus.invoke(voteEvents.cast(id)));
 const join = async (code: string) => {
   const ok = await act(bus.invoke(voteEvents.join(code)));
-  if (ok) joinWait.joined();
+  joinWait.joined(ok);
   show();
   return ok;
 };
