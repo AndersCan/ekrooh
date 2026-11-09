@@ -210,7 +210,12 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           script: |
+            adb wait-for-device
+            until [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; do sleep 2; done
+            until adb shell pm path android | grep -q package; do sleep 2; done
             adb install -r "$STARTER_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
+            until adb shell pm path com.example.vote | grep -q package; do sleep 2; done
+            adb devices -l
             maestro test --debug-output "$RUNNER_TEMP/maestro-debug" --flatten-debug-output .github/scripts/starter-vote-native.yaml
 
       - name: Upload the Maestro output
