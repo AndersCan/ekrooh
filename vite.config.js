@@ -45,6 +45,13 @@ export default defineConfig({
       { find: 'bare-encoding', replacement: 'node:util' },
       { find: 'bare-crypto', replacement: bareStub('crypto') },
       { find: 'bare-ws', replacement: bareStub('ws') },
+      // The vote starter imports the published package name; test it from source.
+      {
+        find: '@ekrooh/bare/core',
+        replacement: fileURLToPath(
+          new URL('./core/messages/index.ts', import.meta.url),
+        ),
+      },
     ],
     coverage: {
       // Vitest 5 counts every file matching `include`, loaded by a test or

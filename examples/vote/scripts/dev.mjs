@@ -3,37 +3,38 @@
  * `npm run dev`: bundles and runs the app backend (worklet) under Bare and
  * serves the page with Vite, in one process.
  */
-import { context } from "esbuild";
-import { spawn } from "node:child_process";
-import fs from "node:fs";
-import { createRequire } from "node:module";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { context } from 'esbuild';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createServer } from 'vite';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // `npm run dev:second` starts a second copy beside the first, on other ports,
 // so you can try sync with one computer: paste the first copy's code into it.
-const second = process.argv.includes("--second");
+const second = process.argv.includes('--second');
 const pagePort = second ? 5174 : 5173;
 const backendPort = second ? 8081 : 8080;
 const outfile = path.join(
   root,
-  "worklet",
-  second ? "app.second.core.gen.js" : "app.core.gen.js",
+  'worklet',
+  second ? 'app.second.core.gen.js' : 'app.core.gen.js',
 );
 const require = createRequire(import.meta.url);
-const bareExecutable = require("bare-runtime")();
+const bareExecutable = require('bare-runtime')();
 // npm ci can leave the prebuilt runtime without its execute bit.
-if (process.platform !== "win32") fs.chmodSync(bareExecutable, 0o755);
+if (process.platform !== 'win32') fs.chmodSync(bareExecutable, 0o755);
 
 // `mode=dev` selects the dev backend (auth off). The origins let the Vite dev
 // server (pinned in vite.config.ts and above) open the protocol socket.
 const appArgs = [
-  "mode=dev",
+  'mode=dev',
   `origin=http://localhost:${pagePort}`,
   `origin=http://127.0.0.1:${pagePort}`,
-  "--port",
+  `storage=${path.join(root, '.dev-storage', second ? 'second' : 'first')}`,
+  '--port',
   String(backendPort),
 ];
 
@@ -53,11 +54,11 @@ function stopBare() {
       finished = true;
       resolve();
     };
-    processToStop.once("exit", finish);
-    processToStop.kill("SIGTERM");
+    processToStop.once('exit', finish);
+    processToStop.kill('SIGTERM');
     setTimeout(() => {
       if (finished) return;
-      processToStop.kill("SIGKILL");
+      processToStop.kill('SIGKILL');
       setTimeout(finish, 500);
     }, 1200);
   });
@@ -67,7 +68,7 @@ async function startBare() {
   await stopBare();
   if (shuttingDown) return;
   bareProcess = spawn(bareExecutable, [outfile, ...appArgs], {
-    stdio: "inherit",
+    stdio: 'inherit',
   });
 }
 
@@ -79,22 +80,22 @@ function scheduleRestart() {
 }
 
 const worklet = await context({
-  entryPoints: [path.join(root, "worklet", "entry.ts")],
+  entryPoints: [path.join(root, 'worklet', 'entry.ts')],
   outfile,
   bundle: true,
-  packages: "external",
-  platform: "node",
-  format: "esm",
-  logLevel: "warning",
+  packages: 'external',
+  platform: 'node',
+  format: 'esm',
+  logLevel: 'warning',
   plugins: [
     {
-      name: "restart-bare-on-build",
+      name: 'restart-bare-on-build',
       setup(build) {
         build.onEnd((result) => {
           if (result.errors.length === 0) scheduleRestart();
           else
             console.log(
-              "[vote] Worklet build failed; keeping the old backend.",
+              '[vote] Worklet build failed; keeping the old backend.',
             );
         });
       },
@@ -113,7 +114,7 @@ try {
   await server.listen();
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("in use") || message.includes("EADDRINUSE")) {
+  if (message.includes('in use') || message.includes('EADDRINUSE')) {
     console.log(
       `[vote] Port ${pagePort} is in use. Stop the other dev server and run it again.`,
     );
@@ -139,5 +140,5 @@ async function shutdown() {
   await server.close();
   process.exit(0);
 }
-process.on("SIGINT", () => void shutdown());
-process.on("SIGTERM", () => void shutdown());
+process.on('SIGINT', () => void shutdown());
+process.on('SIGTERM', () => void shutdown());

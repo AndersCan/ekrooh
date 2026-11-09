@@ -1,7 +1,7 @@
 import {
   createWebSocketTransport,
   type MessageTransport,
-} from "@ekrooh/bare/transports";
+} from '@ekrooh/bare/transports';
 
 /**
  * On a phone the page is served by the app backend's loopback server, so the

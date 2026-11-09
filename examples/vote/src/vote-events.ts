@@ -1,4 +1,4 @@
-import { type EventSpec, invokeEvent } from "@ekrooh/bare/core";
+import { type EventSpec, invokeEvent } from '@ekrooh/bare/core';
 
 export type VoteOption = { id: string; label: string; votes: number };
 
@@ -12,20 +12,20 @@ export type VoteState = {
 
 export const voteSpecs = {
   list: {
-    pluginId: "app.vote",
-    name: "vote.list",
+    pluginId: 'app.vote',
+    name: 'vote.list',
     args: {} as Record<string, never>,
     result: {} as VoteState,
   },
   cast: {
-    pluginId: "app.vote",
-    name: "vote.cast",
+    pluginId: 'app.vote',
+    name: 'vote.cast',
     args: {} as { id: string },
     result: {} as VoteState,
   },
   join: {
-    pluginId: "app.vote",
-    name: "vote.join",
+    pluginId: 'app.vote',
+    name: 'vote.join',
     args: {} as { code: string },
     result: {} as VoteState,
   },

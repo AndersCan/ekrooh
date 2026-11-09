@@ -1,15 +1,30 @@
-import type { VoteState } from "./vote-events";
+import type { VoteState } from './vote-events';
 
 export type View =
-  { kind: "loading" } | { kind: "ready"; state: VoteState; message: string };
+  | { kind: 'loading' }
+  | {
+      kind: 'ready';
+      state: VoteState;
+      message: string;
+      /** Seconds since a successful Join with no device connected yet. */
+      waiting?: number;
+    };
 
-export type Actions = { vote(id: string): void; join(code: string): void };
+export type Actions = {
+  vote(id: string): void;
+  join(code: string): Promise<boolean>;
+};
 
 /** One line for how many other devices are connected. */
-export function connectionText(connected: number): string {
-  if (connected === 0) return "No other device yet";
+export function connectionText(connected: number, waiting?: number): string {
+  if (connected === 0 && waiting !== undefined) {
+    return waiting < 60
+      ? 'Joined. Looking for the other device…'
+      : 'Still looking for the other device. A first connection can be slow: wait a little, then restart both apps.';
+  }
+  if (connected === 0) return 'No other device yet';
   return connected === 1
-    ? "1 other device connected"
+    ? '1 other device connected'
     : `${connected} other devices connected`;
 }
 
@@ -27,9 +42,9 @@ const pages = new WeakMap<HTMLElement, Page>();
  * The page is built once and then updated in place, so the Join box keeps
  * what you typed while votes arrive. */
 export function render(root: HTMLElement, view: View, actions: Actions): void {
-  if (view.kind === "loading") {
-    const text = document.createElement("p");
-    text.textContent = "Connecting…";
+  if (view.kind === 'loading') {
+    const text = document.createElement('p');
+    text.textContent = 'Connecting…';
     root.replaceChildren(text);
     pages.delete(root);
     return;
@@ -39,14 +54,14 @@ export function render(root: HTMLElement, view: View, actions: Actions): void {
     page = build(root, actions);
     pages.set(root, page);
   }
-  const ids = view.state.options.map((o) => o.id).join(",");
+  const ids = view.state.options.map((o) => o.id).join(',');
   if (ids !== page.optionIds) {
     page.optionIds = ids;
     page.buttons.replaceChildren(
       ...view.state.options.map((option) => {
-        const button = document.createElement("button");
+        const button = document.createElement('button');
         button.dataset.id = option.id;
-        button.addEventListener("click", () => actions.vote(option.id));
+        button.addEventListener('click', () => actions.vote(option.id));
         return button;
       }),
     );
@@ -58,41 +73,42 @@ export function render(root: HTMLElement, view: View, actions: Actions): void {
     if (button) button.textContent = `${option.label} (${option.votes})`;
   }
   page.invite.textContent = view.state.invite;
-  page.status.textContent = connectionText(view.state.connected);
+  page.status.textContent = connectionText(view.state.connected, view.waiting);
   page.message.textContent = view.message;
 }
 
 function build(root: HTMLElement, actions: Actions): Page {
-  const heading = document.createElement("h1");
-  heading.textContent = "Vote";
-  const buttons = document.createElement("div");
-  buttons.className = "buttons";
+  const heading = document.createElement('h1');
+  heading.textContent = 'Vote';
+  const buttons = document.createElement('div');
+  buttons.className = 'buttons';
 
-  const status = document.createElement("p");
-  status.className = "status";
-  status.setAttribute("role", "status");
+  const status = document.createElement('p');
+  status.className = 'status';
+  status.setAttribute('role', 'status');
 
-  const inviteLabel = document.createElement("p");
-  inviteLabel.textContent = "Your invite code. Paste it on another device:";
-  const invite = document.createElement("code");
-  invite.className = "invite";
+  const inviteLabel = document.createElement('p');
+  inviteLabel.textContent = 'Your invite code. Paste it on another device:';
+  const invite = document.createElement('code');
+  invite.className = 'invite';
 
-  const form = document.createElement("form");
-  const input = document.createElement("input");
-  input.placeholder = "Paste a code here";
-  input.setAttribute("aria-label", "Invite code from another device");
-  input.autocomplete = "off";
-  const joinButton = document.createElement("button");
-  joinButton.textContent = "Join";
+  const form = document.createElement('form');
+  const input = document.createElement('input');
+  input.placeholder = 'Paste a code here';
+  input.setAttribute('aria-label', 'Invite code from another device');
+  input.autocomplete = 'off';
+  const joinButton = document.createElement('button');
+  joinButton.textContent = 'Join';
   form.append(input, joinButton);
-  form.addEventListener("submit", (event) => {
+  form.addEventListener('submit', (event) => {
     event.preventDefault();
-    actions.join(input.value);
-    input.value = "";
+    void actions.join(input.value).then((joined) => {
+      if (joined) input.value = '';
+    });
   });
 
-  const message = document.createElement("p");
-  message.setAttribute("role", "alert");
+  const message = document.createElement('p');
+  message.setAttribute('role', 'alert');
 
   root.replaceChildren(
     heading,
@@ -103,5 +119,5 @@ function build(root: HTMLElement, actions: Actions): Page {
     form,
     message,
   );
-  return { buttons, invite, status, message, optionIds: "" };
+  return { buttons, invite, status, message, optionIds: '' };
 }

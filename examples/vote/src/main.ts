@@ -4,10 +4,10 @@ import {
   MessageType,
   createPluginBus,
   createProtocolMessenger,
-} from "@ekrooh/bare/core";
-import { render, type View } from "./render";
-import { transport } from "./transport";
-import { type VoteState, voteEvents } from "./vote-events";
+} from '@ekrooh/bare/core';
+import { render, type View } from './render';
+import { transport } from './transport';
+import { type VoteState, voteEvents } from './vote-events';
 
 const messenger = createProtocolMessenger((request, payload) => {
   transport.send(MessageType.ENVELOPE, request, payload);
@@ -17,29 +17,39 @@ transport.subscribe((message) => {
   messenger.handleIncoming(message.header);
 });
 
-const root = document.getElementById("app");
+const root = document.getElementById('app');
 if (!root) throw new Error('index.html needs <div id="app">');
 const app = root;
 
 let state: VoteState | undefined;
-let message = "";
+let message = '';
+let joinedAt: number | undefined;
 
 function show() {
   const view: View = state
-    ? { kind: "ready", state, message }
-    : { kind: "loading" };
+    ? { kind: 'ready', state, message, waiting: waitedSeconds() }
+    : { kind: 'loading' };
   render(app, view, { vote, join });
 }
 
+function waitedSeconds(): number | undefined {
+  if (state?.connected) joinedAt = undefined;
+  if (joinedAt === undefined) return undefined;
+  return Math.floor((Date.now() - joinedAt) / 1000);
+}
+
 /** An action's failure shows its message; its result updates the page. */
-async function act(call: Promise<Either<CoreError, VoteState>>) {
+async function act(
+  call: Promise<Either<CoreError, VoteState>>,
+): Promise<boolean> {
   const [error, result] = await call;
   message =
     error || !result
-      ? (error?.message ?? "Something went wrong. Try again.")
-      : "";
+      ? (error?.message ?? 'Something went wrong. Try again.')
+      : '';
   if (result) state = result;
   show();
+  return !error && !!result;
 }
 
 /** The once-a-second poll updates the counts but leaves any message alone. */
@@ -51,7 +61,12 @@ async function refresh() {
 }
 
 const vote = (id: string) => act(bus.invoke(voteEvents.cast(id)));
-const join = (code: string) => act(bus.invoke(voteEvents.join(code)));
+const join = async (code: string) => {
+  const ok = await act(bus.invoke(voteEvents.join(code)));
+  if (ok) joinedAt = Date.now();
+  show();
+  return ok;
+};
 
 show();
 void refresh();
