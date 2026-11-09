@@ -15,6 +15,9 @@ final class BareRuntime {
   private var storagePath = ""
   private var cachePath = ""
   private var attached = false
+  // The worklet is created in init but started after the dev server probe;
+  // BareKit crashes on suspend/resume/terminate of a worklet never started.
+  private var workletStarted = false
   private var terminated = false
   private var ready = true
   private let handoffURL: URL
@@ -149,6 +152,7 @@ final class BareRuntime {
       inBundle: .main,
       arguments: arguments
     )
+    workletStarted = true
     do {
       self.ipc = try IPC(worklet: worklet)
     } catch {
@@ -282,12 +286,12 @@ final class BareRuntime {
 
   /// Suspends the worklet when the app is backgrounded.
   func suspend() {
-    worklet?.suspend(linger: 0)
+    if workletStarted { worklet?.suspend(linger: 0) }
   }
 
   /// Resumes the worklet when the app returns to the foreground.
   func resume() {
-    worklet?.resume()
+    if workletStarted { worklet?.resume() }
   }
 
   func terminate() {
@@ -303,7 +307,7 @@ final class BareRuntime {
     let ipcToClose = ipc
     Task { await ipcToClose?.close() }
     ipc = nil
-    worklet?.terminate()
+    if workletStarted { worklet?.terminate() }
     worklet = nil
   }
 
