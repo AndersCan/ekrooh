@@ -23,6 +23,7 @@ function stub(webView: () => Promise<unknown>, page: () => Promise<unknown>) {
         attemptMs: 30,
         resetAttach: async (d: unknown) => {
           resets.push(d);
+          return '';
         },
       }),
     page,
@@ -45,7 +46,6 @@ describe('attachTry', () => {
     const s = stub(never, async () => 'PAGE');
     const got = await s.run();
     expect(got.page).toBeUndefined();
-    expect(got.reset).toBeUndefined();
     expect(got.error).toMatch(/no answer/);
     expect(s.resets).toEqual([]);
   });
@@ -53,14 +53,30 @@ describe('attachTry', () => {
   it('restarts the app when page() hangs', async () => {
     const s = stub(async () => s.webViewObj, never);
     const got = await s.run();
-    expect(got.reset).toBe(true);
+    expect(got.error).toMatch(/no answer/);
+    expect(got.error).not.toMatch(/restart failed/);
     expect(s.resets).toEqual([s.device]);
+  });
+
+  it('keeps the restart failure in the error', async () => {
+    const got = await attachTry({
+      android: {
+        devices: async () => [{ webView: async () => ({ page: never }) }],
+      },
+      pkg: 'p',
+      attemptMs: 30,
+      resetAttach: async () => 'adb: device offline',
+    });
+    expect(got.error).toBe(
+      'no answer in 30 ms; restart failed: adb: device offline',
+    );
   });
 
   it('reports a missing device and a hung devices() without restarting', async () => {
     const resets: unknown[] = [];
     const resetAttach = async (d: unknown) => {
       resets.push(d);
+      return '';
     };
     expect(
       await attachTry({

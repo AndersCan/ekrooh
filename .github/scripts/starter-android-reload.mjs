@@ -123,8 +123,9 @@ async function resetAttach(device) {
     adbQuick('shell', 'am', 'force-stop', PKG);
     adbQuick('shell', 'am', 'start', '-n', `${PKG}/.MainActivity`);
   } catch (error) {
-    attachError += `; restart failed: ${String(error.message).split('\n')[0]}`;
+    return String(error.message).split('\n')[0];
   }
+  return '';
 }
 
 async function buttonShown(name) {
