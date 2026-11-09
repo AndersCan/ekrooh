@@ -13,6 +13,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import readline from 'node:readline';
 import path from 'node:path';
+import { attachTry, within } from './starter-android-attach.mjs';
 
 // Budgets in seconds. Every wait is on what the page shows, never a sleep.
 const DEV = 90;
@@ -116,20 +117,7 @@ const adbQuick = (...args) =>
 let page = null;
 let attachError = '(no attempt finished)';
 
-// Rejects when a call hangs. Playwright keeps a hung webView().page() attempt
-// and returns it on every later call, so a failed try also resets the app
-// (see resetAttach): a retry on the same objects would wait on the same attempt.
-function within(ms, promise) {
-  let timer;
-  const cap = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`no answer in ${ms} ms`)), ms);
-  });
-  return Promise.race([promise, cap]).finally(() => clearTimeout(timer));
-}
-
 async function resetAttach(device) {
-  // A new app process opens a new devtools socket and so a new webview object;
-  // closing the device makes the next devices() build a fresh one.
   await within(ATTEMPT_MS, device.close()).catch(() => {});
   try {
     adbQuick('shell', 'am', 'force-stop', PKG);
@@ -163,24 +151,15 @@ async function run() {
 
   begin('attach', 'Playwright to read the debug WebView');
   const attached = await until(async () => {
-    let device;
-    try {
-      [device] = await within(ATTEMPT_MS, _android.devices());
-      if (!device) {
-        attachError = 'Playwright sees no device';
-        return false;
-      }
-      const webView = await within(
-        ATTEMPT_MS,
-        device.webView({ pkg: PKG }, { timeout: 2000 }),
-      );
-      page = await within(ATTEMPT_MS, webView.page());
-      return true;
-    } catch (error) {
-      attachError = String(error.message).split('\n')[0];
-      if (device) await resetAttach(device);
-      return false;
-    }
+    const got = await attachTry({
+      android: _android,
+      pkg: PKG,
+      attemptMs: ATTEMPT_MS,
+      resetAttach,
+    });
+    if (got.error) attachError = got.error;
+    if (got.page) page = got.page;
+    return Boolean(got.page);
   }, ATTACH);
   if (!attached) return false;
   passed();
