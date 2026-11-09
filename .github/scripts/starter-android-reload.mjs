@@ -13,6 +13,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import readline from 'node:readline';
 import path from 'node:path';
+import { attachTry, within } from './starter-android-attach.mjs';
 
 // Budgets in seconds. Every wait is on what the page shows, never a sleep.
 const DEV = 90;
@@ -23,6 +24,8 @@ const VOTE = 15;
 const RELOAD = 20;
 const OVERALL = 430; // the budgets above add up to 425 s
 const KILL_GRACE_MS = 5000;
+const ATTEMPT_MS = 15000; // one attach try; a hung adb call must not eat the budget
+const REPORT_ADB_MS = 20000;
 const LOG_LINES = 60;
 const PKG = 'com.example.vote';
 
@@ -99,8 +102,31 @@ async function stopServer() {
 }
 
 const adb = (...args) =>
-  execFileSync('adb', args, { encoding: 'utf8', timeout: INSTALL * 1000 });
+  execFileSync('adb', args, {
+    encoding: 'utf8',
+    timeout: INSTALL * 1000,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+// The failure report must print even when adb is wedged.
+const adbQuick = (...args) =>
+  execFileSync('adb', args, {
+    encoding: 'utf8',
+    timeout: REPORT_ADB_MS,
+    maxBuffer: 64 * 1024 * 1024,
+  });
 let page = null;
+let attachError = '(no attempt finished)';
+
+async function resetAttach(device) {
+  await within(ATTEMPT_MS, device.close()).catch(() => {});
+  try {
+    adbQuick('shell', 'am', 'force-stop', PKG);
+    adbQuick('shell', 'am', 'start', '-n', `${PKG}/.MainActivity`);
+  } catch (error) {
+    return String(error.message).split('\n')[0];
+  }
+  return '';
+}
 
 async function buttonShown(name) {
   return page
@@ -125,17 +151,16 @@ async function run() {
   passed();
 
   begin('attach', 'Playwright to read the debug WebView');
-  let device;
   const attached = await until(async () => {
-    try {
-      [device] = await _android.devices();
-      if (!device) return false;
-      const webView = await device.webView({ pkg: PKG }, { timeout: 2000 });
-      page = await webView.page();
-      return true;
-    } catch {
-      return false;
-    }
+    const got = await attachTry({
+      android: _android,
+      pkg: PKG,
+      attemptMs: ATTEMPT_MS,
+      resetAttach,
+    });
+    if (got.error) attachError = got.error;
+    if (got.page) page = got.page;
+    return Boolean(got.page);
   }, ATTACH);
   if (!attached) return false;
   passed();
@@ -194,15 +219,35 @@ if (result) {
       .catch(() => '(page not readable)');
   }
   let logcat = '(adb logcat failed)';
+  let adbState = '(adb not answering)';
   try {
-    logcat = adb('logcat', '-d', '-s', 'BARE_KOTLIN:*', 'chromium:*', '*:E')
+    const sockets = adbQuick('shell', 'cat', '/proc/net/unix')
+      .split('\n')
+      .filter((line) => line.includes('devtools_remote'));
+    adbState = `${adbQuick('devices').trim()}\ndevtools sockets: ${sockets.length}`;
+  } catch (error) {
+    adbState += ` ${String(error.message).split('\n')[0]}`;
+  }
+  try {
+    logcat = adbQuick(
+      'logcat',
+      '-d',
+      '-s',
+      'BARE_KOTLIN:*',
+      'chromium:*',
+      '*:E',
+    )
       .split('\n')
       .slice(-LOG_LINES)
       .join('\n');
-  } catch {}
+  } catch (error) {
+    logcat += ` ${String(error.message).split('\n')[0]}`;
+  }
   console.error(
     `starter android reload: FAIL at ${stage} after ${seconds()} s: ${wanted}\n` +
       `page: ${pageText}\n` +
+      (stage === 'attach' ? `last attach error: ${attachError}\n` : '') +
+      `--- adb ---\n${adbState}\n` +
       `--- logcat (last ${LOG_LINES} lines) ---\n${logcat}\n` +
       `--- node scripts/dev.mjs (last ${LOG_LINES} lines) ---\n${lines.slice(-LOG_LINES).join('\n')}`,
   );
