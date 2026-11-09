@@ -9,7 +9,9 @@
  * updating this file.
  */
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import readline from 'node:readline';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,11 +23,12 @@ const root = path.resolve(
 // Budgets in seconds. Every wait is on what the pages show, never a sleep.
 const START = 60;
 const READY = 60;
+const ANNOUNCED = 30;
 const JOIN = 15;
 const CONNECTED = 120;
 const VOTE = 15;
 const SYNCED = 30;
-const OVERALL = 300;
+const OVERALL = 345; // the budgets above add up to 330 s
 const KILL_GRACE_MS = 5000;
 const LOG_LINES = 60;
 
@@ -56,12 +59,25 @@ try {
 } catch {
   usage('Playwright not found: run npm ci at the repo root');
 }
+let Hyperswarm;
+try {
+  ({ default: Hyperswarm } = await import('hyperswarm'));
+} catch {
+  usage('hyperswarm not found: run npm ci at the repo root');
+}
+// Before any server starts, so a missing browser is a usage error.
+let browser;
+try {
+  browser = await chromium.launch();
+} catch {
+  usage('Chromium not installed: run npm run playwright:install');
+}
 
 const startedAt = Date.now();
 const seconds = () => Math.round((Date.now() - startedAt) / 1000);
-let stage = 'start';
-let wanted = 'both dev servers to print "vote ready:"';
-let stageStartedAt = Date.now();
+let stage;
+let wanted;
+let stageStartedAt;
 
 function begin(name, what) {
   stage = name;
@@ -83,20 +99,13 @@ function startServer(args) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const state = { child, lines, exited: null, ready: false };
-  let partial = '';
-  const onData = (chunk) => {
-    const parts = (partial + chunk).split('\n');
-    partial = parts.pop();
-    for (const line of parts) {
+  for (const stream of [child.stdout, child.stderr]) {
+    readline.createInterface({ input: stream }).on('line', (line) => {
       lines.push(line);
       if (line.includes('vote ready:')) state.ready = true;
-    }
-  };
-  child.stdout.setEncoding('utf8').on('data', onData);
-  child.stderr.setEncoding('utf8').on('data', onData);
+    });
+  }
   child.on('exit', (code, signal) => {
-    if (partial) lines.push(partial);
-    partial = '';
     state.exited = `exit code ${code ?? signal}`;
   });
   return state;
@@ -116,13 +125,33 @@ async function until(check, budget) {
   const deadline = Date.now() + budget * 1000;
   while (Date.now() < deadline) {
     if (await check()) return true;
+    // Gap between two checks of what the pages show; not a wait for a result.
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return false;
 }
 
+async function roomFound(room) {
+  const swarm = new Hyperswarm();
+  swarm.on('error', () => {});
+  try {
+    const topic = crypto
+      .createHash('sha256')
+      .update(`ekrooh/sync/v1\n${room}`)
+      .digest();
+    const deadline = Date.now() + ANNOUNCED * 1000;
+    while (Date.now() < deadline) {
+      for await (const result of swarm.dht.lookup(topic)) {
+        if (result.peers.length > 0) return true;
+      }
+    }
+    return false;
+  } finally {
+    await swarm.destroy();
+  }
+}
+
 const servers = { a: startServer([]), b: startServer(['--second']) };
-let browser = null;
 let pages = null;
 const pageErrors = [];
 
@@ -136,11 +165,12 @@ async function pageText(page) {
 }
 
 async function fail() {
+  const failedStage = stage;
   const a = pages ? await pageText(pages.a) : '(no page yet)';
   const b = pages ? await pageText(pages.b) : '(no page yet)';
   const tail = (server) => server.lines.slice(-LOG_LINES).join('\n');
   console.error(
-    `starter journey: FAIL at ${stage} after ${seconds()} s: ${wanted}\n` +
+    `starter journey: FAIL at ${failedStage} after ${seconds()} s: ${wanted}\n` +
       `page A (${ports.a}): ${a}\n` +
       `page B (${ports.b}): ${b}\n` +
       `page errors: ${pageErrors.length ? pageErrors.join(' ; ') : 'none'}\n` +
@@ -173,14 +203,13 @@ async function run() {
     START,
   );
   if (exitedFirst()) {
-    wanted = `dev servers to keep running (${servers.a.exited ?? servers.b.exited})`;
+    wanted = `dev servers to keep running (${exitedFirst()})`;
     return false;
   }
   if (!started) return false;
   passed();
 
   begin('ready', 'both pages to show Tea (0) and an invite code');
-  browser = await chromium.launch();
   pages = {
     a: await (await browser.newContext()).newPage(),
     b: await (await browser.newContext()).newPage(),
@@ -202,6 +231,14 @@ async function run() {
     READY,
   );
   if (!ready) return false;
+  passed();
+
+  // A device that joins a room before the other device's announce reaches the
+  // DHT never finds it (the next lookup is 10+ minutes away): this was the
+  // cause of the stalls at "connected". A user pastes seconds later, so wait
+  // until the room can be looked up.
+  begin('announced', "page A's room to be found on the DHT");
+  if (!(await roomFound((await invite(pages.a)).trim()))) return false;
   passed();
 
   begin('join', 'page B to accept the invite code from page A');
