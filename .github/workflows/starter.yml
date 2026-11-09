@@ -53,7 +53,7 @@ jobs:
         # request leaves the starter alone. Any git error falls through to true.
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ] \
-            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml; then
+            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml .github/scripts/starter-android-reload.mjs; then
             echo "starter=false" >> "$GITHUB_OUTPUT"
           else
             echo "starter=true" >> "$GITHUB_OUTPUT"
