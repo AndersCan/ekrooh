@@ -9,6 +9,7 @@ on:
       - .github/scripts/starter-vote-journey.mjs
       - .github/scripts/starter-android-reload.mjs
       - .github/scripts/starter-android-attach.mjs
+      - '.github/scripts/starter-ios-reload/**'
   pull_request:
     branches:
       - main
@@ -18,6 +19,7 @@ on:
       - .github/scripts/starter-vote-journey.mjs
       - .github/scripts/starter-android-reload.mjs
       - .github/scripts/starter-android-attach.mjs
+      - '.github/scripts/starter-ios-reload/**'
       # The web job installs this PR's @ekrooh/bare, so package changes run it too.
       - 'core/**'
       - 'plugins/**'
@@ -55,7 +57,7 @@ jobs:
         # request leaves the starter alone. Any git error falls through to true.
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ] \
-            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml .github/scripts/starter-android-reload.mjs; then
+            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml .github/scripts/starter-android-reload.mjs .github/scripts/starter-ios-reload; then
             echo "starter=false" >> "$GITHUB_OUTPUT"
           else
             echo "starter=true" >> "$GITHUB_OUTPUT"
@@ -251,6 +253,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.starter != 'false' }}
     runs-on: macos-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -280,3 +283,59 @@ jobs:
           cd "$STARTER_DIR"
           xcodebuild -project ios/Vote.xcodeproj -scheme Vote -configuration Debug \
             -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Edit render.ts, wait for the Simulator to reload
+        run: |
+          cd "$STARTER_DIR/ios"
+          cp "$GITHUB_WORKSPACE/.github/scripts/starter-ios-reload/project.yml" reload-ci.yml
+          mkdir ReloadUITests
+          cp "$GITHUB_WORKSPACE/.github/scripts/starter-ios-reload/ReloadUITests.swift" ReloadUITests/
+          xcodegen generate --spec reload-ci.yml
+          udid=$(xcrun simctl list devices available --json | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8")).devices;console.log(Object.values(d).flat().find(x=>x.name.startsWith("iPhone")).udid)')
+          xcrun simctl boot "$udid" || true
+          xcrun simctl bootstatus "$udid" -b
+          xcodebuild build-for-testing -project VoteReload.xcodeproj -scheme VoteReload \
+            -destination "id=$udid" -quiet
+          cd ..
+          node scripts/dev.mjs > "$RUNNER_TEMP/dev.log" 2>&1 &
+          dev=$!
+          trap 'kill $dev 2>/dev/null || true' EXIT
+          ready=
+          for _ in $(seq 300); do
+            if grep -q 'vote ready:' "$RUNNER_TEMP/dev.log" && grep -q 'backend ready on http://127.0.0.1:8080' "$RUNNER_TEMP/dev.log"; then ready=1; break; fi
+            kill -0 $dev || { cat "$RUNNER_TEMP/dev.log"; exit 1; }
+            sleep 1
+          done
+          [ -n "$ready" ] || { cat "$RUNNER_TEMP/dev.log"; exit 1; }
+          # Only the app's own backend (8082) may serve the page: stop the
+          # computer's 8080 backend so a page that ignores ?backend= stays on
+          # "Connecting…" and the test fails.
+          kill $(lsof -tiTCP:8080 -sTCP:LISTEN)
+          cd ios
+          TEST_RUNNER_VOTE_RENDER_TS="$STARTER_DIR/src/render.ts" \
+            xcodebuild test-without-building -project VoteReload.xcodeproj -scheme VoteReload \
+            -destination "id=$udid" || { tail -60 "$RUNNER_TEMP/dev.log"; exit 1; }
+
+      - name: Show the app's crash report
+        if: failure()
+        run: |
+          for f in "$HOME"/Library/Logs/DiagnosticReports/Vote*.ips; do
+            [ -e "$f" ] || continue
+            echo "== $f"
+            node -e '
+              const text = require("fs").readFileSync(process.argv[1], "utf8");
+              const [head, ...rest] = text.split("\n");
+              const report = JSON.parse(rest.join("\n"));
+              console.log(head);
+              console.log(JSON.stringify({ exception: report.exception, termination: report.termination, asi: report.asi }, null, 1));
+              const thread = report.threads[report.faultingThread];
+              for (const frame of thread.frames.slice(0, 25)) {
+                console.log(report.usedImages[frame.imageIndex]?.name, frame.symbol ?? frame.imageOffset);
+              }
+            ' "$f" || head -c 4000 "$f"
+          done
+          xcrun simctl spawn booted log show --last 20m --style compact --predicate 'subsystem == "com.example.vote"' || true
+          tail -60 "$RUNNER_TEMP/dev.log" || true

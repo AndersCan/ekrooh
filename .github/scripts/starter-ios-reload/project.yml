@@ -1,0 +1,30 @@
+# CI only: adds a UI test target to the starter's iOS project (generated copy;
+# nothing here ships in the starter).
+include:
+  - project.yml
+name: VoteReload
+targets:
+  VoteReloadUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: '14.0'
+    sources:
+      - ReloadUITests
+    dependencies:
+      - target: Vote
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.vote.reloaduitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Vote
+        SWIFT_VERSION: '5.0'
+schemes:
+  VoteReload:
+    build:
+      targets:
+        Vote: all
+        VoteReloadUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - VoteReloadUITests

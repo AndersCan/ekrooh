@@ -27,7 +27,7 @@ Votes start from zero when the app restarts. If the status still says "Looking f
 
 ## Change the page
 
-Edit `src/render.ts`. The browser and the Android emulator reload on save.
+Edit `src/render.ts`. The browser, the Android emulator and the iOS Simulator reload on save.
 
 | File                     | What it is                                                                                             |
 | ------------------------ | ------------------------------------------------------------------------------------------------------ |
@@ -54,9 +54,12 @@ If Gradle says "Web build not found", run `npm run sync` first.
 iOS needs a Mac. On Linux or Windows, skip this section; web and Android work fully.
 
 1. Install Xcode from the App Store.
-2. In the project folder, run `npm run sync`. Run it again after every edit.
+2. In the project folder, run `npm run sync` once (it builds the app backend and native parts), then `npm run dev` and leave it running.
 3. Open `ios/Vote.xcodeproj` in Xcode. The first open downloads packages; this takes a few minutes.
 4. Pick a Simulator and press Run. No Apple account is needed.
+5. Edit `src/render.ts` and save. The Simulator shows the change in a few seconds.
+
+A real iPhone and release builds show the page from the last `npm run sync`; run it again after an edit.
 
 For a real iPhone: select the Vote target > Signing & Capabilities > Team > your Personal Team.
 
