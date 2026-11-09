@@ -14,6 +14,22 @@ android {
     versionName = "1.0"
   }
 
+  buildFeatures {
+    buildConfig = true
+  }
+
+  buildTypes {
+    // Debug builds load the page from "npm run dev" when it answers at the
+    // emulator's address for this computer. The port must match scripts/dev.mjs.
+    debug {
+      buildConfigField "String", "DEV_SERVER_URL", '"http://10.0.2.2:5173"'
+    }
+    // Release builds always show the page from "npm run sync".
+    release {
+      buildConfigField "String", "DEV_SERVER_URL", '""'
+    }
+  }
+
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17

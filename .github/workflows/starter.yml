@@ -7,6 +7,7 @@ on:
       - 'examples/vote/**'
       - .github/workflows/starter.yml
       - .github/scripts/starter-vote-journey.mjs
+      - .github/scripts/starter-android-reload.mjs
   pull_request:
     branches:
       - main
@@ -14,6 +15,7 @@ on:
       - 'examples/vote/**'
       - .github/workflows/starter.yml
       - .github/scripts/starter-vote-journey.mjs
+      - .github/scripts/starter-android-reload.mjs
       # The web job installs this PR's @ekrooh/bare, so package changes run it too.
       - 'core/**'
       - 'plugins/**'
@@ -51,7 +53,7 @@ jobs:
         # request leaves the starter alone. Any git error falls through to true.
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ] \
-            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml; then
+            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml .github/scripts/starter-android-reload.mjs; then
             echo "starter=false" >> "$GITHUB_OUTPUT"
           else
             echo "starter=true" >> "$GITHUB_OUTPUT"
@@ -171,6 +173,76 @@ jobs:
           grep -q 'assets/web/index.html' apk.txt || { echo "APK has no assets/web/index.html" >&2; exit 1; }
           grep -q 'lib/arm64-v8a/libbare-kit.so' apk.txt || { echo "APK has no lib/arm64-v8a/libbare-kit.so" >&2; exit 1; }
           grep 'lib/arm64-v8a/lib.*\.so' apk.txt | grep -qv 'libbare-kit.so' || { echo "APK has no native addon besides libbare-kit.so" >&2; exit 1; }
+
+  android-reload:
+    name: Starter / android reload
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.starter != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
+
+      - name: Remove preinstalled NDKs
+        # The starter must build without an NDK (prebuilt .so files only).
+        run: |
+          sudo rm -rf "$ANDROID_HOME/ndk" "$ANDROID_HOME/ndk-bundle" "$ANDROID_SDK_ROOT/ndk" || true
+          sudo rm -rf /usr/local/lib/android/sdk/ndk || true
+
+      - name: Install the repo (Playwright)
+        run: npm ci
+
+      - name: Get the starter
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            cp -R examples/vote "$RUNNER_TEMP/my-app"
+          else
+            npx --yes degit@3.10.1 AndersCan/ekrooh/examples/vote#main "$RUNNER_TEMP/my-app"
+          fi
+          echo "STARTER_DIR=$RUNNER_TEMP/my-app" >> "$GITHUB_ENV"
+
+      - name: Sync and build the debug APK
+        run: |
+          cd "$STARTER_DIR"
+          npm ci
+          npm run sync
+          cd android && ./gradlew assembleDebug
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Edit render.ts, wait for the emulator to reload
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: true
+          cores: 4
+          emulator-boot-timeout: 300
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+          script: node .github/scripts/starter-android-reload.mjs "$STARTER_DIR"
 
   ios:
     name: Starter / ios

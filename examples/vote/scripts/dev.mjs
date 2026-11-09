@@ -114,7 +114,9 @@ await worklet.watch();
 process.env.VITE_BACKEND_PORT = String(backendPort);
 const server = await createServer({
   root,
-  server: { port: pagePort, strictPort: true },
+  // 127.0.0.1: the Android emulator reaches this computer's 127.0.0.1 as 10.0.2.2.
+  // The port must match DEV_SERVER_URL in android/app/build.gradle.
+  server: { host: '127.0.0.1', port: pagePort, strictPort: true },
 });
 try {
   await server.listen();
@@ -134,7 +136,7 @@ try {
 }
 server.printUrls();
 console.log(
-  `vote ready: http://localhost:${pagePort} (browser only; the phone shows the last "npm run sync")`,
+  `vote ready: http://localhost:${pagePort} (browser)${second ? '' : ` and http://10.0.2.2:${pagePort} (Android emulator debug app)`}`,
 );
 
 async function shutdown() {
