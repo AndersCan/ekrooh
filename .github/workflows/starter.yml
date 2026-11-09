@@ -211,14 +211,14 @@ jobs:
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           script: |
             adb install -r "$STARTER_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
-            maestro test --debug-output "$RUNNER_TEMP/maestro" .github/scripts/starter-vote-native.yaml
+            maestro test --debug-output "$RUNNER_TEMP/maestro-debug" --flatten-debug-output .github/scripts/starter-vote-native.yaml
 
       - name: Upload the Maestro output
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: maestro-android
-          path: ${{ runner.temp }}/maestro
+          path: ${{ runner.temp }}/maestro-debug
 
   android-reload:
     name: Starter / android reload
