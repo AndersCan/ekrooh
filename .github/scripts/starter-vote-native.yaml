@@ -1,0 +1,19 @@
+# Native vote journey (Starter / android): opens the debug app with no `npm run dev`, votes Tea.
+# By hand: install the debug app, then `maestro test` this file. It reads the starter's button names.
+appId: com.example.vote
+name: Vote in the native app
+androidWebViewHierarchy: devtools
+---
+- launchApp:
+    label: Open the vote app
+- extendedWaitUntil:
+    label: App shows Tea (0)
+    visible: Tea (0)
+    timeout: 90000
+- tapOn:
+    label: Vote Tea
+    text: Tea (0)
+- extendedWaitUntil:
+    label: Count goes up to Tea (1)
+    visible: Tea (1)
+    timeout: 15000
