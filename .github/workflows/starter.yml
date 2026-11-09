@@ -318,3 +318,23 @@ jobs:
           TEST_RUNNER_VOTE_RENDER_TS="$STARTER_DIR/src/render.ts" \
             xcodebuild test-without-building -project VoteReload.xcodeproj -scheme VoteReload \
             -destination "id=$udid" || { tail -60 "$RUNNER_TEMP/dev.log"; exit 1; }
+
+      - name: Show the app's crash report
+        if: failure()
+        run: |
+          for f in "$HOME"/Library/Logs/DiagnosticReports/Vote*.ips; do
+            [ -e "$f" ] || continue
+            echo "== $f"
+            node -e '
+              const text = require("fs").readFileSync(process.argv[1], "utf8");
+              const [head, ...rest] = text.split("\n");
+              const report = JSON.parse(rest.join("\n"));
+              console.log(head);
+              console.log(JSON.stringify({ exception: report.exception, termination: report.termination, asi: report.asi }, null, 1));
+              const thread = report.threads[report.faultingThread];
+              for (const frame of thread.frames.slice(0, 25)) {
+                console.log(report.usedImages[frame.imageIndex]?.name, frame.symbol ?? frame.imageOffset);
+              }
+            ' "$f" || head -c 4000 "$f"
+          done
+          tail -60 "$RUNNER_TEMP/dev.log" || true
