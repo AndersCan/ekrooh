@@ -112,7 +112,8 @@ final class IOSAppUITests: XCTestCase {
     _ app: XCUIApplication, containing text: String, _ message: String
   ) {
     if !waitForResult(app, containing: text) {
-      XCTFail("\(message) — harness showed: \(resultText(app))")
+      XCTFail(
+        "\(message) — harness showed: \(resultText(app))\n\(app.debugDescription)")
     }
   }
 }
