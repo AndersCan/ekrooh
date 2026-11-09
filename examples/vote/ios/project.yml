@@ -8,7 +8,7 @@ options:
 packages:
   BareHost:
     url: https://github.com/AndersCan/ekrooh
-    exactVersion: 0.6.1
+    exactVersion: 0.7.0
 targets:
   Vote:
     type: application

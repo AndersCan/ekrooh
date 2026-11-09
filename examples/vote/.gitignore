@@ -12,3 +12,4 @@ ios/Vote/main.core.bundle
 ios/Vote/WebAssets/
 xcuserdata/
 .DS_Store
+worklet/app.second.core.gen.js

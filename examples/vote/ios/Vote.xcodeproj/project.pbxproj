@@ -482,7 +482,7 @@
 			repositoryURL = "https://github.com/AndersCan/ekrooh";
 			requirement = {
 				kind = exactVersion;
-				version = 0.6.1;
+				version = 0.7.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
