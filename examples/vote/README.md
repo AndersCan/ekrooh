@@ -45,10 +45,6 @@ Edit `src/render.ts`. The browser and the Android emulator reload on save.
 4. Pick a device: Device Manager > Create Device > any Pixel with API 35. Press Run.
 5. Edit `src/render.ts` and save. The emulator shows the change in a few seconds.
 
-The app says `npm run dev` is not running? Start it on this computer and press Run again. The emulator reaches your computer at 10.0.2.2.
-
-Changed `worklet/`? Run `npm run sync` and press Run again; only the page reloads live.
-
 A USB phone (debugging on) and release builds show the page from the last `npm run sync`; run it again after an edit.
 
 If Gradle says "Web build not found", run `npm run sync` first.

@@ -136,7 +136,7 @@ try {
 }
 server.printUrls();
 console.log(
-  `vote ready: http://localhost:${pagePort} (browser) and http://10.0.2.2:${pagePort} (Android emulator debug app)`,
+  `vote ready: http://localhost:${pagePort} (browser)${second ? "" : ` and http://10.0.2.2:${pagePort} (Android emulator debug app)`}`,
 );
 
 async function shutdown() {

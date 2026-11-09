@@ -7,7 +7,6 @@ import android.os.Looper
 import android.util.Log
 import android.webkit.WebSettings
 import android.webkit.WebView
-import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.webkit.WebViewCompat
@@ -63,14 +62,14 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = webViewClient
 
         if (BuildConfig.DEV_SERVER_URL.isEmpty()) {
-            startBundled(showNote = false)
+            startBundled()
         } else {
             // Debug build: use the page from "npm run dev" when it answers.
             Thread {
                 val up = devServerAnswers(BuildConfig.DEV_SERVER_URL)
                 mainHandler.post {
                     if (!isDestroyed) {
-                        if (up) startDev() else startBundled(showNote = true)
+                        if (up) startDev() else startBundled()
                     }
                 }
             }.start()
@@ -93,7 +92,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** The page from the last "npm run sync", served by the worklet. */
-    private fun startBundled(showNote: Boolean) {
+    private fun startBundled() {
         startWorklet(
             // argv contract: [webAssets, storage, cache]
             arrayOf(
@@ -102,15 +101,6 @@ class MainActivity : AppCompatActivity() {
                 bareCacheDir.absolutePath,
             ),
         )
-        if (showNote) {
-            Log.i("BARE_KOTLIN", "npm run dev not reachable at ${BuildConfig.DEV_SERVER_URL}; loading the built page")
-            Toast.makeText(
-                this,
-                "npm run dev is not running: showing the page from the last \"npm run sync\". " +
-                    "Start npm run dev and press Run again.",
-                Toast.LENGTH_LONG,
-            ).show()
-        }
         waitForHandoffAndLoad()
     }
 
@@ -118,7 +108,6 @@ class MainActivity : AppCompatActivity() {
      * computer), page loaded from the dev server. */
     private fun startDev() {
         val url = BuildConfig.DEV_SERVER_URL
-        Log.i("BARE_KOTLIN", "Loading the page from $url (npm run dev)")
         startWorklet(
             arrayOf(
                 "webassets=${webappDir.absolutePath}",
