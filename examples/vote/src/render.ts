@@ -1,3 +1,4 @@
+import { submitJoin } from './join-wait';
 import type { VoteState } from './vote-events';
 
 export type View =
@@ -102,9 +103,7 @@ function build(root: HTMLElement, actions: Actions): Page {
   form.append(input, joinButton);
   form.addEventListener('submit', (event) => {
     event.preventDefault();
-    void actions.join(input.value).then((joined) => {
-      if (joined) input.value = '';
-    });
+    void submitJoin(input, actions.join);
   });
 
   const message = document.createElement('p');

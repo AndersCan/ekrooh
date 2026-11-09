@@ -5,6 +5,7 @@ import {
   createPluginBus,
   createProtocolMessenger,
 } from '@ekrooh/bare/core';
+import { createJoinWait } from './join-wait';
 import { render, type View } from './render';
 import { transport } from './transport';
 import { type VoteState, voteEvents } from './vote-events';
@@ -23,19 +24,18 @@ const app = root;
 
 let state: VoteState | undefined;
 let message = '';
-let joinedAt: number | undefined;
+const joinWait = createJoinWait();
 
 function show() {
   const view: View = state
-    ? { kind: 'ready', state, message, waiting: waitedSeconds() }
+    ? {
+        kind: 'ready',
+        state,
+        message,
+        waiting: joinWait.seconds(state.connected),
+      }
     : { kind: 'loading' };
   render(app, view, { vote, join });
-}
-
-function waitedSeconds(): number | undefined {
-  if (state?.connected) joinedAt = undefined;
-  if (joinedAt === undefined) return undefined;
-  return Math.floor((Date.now() - joinedAt) / 1000);
 }
 
 /** An action's failure shows its message; its result updates the page. */
@@ -63,7 +63,7 @@ async function refresh() {
 const vote = (id: string) => act(bus.invoke(voteEvents.cast(id)));
 const join = async (code: string) => {
   const ok = await act(bus.invoke(voteEvents.join(code)));
-  if (ok) joinedAt = Date.now();
+  if (ok) joinWait.joined();
   show();
   return ok;
 };

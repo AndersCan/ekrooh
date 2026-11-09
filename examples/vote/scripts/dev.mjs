@@ -38,6 +38,12 @@ const appArgs = [
   String(backendPort),
 ];
 
+// The sync state writer does not create folders; without this a fresh clone
+// joins a new room on every start.
+fs.mkdirSync(path.join(root, '.dev-storage', second ? 'second' : 'first'), {
+  recursive: true,
+});
+
 let bareProcess = null;
 let restartTimer = null;
 let shuttingDown = false;

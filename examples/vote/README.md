@@ -23,7 +23,7 @@ Votes are shared over p2p (`@ekrooh/bare/sync`). Each device counts its own vote
 
 On one computer, run `npm run dev:second` in a second terminal and open http://localhost:5174 as the second device.
 
-Votes start from zero when the app restarts. If the status stays on "No other device yet", wait a minute, then restart the app: the first connection over the public network can be slow. A device that crashed can still show as connected until it comes back.
+Votes start from zero when the app restarts. If the status still says "Looking for the other device" after a minute, wait a little, then restart both apps: the first connection over the public network can be slow. A device that crashed can still show as connected until it comes back.
 
 ## Change the page
 

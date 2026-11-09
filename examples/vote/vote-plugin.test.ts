@@ -7,6 +7,8 @@ import {
   type Counts,
 } from './worklet/vote-plugin';
 import type { VoteState } from './src/vote-events';
+import { createJoinWait, submitJoin } from './src/join-wait';
+import { connectionText } from './src/render';
 
 type Fake = Sync<Counts> & { published: Counts[]; peers: SyncValue<Counts>[] };
 
@@ -127,11 +129,49 @@ describe('vote plugin', () => {
   });
 
   it('a restarted device starts at zero, not at its old votes', async () => {
-    const first = createVotePlugin(fakeSync());
-    await call(first, 'vote.cast', { id: 'water' });
     const sync = fakeSync();
+    const first = createVotePlugin(sync);
+    await call(first, 'vote.cast', { id: 'water' });
     const second = createVotePlugin(sync);
     const [, state] = await call(second, 'vote.list', {});
     expect(votes(state).water).toBe(0);
+  });
+});
+
+describe('connectionText', () => {
+  it.each([
+    [0, undefined, 'No other device yet'],
+    [0, 0, 'Joined. Looking for the other device…'],
+    [0, 59, 'Joined. Looking for the other device…'],
+    [1, 30, '1 other device connected'],
+    [2, undefined, '2 other devices connected'],
+  ])('(%i, %s)', (connected, waiting, text) => {
+    expect(connectionText(connected, waiting)).toBe(text);
+  });
+
+  it('after a minute tells you to restart both apps', () => {
+    expect(connectionText(0, 60)).toContain('restart both apps');
+  });
+});
+
+describe('join wait', () => {
+  it('counts seconds from a join until a device connects', () => {
+    let t = 1000;
+    const wait = createJoinWait(() => t);
+    expect(wait.seconds(0)).toBeUndefined();
+    wait.joined();
+    t += 61_500;
+    expect(wait.seconds(0)).toBe(61);
+    expect(wait.seconds(1)).toBeUndefined();
+    expect(wait.seconds(0)).toBeUndefined();
+  });
+
+  it('a good join clears the box, a failed one keeps the text', async () => {
+    const good = { value: 'abc' };
+    await submitJoin(good, async () => true);
+    expect(good.value).toBe('');
+    const bad = { value: 'abc' };
+    await submitJoin(bad, async () => false);
+    expect(bad.value).toBe('abc');
   });
 });
