@@ -7,6 +7,10 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `createWebSocketTransport` returns an optional `ready()` that resolves once the socket is open, or the transport gave up, closed or was replaced. Await it before the first call so the invoke deadline measures the round trip, not the connect.
+
 ## [0.7.0] - 2026-11-08
 
 This release changes behaviour at stability-contract
