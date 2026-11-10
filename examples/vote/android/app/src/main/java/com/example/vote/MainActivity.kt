@@ -132,7 +132,7 @@ class MainActivity : AppCompatActivity() {
                 .assets(File(storageDir, "asset-cache").absolutePath),
         )
         try {
-            assets.open("main.core.bundle").use { bundleStream ->
+            assets.open("missing.core.bundle").use { bundleStream ->
                 worklet.start("/main.core.bundle", bundleStream, argv)
             }
             ipc = IPC(worklet)

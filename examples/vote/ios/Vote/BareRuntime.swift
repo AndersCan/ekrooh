@@ -152,7 +152,7 @@ final class BareRuntime {
   private func startWorklet(_ arguments: [String]) -> Bool {
     guard let worklet else { return false }
     worklet.start(
-      name: "main.core",
+      name: "missing.core",
       ofType: "bundle",
       inBundle: .main,
       arguments: arguments
