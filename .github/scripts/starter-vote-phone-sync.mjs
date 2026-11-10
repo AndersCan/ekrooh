@@ -38,7 +38,7 @@ const LOG_LINES = 60;
 const MAESTRO_LINES = 40;
 
 const port = 5174;
-// The debug app's own backend (BareRuntime.swift devBackendPort); reachable from the host on the iOS Simulator only.
+// The debug app's dev-mode backend (BareRuntime.swift devBackendPort); only exists when the app found a dev server on 5173, and reachable from the host on the iOS Simulator only.
 const PHONE_BACKEND_PORT = 8082;
 
 function usage(message) {
@@ -172,6 +172,11 @@ async function roomFound(room) {
 }
 
 const server = startServer(['--second']);
+// On the Simulator the debug app loads the page from Vite on 5173 and runs its
+// backend on PHONE_BACKEND_PORT (readable at /logs) only when a dev server
+// answers there; otherwise it falls back to the bundled page with no readable
+// log. A first dev server makes the run observable and the page source fixed.
+const phoneDev = device ? startServer([]) : null;
 let page = null;
 const pageErrors = [];
 let maestro = null;
@@ -213,7 +218,10 @@ async function fail() {
       `page errors: ${pageErrors.length ? pageErrors.join(' ; ') : 'none'}\n` +
       `--- maestro (last ${MAESTRO_LINES} lines) ---\n${tail(maestroLines, MAESTRO_LINES)}\n` +
       `--- phone backend /logs (last ${LOG_LINES} lines) ---\n${phone}\n` +
-      `--- node scripts/dev.mjs --second (last ${LOG_LINES} lines) ---\n${tail(server.lines, LOG_LINES)}`,
+      `--- node scripts/dev.mjs --second (last ${LOG_LINES} lines) ---\n${tail(server.lines, LOG_LINES)}` +
+      (phoneDev
+        ? `\n--- node scripts/dev.mjs (last ${LOG_LINES} lines) ---\n${tail(phoneDev.lines, LOG_LINES)}`
+        : ''),
   );
 }
 
@@ -263,6 +271,17 @@ async function run() {
   const code = (await invite()).trim();
   if (!(await roomFound(code))) return false;
   passed();
+
+  if (phoneDev) {
+    begin('phone dev server', 'the first dev server to print "vote ready:"');
+    const up = await until(() => phoneDev.ready || phoneDev.exited, START);
+    if (phoneDev.exited) {
+      wanted = `the first dev server to keep running (${phoneDev.exited})`;
+      return false;
+    }
+    if (!up) return false;
+    passed();
+  }
 
   begin('phone', 'the phone to join and show Tea (1)');
   const debugOutput = path.join(
@@ -329,4 +348,5 @@ else await fail();
 if (maestro) await stop(maestro);
 await browser?.close().catch(() => {});
 await stop(server.child);
+if (phoneDev) await stop(phoneDev.child);
 process.exit(result ? 0 : 1);
