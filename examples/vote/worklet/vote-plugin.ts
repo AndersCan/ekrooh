@@ -59,9 +59,7 @@ export function createVotePlugin(sync: Sync<Counts>) {
         return ok(state());
       },
       join(args) {
-        // Break check (plan #495): never call sync.join.
-        void args.code;
-        const error = undefined;
+        const [error] = sync.join(args.code);
         if (error) {
           return err(
             'app.vote/bad-code',
