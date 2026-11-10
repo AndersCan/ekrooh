@@ -326,7 +326,33 @@ jobs:
         run: |
           cd "$STARTER_DIR"
           xcodebuild -project ios/Vote.xcodeproj -scheme Vote -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/vote-build" \
+            CODE_SIGNING_ALLOWED=NO build
+
+      - name: Boot the Simulator
+        run: |
+          udid=$(xcrun simctl list devices available --json | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8")).devices;console.log(Object.values(d).flat().find(x=>x.name.startsWith("iPhone")).udid)')
+          xcrun simctl boot "$udid" || true
+          xcrun simctl bootstatus "$udid" -b
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+
+      - name: Install Maestro
+        env:
+          MAESTRO_VERSION: 2.12.1
+          MAESTRO_SHA256: 54dbb0716425626604973cbb374c585ca30272375d9ce15177a1152765ddd9d7
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-$MAESTRO_VERSION/maestro.zip"
+          echo "$MAESTRO_SHA256  $RUNNER_TEMP/maestro.zip" | shasum -a 256 -c - || { echo "maestro.zip checksum mismatch" >&2; exit 1; }
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/maestro/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/maestro/bin/maestro" --version
+
+      - name: Vote in the app (Maestro)
+        timeout-minutes: 15
+        run: |
+          xcrun simctl install "$SIM_UDID" "$RUNNER_TEMP/vote-build/Build/Products/Debug-iphonesimulator/Vote.app"
+          maestro --device "$SIM_UDID" test --debug-output "$RUNNER_TEMP/maestro-debug" --flatten-debug-output .github/scripts/starter-vote-native.yaml
+          xcrun simctl uninstall "$SIM_UDID" dev.mobile.maestro-driver-iosUITests.xctrunner || true
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -338,11 +364,8 @@ jobs:
           mkdir ReloadUITests
           cp "$GITHUB_WORKSPACE/.github/scripts/starter-ios-reload/ReloadUITests.swift" ReloadUITests/
           xcodegen generate --spec reload-ci.yml
-          udid=$(xcrun simctl list devices available --json | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8")).devices;console.log(Object.values(d).flat().find(x=>x.name.startsWith("iPhone")).udid)')
-          xcrun simctl boot "$udid" || true
-          xcrun simctl bootstatus "$udid" -b
           xcodebuild build-for-testing -project VoteReload.xcodeproj -scheme VoteReload \
-            -destination "id=$udid" -quiet
+            -destination "id=$SIM_UDID" -quiet
           cd ..
           node scripts/dev.mjs > "$RUNNER_TEMP/dev.log" 2>&1 &
           dev=$!
@@ -361,7 +384,14 @@ jobs:
           cd ios
           TEST_RUNNER_VOTE_RENDER_TS="$STARTER_DIR/src/render.ts" \
             xcodebuild test-without-building -project VoteReload.xcodeproj -scheme VoteReload \
-            -destination "id=$udid" || { tail -60 "$RUNNER_TEMP/dev.log"; exit 1; }
+            -destination "id=$SIM_UDID" || { tail -60 "$RUNNER_TEMP/dev.log"; exit 1; }
+
+      - name: Upload the Maestro output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: maestro-ios
+          path: ${{ runner.temp }}/maestro-debug
 
       - name: Show the app's crash report
         if: failure()
