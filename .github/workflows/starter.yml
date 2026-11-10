@@ -9,7 +9,6 @@ on:
       - .github/scripts/starter-vote-journey.mjs
       - .github/scripts/starter-android-reload.mjs
       - .github/scripts/starter-android-attach.mjs
-      - .github/scripts/starter-vote-native.yaml
       - .github/scripts/starter-vote-phone-sync.mjs
       - .github/scripts/starter-vote-native-sync.yaml
       - '.github/scripts/starter-ios-reload/**'
@@ -21,7 +20,6 @@ on:
       - .github/workflows/starter.yml
       - .github/scripts/starter-vote-journey.mjs
       - .github/scripts/starter-android-reload.mjs
-      - .github/scripts/starter-vote-native.yaml
       - .github/scripts/starter-vote-phone-sync.mjs
       - .github/scripts/starter-vote-native-sync.yaml
       - .github/scripts/starter-android-attach.mjs
@@ -63,7 +61,7 @@ jobs:
         # request leaves the starter alone. Any git error falls through to true.
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ] \
-            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml .github/scripts/starter-android-reload.mjs .github/scripts/starter-vote-native.yaml .github/scripts/starter-vote-phone-sync.mjs .github/scripts/starter-vote-native-sync.yaml .github/scripts/starter-ios-reload; then
+            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml .github/scripts/starter-android-reload.mjs .github/scripts/starter-vote-phone-sync.mjs .github/scripts/starter-vote-native-sync.yaml .github/scripts/starter-ios-reload; then
             echo "starter=false" >> "$GITHUB_OUTPUT"
           else
             echo "starter=true" >> "$GITHUB_OUTPUT"
@@ -315,6 +313,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
+          cache: npm
 
       - name: Get the starter
         run: |
@@ -345,6 +344,11 @@ jobs:
           xcrun simctl bootstatus "$udid" -b
           echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
 
+      - name: Install the repo (Playwright)
+        run: |
+          npm ci
+          npm run playwright:install
+
       - name: Install Maestro
         env:
           MAESTRO_VERSION: 2.12.1
@@ -356,13 +360,13 @@ jobs:
           echo "$RUNNER_TEMP/maestro/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/maestro/bin/maestro" --version
 
-      - name: Vote in the app (Maestro)
+      - name: Phone votes, second peer sees it
         timeout-minutes: 15
         env:
           MAESTRO_DRIVER_STARTUP_TIMEOUT: '300000'
         run: |
           xcrun simctl install "$SIM_UDID" "$RUNNER_TEMP/vote-build/Build/Products/Debug-iphonesimulator/Vote.app"
-          maestro --device "$SIM_UDID" test --debug-output "$RUNNER_TEMP/maestro-debug" --flatten-debug-output .github/scripts/starter-vote-native.yaml
+          node .github/scripts/starter-vote-phone-sync.mjs "$STARTER_DIR" --device "$SIM_UDID"
           xcrun simctl uninstall "$SIM_UDID" dev.mobile.maestro-driver-iosUITests.xctrunner || true
 
       - name: Install xcodegen
@@ -422,5 +426,5 @@ jobs:
               }
             ' "$f" || head -c 4000 "$f"
           done
-          xcrun simctl spawn booted log show --last 20m --style compact --predicate 'subsystem == "com.example.vote"' || true
+          xcrun simctl spawn booted log show --last 20m --style compact --predicate 'subsystem == "com.example.vote" OR eventMessage CONTAINS "[sync]" OR eventMessage CONTAINS "[vote]"' || true
           tail -60 "$RUNNER_TEMP/dev.log" || true

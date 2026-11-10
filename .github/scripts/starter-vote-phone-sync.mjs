@@ -4,7 +4,7 @@
  * this machine (`node scripts/dev.mjs --second`, read with headless Chromium),
  * has the debug app on a booted phone or Simulator join its room by invite code
  * through Maestro, vote Tea, and passes only when the second peer shows Tea (1).
- * CI runs it in Starter / android; by hand:
+ * CI runs it in Starter / android and Starter / ios; by hand:
  * `node .github/scripts/starter-vote-phone-sync.mjs <fresh starter copy> [--device <id>]`
  * with the debug app installed, `maestro` on PATH, `npm ci` and
  * `npm run playwright:install` at the repo root and `npm ci` in the copy. It
