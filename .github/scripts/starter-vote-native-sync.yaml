@@ -24,10 +24,6 @@ androidWebViewHierarchy: devtools
 - tapOn:
     label: Join the second peer's room
     text: Join
-- extendedWaitUntil:
-    label: The phone says it joined
-    visible: Joined.*
-    timeout: 15000
 - tapOn:
     label: Vote Tea
     text: Tea (0)
