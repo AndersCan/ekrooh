@@ -1,4 +1,4 @@
-# Phone sync flow (Starter / android): joins the second peer's room by invite code, votes Tea.
+# Phone sync flow (Starter / android and ios): joins the second peer's room by invite code, votes Tea.
 # Needs `-e INVITE=<code>`; run by starter-vote-phone-sync.mjs. It reads the starter's button names and Join box label.
 appId: com.example.vote
 name: Join a room and vote in the native app
@@ -19,8 +19,20 @@ androidWebViewHierarchy: devtools
 - inputText:
     label: Type the second peer's invite code
     text: ${INVITE}
-# The soft keyboard covers the Join button on the emulator's small screen.
-- hideKeyboard
+# The soft keyboard covers the Join button on the emulator's small screen. The iOS Simulator has
+# no dismiss action (hideKeyboard fails there), so tap the heading instead.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          label: Tap the heading to close the keyboard
+          text: Vote
 - tapOn:
     label: Join the second peer's room
     text: Join
