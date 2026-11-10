@@ -19,20 +19,14 @@ androidWebViewHierarchy: devtools
 - inputText:
     label: Type the second peer's invite code
     text: ${INVITE}
-# The soft keyboard covers the Join button on the emulator's small screen. The iOS Simulator has
-# no dismiss action (hideKeyboard fails there), so tap the heading instead.
+# The soft keyboard covers the Join button on the emulator's small screen.
+# Android only: hideKeyboard fails on the iOS Simulator, and a tap on the "Vote" heading there
+# lands on the Water button (its element spans the page). Join stays visible above the iOS keyboard.
 - runFlow:
     when:
       platform: Android
     commands:
       - hideKeyboard
-- runFlow:
-    when:
-      platform: iOS
-    commands:
-      - tapOn:
-          label: Tap the heading to close the keyboard
-          text: Vote
 - tapOn:
     label: Join the second peer's room
     text: Join
