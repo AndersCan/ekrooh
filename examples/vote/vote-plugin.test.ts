@@ -56,15 +56,13 @@ async function call(
   })) as Either<CoreError, VoteState>;
 }
 
-const votes = (state: VoteState | null) =>
-  Object.fromEntries((state?.options ?? []).map((o) => [o.id, o.votes]));
+const votes = (state: VoteState | null) => state?.votes ?? {};
 
 describe('parseCounts', () => {
-  it('keeps known options with whole non-negative counts', () => {
-    expect(parseCounts({ tea: 2, coffee: 0, other: 9 })).toEqual({
-      tea: 2,
-      coffee: 0,
-    });
+  it('keeps valid option ids with whole non-negative counts', () => {
+    expect(
+      parseCounts(JSON.parse('{"tea":2,"pizza":1,"Tea":9,"__proto__":1}')),
+    ).toEqual({ tea: 2, pizza: 1 });
     expect(parseCounts({})).toEqual({});
   });
 
@@ -92,20 +90,60 @@ describe('vote plugin', () => {
   it('counts own votes and sums them with other devices', async () => {
     const sync = fakeSync();
     const plugin = createVotePlugin(sync);
-    sync.peers.push({ peer: 'b', self: false, value: { tea: 2, coffee: 1 } });
+    sync.peers.push({
+      peer: 'b',
+      self: false,
+      value: { tea: 2, coffee: 1, pizza: 5 },
+    });
     await call(plugin, 'vote.cast', { id: 'tea' });
     const [error, state] = await call(plugin, 'vote.cast', { id: 'tea' });
     expect(error).toBeNull();
-    expect(votes(state)).toEqual({ tea: 4, coffee: 1, water: 0 });
+    expect(votes(state)).toEqual({ tea: 4, coffee: 1, pizza: 5 });
     expect(state?.connected).toBe(1);
     expect(state?.invite).toBe('a'.repeat(32));
   });
 
-  it('rejects an unknown option without publishing', async () => {
+  it('counts an id no one listed, summed with a peer', async () => {
     const sync = fakeSync();
     const plugin = createVotePlugin(sync);
-    const [error] = await call(plugin, 'vote.cast', { id: 'juice' });
-    expect(error?.code).toBe('app.vote/unknown-option');
+    sync.peers.push({ peer: 'b', self: false, value: { pizza: 2 } });
+    const [, state] = await call(plugin, 'vote.cast', { id: 'pizza' });
+    expect(votes(state).pizza).toBe(3);
+  });
+
+  it.each([
+    ['a dash', 'ice-cream'],
+    ['digits', 'option-2'],
+    ['32 characters', 'a'.repeat(32)],
+  ])('counts an option id with %s', async (_, id) => {
+    const [error, state] = await call(
+      createVotePlugin(fakeSync()),
+      'vote.cast',
+      { id },
+    );
+    expect(error).toBeNull();
+    expect(votes(state)[id]).toBe(1);
+  });
+
+  it('counts an id named like an Object property', async () => {
+    const plugin = createVotePlugin(fakeSync());
+    const [, state] = await call(plugin, 'vote.cast', { id: 'constructor' });
+    expect(votes(state).constructor).toBe(1);
+  });
+
+  it.each([
+    ['capital', 'Pizza'],
+    ['too long', 'a'.repeat(33)],
+    ['empty', ''],
+    ['not a string', 7],
+  ])('rejects a %s option id without publishing', async (_, id) => {
+    const sync = fakeSync();
+    const plugin = createVotePlugin(sync);
+    const [error] = await call(plugin, 'vote.cast', { id });
+    expect(error?.code).toBe('app.vote/bad-option');
+    expect(error?.message).toBe(
+      'Option ids use a-z, 0-9 and - (1 to 32 characters).',
+    );
     expect(sync.published).toEqual([{}]);
   });
 
@@ -125,7 +163,7 @@ describe('vote plugin', () => {
     const plugin = createVotePlugin(fakeSync());
     const [error, state] = await call(plugin, 'vote.join', { code: 'x' });
     expect(error).toBeNull();
-    expect(votes(state)).toEqual({ tea: 0, coffee: 0, water: 0 });
+    expect(votes(state)).toEqual({});
   });
 
   it('a restarted device starts at zero, not at its old votes', async () => {
@@ -134,7 +172,7 @@ describe('vote plugin', () => {
     await call(first, 'vote.cast', { id: 'water' });
     const second = createVotePlugin(sync);
     const [, state] = await call(second, 'vote.list', {});
-    expect(votes(state).water).toBe(0);
+    expect(votes(state)).toEqual({});
   });
 });
 

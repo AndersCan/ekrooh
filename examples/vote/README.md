@@ -27,14 +27,14 @@ Votes start from zero when the app restarts. If the status still says "Looking f
 
 ## Change the page
 
-Edit `src/render.ts`. The browser, the Android emulator and the iOS Simulator reload on save.
+Edit `src/render.ts`: the options are at the top, the buttons below. The browser, the Android emulator and the iOS Simulator reload on save. Devices count any option id, so a phone needs no new `npm run sync` when you change options. Run `npm run sync` and press Run again only after you change `worklet/`.
 
 | File                     | What it is                                                                                             |
 | ------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `src/render.ts`          | What you see                                                                                           |
+| `src/render.ts`          | Your poll: the options and what you see                                                                |
 | `src/main.ts`            | Connects the page to the app backend                                                                   |
 | `src/vote-events.ts`     | The messages                                                                                           |
-| `worklet/vote-plugin.ts` | Counts votes and shares them with `createSync`                                                         |
+| `worklet/vote-plugin.ts` | Counts votes for any option id and shares them with `createSync`                                       |
 | `worklet/`               | The app backend. It runs in Node's sibling runtime Bare on your computer and inside the app on a phone |
 
 ## Run on Android

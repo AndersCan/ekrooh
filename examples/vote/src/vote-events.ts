@@ -1,11 +1,10 @@
 import { type EventSpec, invokeEvent } from '@ekrooh/bare/core';
 
-export type VoteOption = { id: string; label: string; votes: number };
-
 /** What the page shows: totals across all devices, this device's invite code
  * and how many other devices are connected right now. */
 export type VoteState = {
-  options: VoteOption[];
+  /** Sum over all devices by option id, including ids this page does not list. */
+  votes: Record<string, number>;
   invite: string;
   connected: number;
 };

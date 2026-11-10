@@ -1,6 +1,14 @@
 import { submitJoin } from './join-wait';
 import type { VoteState } from './vote-events';
 
+/** Your poll. `id` is what devices share (a-z, 0-9, -, up to 32 characters);
+ * `label` is what you see. Devices count every id they are sent. */
+const options = [
+  { id: 'tea', label: 'Tea' },
+  { id: 'coffee', label: 'Coffee' },
+  { id: 'water', label: 'Water' },
+];
+
 export type View =
   | { kind: 'loading' }
   | {
@@ -30,11 +38,10 @@ export function connectionText(connected: number, waiting?: number): string {
 }
 
 type Page = {
-  buttons: HTMLElement;
   invite: HTMLElement;
   status: HTMLElement;
   message: HTMLElement;
-  optionIds: string;
+  buttonById: Map<string, HTMLElement>;
 };
 
 const pages = new WeakMap<HTMLElement, Page>();
@@ -55,22 +62,12 @@ export function render(root: HTMLElement, view: View, actions: Actions): void {
     page = build(root, actions);
     pages.set(root, page);
   }
-  const ids = view.state.options.map((o) => o.id).join(',');
-  if (ids !== page.optionIds) {
-    page.optionIds = ids;
-    page.buttons.replaceChildren(
-      ...view.state.options.map((option) => {
-        const button = document.createElement('button');
-        button.dataset.id = option.id;
-        button.addEventListener('click', () => actions.vote(option.id));
-        return button;
-      }),
-    );
-  }
-  for (const option of view.state.options) {
-    const button = page.buttons.querySelector<HTMLElement>(
-      `[data-id="${option.id}"]`,
-    );
+  for (const { id, label } of options) {
+    const votes = Object.hasOwn(view.state.votes, id)
+      ? view.state.votes[id]
+      : 0;
+    const option = { label, votes };
+    const button = page.buttonById.get(id);
     if (button) button.textContent = `${option.label} (${option.votes})`;
   }
   page.invite.textContent = view.state.invite;
@@ -83,6 +80,14 @@ function build(root: HTMLElement, actions: Actions): Page {
   heading.textContent = 'Vote';
   const buttons = document.createElement('div');
   buttons.className = 'buttons';
+  const buttonById = new Map<string, HTMLElement>();
+  for (const { id } of options) {
+    const button = document.createElement('button');
+    button.dataset.id = id;
+    button.addEventListener('click', () => actions.vote(id));
+    buttonById.set(id, button);
+    buttons.append(button);
+  }
 
   const status = document.createElement('p');
   status.className = 'status';
@@ -118,7 +123,7 @@ function build(root: HTMLElement, actions: Actions): Page {
     form,
     message,
   );
-  return { buttons, invite, status, message, optionIds: '' };
+  return { invite, status, message, buttonById };
 }
 
 /** What to show for the current state; the wait only counts while no peer is connected. */
