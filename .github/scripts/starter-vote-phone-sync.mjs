@@ -129,12 +129,12 @@ function startServer(args) {
   return state;
 }
 
-async function stopServer(server) {
-  if (server.exited) return;
-  const done = new Promise((resolve) => server.child.once('exit', resolve));
-  server.child.kill('SIGTERM');
-  // Kill timer: gives the dev server a moment to stop Bare, then forces it.
-  const timer = setTimeout(() => server.child.kill('SIGKILL'), KILL_GRACE_MS);
+async function stop(child) {
+  if (child.exitCode !== null || child.signalCode) return;
+  const done = new Promise((resolve) => child.once('exit', resolve));
+  child.kill('SIGTERM');
+  // Kill timer: gives the child a moment to stop, then forces it.
+  const timer = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
   await done;
   clearTimeout(timer);
 }
@@ -212,15 +212,6 @@ async function textOf(locator) {
       .textContent({ timeout: 1000 })
       .catch(() => '')) ?? ''
   );
-}
-
-async function stopMaestro() {
-  if (!maestro || maestro.exitCode !== null || maestro.signalCode) return;
-  const done = new Promise((resolve) => maestro.once('exit', resolve));
-  maestro.kill('SIGTERM');
-  const timer = setTimeout(() => maestro.kill('SIGKILL'), KILL_GRACE_MS);
-  await done;
-  clearTimeout(timer);
 }
 
 async function run() {
@@ -316,7 +307,7 @@ const result = await Promise.race([
 if (result) console.log('phone sync: PASS');
 else await fail();
 
-await stopMaestro();
+if (maestro) await stop(maestro);
 await browser?.close().catch(() => {});
-await stopServer(server);
+await stop(server.child);
 process.exit(result ? 0 : 1);
