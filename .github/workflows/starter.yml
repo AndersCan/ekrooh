@@ -10,6 +10,8 @@ on:
       - .github/scripts/starter-android-reload.mjs
       - .github/scripts/starter-android-attach.mjs
       - .github/scripts/starter-vote-native.yaml
+      - .github/scripts/starter-vote-phone-sync.mjs
+      - .github/scripts/starter-vote-native-sync.yaml
       - '.github/scripts/starter-ios-reload/**'
   pull_request:
     branches:
@@ -20,6 +22,8 @@ on:
       - .github/scripts/starter-vote-journey.mjs
       - .github/scripts/starter-android-reload.mjs
       - .github/scripts/starter-vote-native.yaml
+      - .github/scripts/starter-vote-phone-sync.mjs
+      - .github/scripts/starter-vote-native-sync.yaml
       - .github/scripts/starter-android-attach.mjs
       - '.github/scripts/starter-ios-reload/**'
       # The web job installs this PR's @ekrooh/bare, so package changes run it too.
@@ -59,7 +63,7 @@ jobs:
         # request leaves the starter alone. Any git error falls through to true.
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ] \
-            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml .github/scripts/starter-android-reload.mjs .github/scripts/starter-vote-native.yaml .github/scripts/starter-ios-reload; then
+            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml .github/scripts/starter-android-reload.mjs .github/scripts/starter-vote-native.yaml .github/scripts/starter-vote-phone-sync.mjs .github/scripts/starter-vote-native-sync.yaml .github/scripts/starter-ios-reload; then
             echo "starter=false" >> "$GITHUB_OUTPUT"
           else
             echo "starter=true" >> "$GITHUB_OUTPUT"
@@ -135,6 +139,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
+          cache: npm
 
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
@@ -180,6 +185,11 @@ jobs:
           grep -q 'lib/arm64-v8a/libbare-kit.so' apk.txt || { echo "APK has no lib/arm64-v8a/libbare-kit.so" >&2; exit 1; }
           grep 'lib/arm64-v8a/lib.*\.so' apk.txt | grep -qv 'libbare-kit.so' || { echo "APK has no native addon besides libbare-kit.so" >&2; exit 1; }
 
+      - name: Install the repo (Playwright)
+        run: |
+          npm ci
+          npm run playwright:install -- --with-deps
+
       - name: Install Maestro
         env:
           MAESTRO_VERSION: 2.12.1
@@ -197,7 +207,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Vote in the app (Maestro)
+      - name: Phone votes, second peer sees it
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         timeout-minutes: 15
         with:
@@ -212,8 +222,7 @@ jobs:
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           script: |
             adb install -r "$STARTER_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
-            adb devices -l
-            maestro test --debug-output "$RUNNER_TEMP/maestro-debug" --flatten-debug-output .github/scripts/starter-vote-native.yaml || { adb devices -l; exit 1; }
+            node .github/scripts/starter-vote-phone-sync.mjs "$STARTER_DIR" || { adb devices -l; adb logcat -d | grep -E '\[(sync|vote)\]' | tail -40; exit 1; }
 
       - name: Upload the Maestro output
         if: failure()
