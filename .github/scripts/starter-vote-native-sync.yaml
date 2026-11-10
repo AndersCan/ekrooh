@@ -13,12 +13,20 @@ androidWebViewHierarchy: devtools
     label: App shows Tea (0)
     visible: Tea (0)
     timeout: 60000
-- tapOn:
-    label: Focus the invite box
-    text: Invite code from another device
-- inputText:
-    label: Type the second peer's invite code
-    text: ${INVITE}
+# On the iOS Simulator the typed text sometimes does not reach the page's input (the box stays
+# empty and Join answers "That code does not look right"), so type until the box shows the code.
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          label: Focus the invite box
+          text: Invite code from another device
+      - inputText:
+          label: Type the second peer's invite code
+          text: ${INVITE}
+      - assertVisible:
+          label: The invite box shows the code
+          text: ${INVITE}
 # The soft keyboard covers the Join button on the emulator's small screen.
 # Android only: hideKeyboard fails on the iOS Simulator, and a tap on the "Vote" heading there
 # lands on the Water button (its element spans the page). Join stays visible above the iOS keyboard.
