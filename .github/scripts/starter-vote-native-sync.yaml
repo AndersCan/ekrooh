@@ -21,6 +21,8 @@ androidWebViewHierarchy: devtools
       - tapOn:
           label: Focus the invite box
           text: Invite code from another device
+      - eraseText:
+          label: Clear anything a failed try left in the box
       - inputText:
           label: Type the second peer's invite code
           text: ${INVITE}
