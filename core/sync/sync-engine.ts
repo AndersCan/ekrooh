@@ -48,11 +48,7 @@ export interface SwarmPort {
   keyPair: { publicKey: Uint8Array };
   on(event: 'connection', cb: (conn: ConnPort) => void): unknown;
   on(event: 'error', cb: (error: unknown) => void): unknown;
-  /** Hyperswarm returns a PeerDiscovery; `refresh()` looks the topic up again. */
-  join(
-    topic: Buffer,
-    opts: { server: boolean; client: boolean },
-  ): { refresh(): unknown } | undefined | void;
+  join(topic: Buffer, opts: { server: boolean; client: boolean }): unknown;
   leave(topic: Buffer): unknown;
   destroy(): unknown;
 }
@@ -63,12 +59,6 @@ type Peer<T> = {
   value: T | undefined;
   warned: Set<string>;
 };
-
-/** While alone in a room, look it up again this often. Hyperswarm's own next
- * lookup is 10+ minutes away, so a lookup that missed the other device (it
- * announced a moment ago, or this device's network was still starting) would
- * otherwise leave both alone. */
-const REDISCOVER_MS = 15_000;
 
 /** Most devices a room remembers; matches the swarm's maxPeers. */
 const MAX_PEERS = 16;
@@ -91,7 +81,6 @@ export function createSyncWith<T>(
   let selfLine: string | undefined;
   let selfValue: T | undefined;
   let closed = false;
-  let rediscover: ReturnType<typeof setInterval> | undefined;
 
   const fire = () => {
     for (const listener of [...listeners]) {
@@ -137,16 +126,7 @@ export function createSyncWith<T>(
   };
 
   const joinTopic = () => {
-    const discovery = swarm.join(topic, { server: true, client: true });
-    clearInterval(rediscover);
-    rediscover = setInterval(() => {
-      if (connected() > 0) return;
-      try {
-        void Promise.resolve(discovery?.refresh()).catch(() => {});
-      } catch {
-        // A refresh that throws is retried at the next tick.
-      }
-    }, REDISCOVER_MS);
+    swarm.join(topic, { server: true, client: true });
     console.log(`[sync] in room ${room.slice(0, 4)}…`);
   };
 
@@ -280,7 +260,6 @@ export function createSyncWith<T>(
     async close() {
       if (closed) return;
       closed = true;
-      clearInterval(rediscover);
       listeners.clear();
       await Promise.resolve(swarm.destroy()).catch(() => {});
     },

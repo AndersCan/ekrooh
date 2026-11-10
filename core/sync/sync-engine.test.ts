@@ -49,10 +49,8 @@ class FakeSwarm implements SwarmPort {
   on(event: string, cb: (...a: never[]) => void) {
     if (event === 'connection') this.connectionCb = cb as never;
   }
-  refreshes: Buffer[] = [];
-  join(topic: Buffer): { refresh(): unknown } {
+  join(topic: Buffer) {
     this.joined.push(topic);
-    return { refresh: () => void this.refreshes.push(topic) };
   }
   leave(topic: Buffer) {
     this.left.push(topic);
@@ -252,68 +250,6 @@ describe('sync engine', () => {
     expect(sync.values()).toEqual([]);
     swarm.connect(3);
     expect(sync.values()).toEqual([]);
-  });
-
-  describe('looking the room up again', () => {
-    // The outer beforeEach started its sync on real timers; start a new one.
-    beforeEach(async () => {
-      await sync.close();
-      vi.useFakeTimers();
-      swarm = new FakeSwarm();
-      const [, made] = createSyncWith<Counts>(
-        { parse },
-        { createSwarm: () => swarm },
-      );
-      sync = made!;
-    });
-    afterEach(() => vi.useRealTimers());
-
-    it('refreshes the room every 15 s while alone', () => {
-      vi.advanceTimersByTime(14_999);
-      expect(swarm.refreshes).toHaveLength(0);
-      vi.advanceTimersByTime(1);
-      expect(swarm.refreshes).toHaveLength(1);
-      vi.advanceTimersByTime(30_000);
-      expect(swarm.refreshes).toHaveLength(3);
-    });
-
-    it('stops while a device is connected and resumes when it leaves', () => {
-      const conn = swarm.connect(2);
-      vi.advanceTimersByTime(60_000);
-      expect(swarm.refreshes).toHaveLength(0);
-      conn.emit('close');
-      vi.advanceTimersByTime(15_000);
-      expect(swarm.refreshes).toHaveLength(1);
-    });
-
-    it('refreshes the new room after join, not the old one', () => {
-      const code = 'ab'.repeat(16);
-      sync.join(code);
-      vi.advanceTimersByTime(15_000);
-      expect(swarm.refreshes).toHaveLength(1);
-      expect(swarm.refreshes[0]!.equals(topicForInvite(code))).toBe(true);
-    });
-
-    it('stops after close', async () => {
-      await sync.close();
-      vi.advanceTimersByTime(60_000);
-      expect(swarm.refreshes).toHaveLength(0);
-    });
-
-    it('survives a refresh that throws or rejects', () => {
-      swarm.join = () => ({
-        refresh: () => {
-          throw new Error('boom');
-        },
-      });
-      sync.join('cd'.repeat(16));
-      expect(() => vi.advanceTimersByTime(15_000)).not.toThrow();
-      swarm.join = () => ({
-        refresh: () => Promise.reject(new Error('no')),
-      });
-      sync.join('ef'.repeat(16));
-      expect(() => vi.advanceTimersByTime(15_000)).not.toThrow();
-    });
   });
 
   it('join of the current code is a no-op', () => {

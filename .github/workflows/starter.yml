@@ -315,13 +315,6 @@ jobs:
           node-version: lts/*
           cache: npm
 
-      - name: Pack this PR's @ekrooh/bare
-        if: github.event_name == 'pull_request'
-        run: |
-          npm ci
-          npx --yes npm@10.9.9 pack --pack-destination "$RUNNER_TEMP"
-          echo "EKROOH_TARBALL=$(ls "$RUNNER_TEMP"/ekrooh-bare-*.tgz)" >> "$GITHUB_ENV"
-
       - name: Get the starter
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
@@ -335,9 +328,6 @@ jobs:
         run: |
           cd "$STARTER_DIR"
           npm ci
-          if [ -n "${EKROOH_TARBALL:-}" ]; then
-            npm install --no-save "$EKROOH_TARBALL"
-          fi
           npm run sync
 
       - name: Build for the iOS Simulator

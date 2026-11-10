@@ -38,6 +38,8 @@ const LOG_LINES = 60;
 const MAESTRO_LINES = 40;
 
 const port = 5174;
+// The debug app's own backend (BareRuntime.swift devBackendPort); reachable from the host on the iOS Simulator only.
+const PHONE_BACKEND_PORT = 8082;
 
 function usage(message) {
   console.error(message);
@@ -185,15 +187,32 @@ async function pageText() {
   }
 }
 
+// The phone's own backend log (its [sync] lines), served on the Simulator's
+// loopback in dev builds; the Bare worklet's console is not in the system log.
+async function phoneLog() {
+  if (!device) return '(not a phone run)';
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${PHONE_BACKEND_PORT}/logs?tail=${LOG_LINES}&format=text`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+    return `${response.status}\n${await response.text()}`;
+  } catch (error) {
+    return `(unreachable: ${error.message})`;
+  }
+}
+
 async function fail() {
   const failedStage = stage;
   const second = await pageText();
+  const phone = await phoneLog();
   const tail = (lines, count) => lines.slice(-count).join('\n');
   console.error(
     `phone sync: FAIL at ${failedStage} after ${seconds()} s: ${wanted}\n` +
       `second peer page (${port}): ${second}\n` +
       `page errors: ${pageErrors.length ? pageErrors.join(' ; ') : 'none'}\n` +
       `--- maestro (last ${MAESTRO_LINES} lines) ---\n${tail(maestroLines, MAESTRO_LINES)}\n` +
+      `--- phone backend /logs (last ${LOG_LINES} lines) ---\n${phone}\n` +
       `--- node scripts/dev.mjs --second (last ${LOG_LINES} lines) ---\n${tail(server.lines, LOG_LINES)}`,
   );
 }
