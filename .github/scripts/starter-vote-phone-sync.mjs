@@ -193,7 +193,7 @@ async function phoneLog() {
   if (!device) return '(not a phone run)';
   try {
     const response = await fetch(
-      `http://127.0.0.1:${PHONE_BACKEND_PORT}/logs?tail=${LOG_LINES}&format=text`,
+      `http://127.0.0.1:${PHONE_BACKEND_PORT}/logs?tail=${LOG_LINES}&source=backend&format=text`,
       { signal: AbortSignal.timeout(5000) },
     );
     return `${response.status}\n${await response.text()}`;

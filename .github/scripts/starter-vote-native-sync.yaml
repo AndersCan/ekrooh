@@ -30,10 +30,10 @@ androidWebViewHierarchy: devtools
 - tapOn:
     label: Join the second peer's room
     text: Join
-# The page shows the room it is in; the code must be the second peer's, else the Join did not take effect.
+# Status text that only shows after a successful Join (the Join box keeps the typed code when it fails).
 - extendedWaitUntil:
     label: Phone is in the second peer's room
-    visible: ${INVITE}
+    visible: 'Joined\. Looking for the other device…|1 other device connected'
     timeout: 15000
 - tapOn:
     label: Vote Tea
