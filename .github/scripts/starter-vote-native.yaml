@@ -6,10 +6,14 @@ androidWebViewHierarchy: devtools
 ---
 - launchApp:
     label: Open the vote app
-- extendedWaitUntil:
-    label: App shows Tea (0)
-    visible: Tea (0)
-    timeout: 90000
+# The page navigates once while it loads; Maestro 2.12.1 throws if it reads the DOM at that moment.
+- retry:
+    maxRetries: 2
+    commands:
+      - extendedWaitUntil:
+          label: App shows Tea (0)
+          visible: Tea (0)
+          timeout: 60000
 - tapOn:
     label: Vote Tea
     text: Tea (0)
