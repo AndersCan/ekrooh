@@ -28,8 +28,10 @@ const root = path.resolve(
 const START = 60;
 const READY = 60;
 const ANNOUNCED = 30;
-// iOS driver startup 300 (MAESTRO_DRIVER_STARTUP_TIMEOUT) + flow waits ~120 + taps.
+// iOS driver startup 2 x 180 (MAESTRO_DRIVER_STARTUP_TIMEOUT) + flow waits ~120.
 const PHONE = 480;
+// Tries at starting Maestro's iOS driver (the workflow gives each 180 s).
+const DRIVER_ATTEMPTS = 2;
 // The web journey's CONNECTED 120 + SYNCED 30.
 const SYNCED = 150;
 const OVERALL = 800; // the budgets above add up to 780 s
@@ -288,30 +290,40 @@ async function run() {
     process.env.RUNNER_TEMP || os.tmpdir(),
     'maestro-debug',
   );
-  maestro = spawn(
-    'maestro',
-    [
-      ...(device ? ['--device', device] : []),
-      'test',
-      '--debug-output',
-      debugOutput,
-      '--flatten-debug-output',
-      '-e',
-      `INVITE=${code}`,
-      path.join(root, '.github/scripts/starter-vote-native-sync.yaml'),
-    ],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
-  );
+  // A slow Simulator sometimes never brings Maestro's iOS driver up; the flow
+  // has not started then, so one more attempt is safe.
   let maestroExit = null;
-  maestro.on('exit', (exitCode, signal) => {
-    maestroExit = exitCode ?? signal;
-  });
-  for (const stream of [maestro.stdout, maestro.stderr]) {
-    readline
-      .createInterface({ input: stream })
-      .on('line', (line) => maestroLines.push(line));
+  for (let attempt = 1; attempt <= DRIVER_ATTEMPTS; attempt++) {
+    maestroExit = null;
+    maestroLines.length = 0;
+    maestro = spawn(
+      'maestro',
+      [
+        ...(device ? ['--device', device] : []),
+        'test',
+        '--debug-output',
+        debugOutput,
+        '--flatten-debug-output',
+        '-e',
+        `INVITE=${code}`,
+        path.join(root, '.github/scripts/starter-vote-native-sync.yaml'),
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    maestro.on('exit', (exitCode, signal) => {
+      maestroExit = exitCode ?? signal;
+    });
+    for (const stream of [maestro.stdout, maestro.stderr]) {
+      readline
+        .createInterface({ input: stream })
+        .on('line', (line) => maestroLines.push(line));
+    }
+    if (!(await until(() => maestroExit !== null, PHONE))) return false;
+    const driverDown = maestroLines.some((line) =>
+      line.includes('driver not ready in time'),
+    );
+    if (maestroExit === 0 || !driverDown) break;
   }
-  if (!(await until(() => maestroExit !== null, PHONE))) return false;
   if (maestroExit !== 0) {
     wanted = `the phone to join and show Tea (1) (maestro exit ${maestroExit})`;
     return false;

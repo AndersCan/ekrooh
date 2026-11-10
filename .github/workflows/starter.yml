@@ -363,7 +363,7 @@ jobs:
       - name: Phone votes, second peer sees it
         timeout-minutes: 15
         env:
-          MAESTRO_DRIVER_STARTUP_TIMEOUT: '300000'
+          MAESTRO_DRIVER_STARTUP_TIMEOUT: '180000'
         run: |
           xcrun simctl install "$SIM_UDID" "$RUNNER_TEMP/vote-build/Build/Products/Debug-iphonesimulator/Vote.app"
           node .github/scripts/starter-vote-phone-sync.mjs "$STARTER_DIR" --device "$SIM_UDID"
