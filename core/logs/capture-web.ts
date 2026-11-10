@@ -2,14 +2,6 @@ import { LogLevel } from './types';
 
 type ConsoleMethod = 'debug' | 'log' | 'info' | 'warn' | 'error';
 
-const LEVEL_BY_METHOD: Record<ConsoleMethod, LogLevel> = {
-  debug: 'debug',
-  log: 'info',
-  info: 'info',
-  warn: 'warn',
-  error: 'error',
-};
-
 function safeStringify(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value instanceof Error) return value.stack ?? value.message;
@@ -135,5 +127,3 @@ export function installWebConsoleCapture(
     },
   };
 }
-
-export { LEVEL_BY_METHOD };

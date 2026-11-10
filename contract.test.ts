@@ -74,7 +74,6 @@ const EXEMPT: Record<string, string> = {
     'wire constants; exercised via wire-codec tests',
   'core/messages/types.ts':
     'type definitions and CoreError; exercised indirectly',
-  'core/logs/index.ts': 'barrel re-export',
   'core/logs/types.ts': 'type definitions only',
   'web/transports/index.ts': 'barrel re-export',
 };

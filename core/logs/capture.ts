@@ -1,13 +1,5 @@
 import { LogLevel, LogSource, LogStore } from './types';
 
-const LEVEL_BY_METHOD: Record<ConsoleMethod, LogLevel> = {
-  debug: 'debug',
-  log: 'info',
-  info: 'info',
-  warn: 'warn',
-  error: 'error',
-};
-
 type ConsoleMethod = 'debug' | 'log' | 'info' | 'warn' | 'error';
 
 const LEVEL_RANK: Record<LogLevel, number> = {
@@ -118,5 +110,3 @@ export function installConsoleCapture(
     },
   };
 }
-
-export { LEVEL_BY_METHOD };
