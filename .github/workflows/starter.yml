@@ -207,14 +207,13 @@ jobs:
           force-avd-creation: true
           cores: 4
           ram-size: 4096M
-          heap-size: 576M
           emulator-boot-timeout: 300
           disable-animations: true
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           script: |
             adb install -r "$STARTER_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
             adb devices -l
-            maestro test --debug-output "$RUNNER_TEMP/maestro-debug" --flatten-debug-output .github/scripts/starter-vote-native.yaml
+            maestro test --debug-output "$RUNNER_TEMP/maestro-debug" --flatten-debug-output .github/scripts/starter-vote-native.yaml || { adb devices -l; exit 1; }
 
       - name: Upload the Maestro output
         if: failure()
