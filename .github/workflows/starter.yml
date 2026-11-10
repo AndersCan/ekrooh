@@ -350,7 +350,7 @@ jobs:
       - name: Vote in the app (Maestro)
         timeout-minutes: 15
         env:
-          MAESTRO_DRIVER_STARTUP_TIMEOUT: "300000"
+          MAESTRO_DRIVER_STARTUP_TIMEOUT: '300000'
         run: |
           xcrun simctl install "$SIM_UDID" "$RUNNER_TEMP/vote-build/Build/Products/Debug-iphonesimulator/Vote.app"
           maestro --device "$SIM_UDID" test --debug-output "$RUNNER_TEMP/maestro-debug" --flatten-debug-output .github/scripts/starter-vote-native.yaml

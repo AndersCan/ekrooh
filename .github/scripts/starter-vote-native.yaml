@@ -8,7 +8,7 @@ androidWebViewHierarchy: devtools
     label: Open the vote app
 # The page navigates once while it loads, and Maestro 2.12.1 throws an IllegalStateException
 # (which retry does not catch) if it reads the DOM at that moment. Wait without reading the DOM first.
-- evalScript: ${ (function () { var end = Date.now() + 10000; while (Date.now() < end) {} })() }
+- evalScript: ${ (function () { var end = Date.now() + 15500; while (Date.now() < end) {} })() }
 - extendedWaitUntil:
     label: App shows Tea (0)
     visible: Tea (0)
