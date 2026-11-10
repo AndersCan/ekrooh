@@ -38,7 +38,6 @@ export function connectionText(connected: number, waiting?: number): string {
 }
 
 type Page = {
-  buttons: HTMLElement;
   invite: HTMLElement;
   status: HTMLElement;
   message: HTMLElement;
@@ -124,7 +123,7 @@ function build(root: HTMLElement, actions: Actions): Page {
     form,
     message,
   );
-  return { buttons, invite, status, message, buttonById };
+  return { invite, status, message, buttonById };
 }
 
 /** What to show for the current state; the wait only counts while no peer is connected. */

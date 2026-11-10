@@ -111,6 +111,20 @@ describe('vote plugin', () => {
     expect(votes(state).pizza).toBe(3);
   });
 
+  it.each([
+    ['a dash', 'ice-cream'],
+    ['digits', 'option-2'],
+    ['32 characters', 'a'.repeat(32)],
+  ])('counts an option id with %s', async (_, id) => {
+    const [error, state] = await call(
+      createVotePlugin(fakeSync()),
+      'vote.cast',
+      { id },
+    );
+    expect(error).toBeNull();
+    expect(votes(state)[id]).toBe(1);
+  });
+
   it('counts an id named like an Object property', async () => {
     const plugin = createVotePlugin(fakeSync());
     const [, state] = await call(plugin, 'vote.cast', { id: 'constructor' });
@@ -127,6 +141,9 @@ describe('vote plugin', () => {
     const plugin = createVotePlugin(sync);
     const [error] = await call(plugin, 'vote.cast', { id });
     expect(error?.code).toBe('app.vote/bad-option');
+    expect(error?.message).toBe(
+      'Option ids use a-z, 0-9 and - (1 to 32 characters).',
+    );
     expect(sync.published).toEqual([{}]);
   });
 
