@@ -1,4 +1,4 @@
-# Native vote journey (Starter / android): opens the debug app with no `npm run dev`, votes Tea.
+# Native vote journey (Starter / android and Starter / ios): opens the debug app with no `npm run dev`, votes Tea.
 # By hand: install the debug app, then `maestro test` this file. It reads the starter's button names.
 appId: com.example.vote
 name: Vote in the native app
@@ -6,14 +6,13 @@ androidWebViewHierarchy: devtools
 ---
 - launchApp:
     label: Open the vote app
-# The page navigates once while it loads; Maestro 2.12.1 throws if it reads the DOM at that moment.
-- retry:
-    maxRetries: 2
-    commands:
-      - extendedWaitUntil:
-          label: App shows Tea (0)
-          visible: Tea (0)
-          timeout: 60000
+# The page navigates once while it loads, and Maestro 2.12.1 throws an IllegalStateException
+# (which retry does not catch) if it reads the DOM at that moment. Wait without reading the DOM first.
+- evalScript: ${ (function () { var end = Date.now() + 10000; while (Date.now() < end) {} })() }
+- extendedWaitUntil:
+    label: App shows Tea (0)
+    visible: Tea (0)
+    timeout: 60000
 - tapOn:
     label: Vote Tea
     text: Tea (0)
