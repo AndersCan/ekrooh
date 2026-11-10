@@ -30,6 +30,11 @@ androidWebViewHierarchy: devtools
 - tapOn:
     label: Join the second peer's room
     text: Join
+# The page shows the room it is in; the code must be the second peer's, else the Join did not take effect.
+- extendedWaitUntil:
+    label: Phone is in the second peer's room
+    visible: ${INVITE}
+    timeout: 15000
 - tapOn:
     label: Vote Tea
     text: Tea (0)
@@ -37,3 +42,4 @@ androidWebViewHierarchy: devtools
     label: Count goes up to Tea (1)
     visible: Tea (1)
     timeout: 15000
+- takeScreenshot: phone-after-vote
