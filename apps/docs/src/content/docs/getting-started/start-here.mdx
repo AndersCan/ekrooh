@@ -1,0 +1,91 @@
+---
+title: Start here
+description: Your own poll syncing between two devices in five minutes. Copy the vote starter, edit one file, open a second device.
+---
+
+Needs Node 20.19+ (`node -v`).
+
+## 1. Run the starter
+
+```sh
+npx degit AndersCan/ekrooh/examples/vote my-app && cd my-app && npm install && npm run dev
+```
+
+The terminal prints `vote ready: http://localhost:5173 ...`. Open
+http://localhost:5173: three buttons, Tea (0), Coffee (0) and Water (0), the
+status line "No other device yet", and an invite code with a Join box (you use
+these in step 3). Click Tea and it shows Tea (1).
+
+## 2. Make it your poll
+
+```ts
+const options = [
+  { id: 'pizza', label: 'Pizza' },
+  { id: 'tacos', label: 'Tacos' },
+];
+```
+
+Replace the `options` at the top of `src/render.ts` and save: the browser
+reloads with Pizza (0) and Tacos (0). `id` is what devices share (a-z, 0-9,
+-, up to 32 characters), and `label` is what you see.
+
+## 3. Vote from a second device
+
+Keep `npm run dev` running and pick one.
+
+### A second browser (fastest)
+
+```sh
+npm run dev:second
+```
+
+Run it in a second terminal in `my-app`, then open http://localhost:5174. Copy
+the invite code from http://localhost:5173, paste it in the 5174 page's
+"Paste a code here" box and press Join. The status says "Joined. Looking for
+the other device…", then "1 other device connected". Vote on either page: the
+count goes up on both.
+
+### Android emulator
+
+Needs [Android Studio](https://developer.android.com/studio). Stop
+`npm run dev` (Ctrl+C), then:
+
+```sh
+npm run sync && npm run dev
+```
+
+1. In Android Studio, open the `android/` folder and wait for Gradle sync to
+   finish.
+2. Device Manager > Create Device > any Pixel with API 35. Press Run.
+3. The emulator shows your poll. Copy the invite code from
+   http://localhost:5173, then in the emulator long-press the
+   "Paste a code here" box, choose Paste and press Join.
+4. When it says "1 other device connected", vote on either: the count goes up
+   on both.
+
+The first Gradle sync and emulator download take several minutes.
+
+### iOS Simulator (Mac only)
+
+Needs Xcode from the App Store. Stop `npm run dev` (Ctrl+C), then:
+
+```sh
+npm run sync && npm run dev
+```
+
+1. Open `ios/Vote.xcodeproj` in Xcode. The first open downloads packages,
+   which takes a few minutes.
+2. Pick a Simulator and press Run. No Apple account is needed.
+3. Copy the invite code from http://localhost:5173, paste it in the
+   Simulator's "Paste a code here" box and press Join.
+4. When it says "1 other device connected", vote on either: the count goes up
+   on both.
+
+The first connection goes over the public network and can take a minute. If
+the status says "Still looking for the other device", wait a little, then
+restart both (votes start from zero after a restart).
+
+## Next
+
+- What each file does, a USB phone, a real iPhone: the
+  [starter README](https://github.com/AndersCan/ekrooh/tree/main/examples/vote#readme).
