@@ -260,6 +260,8 @@ async function walk() {
     maestroLines.push('--- gradle ---', ...gradle.lines);
     return false;
   }
+  // The Gradle daemon would hold memory the second emulator needs.
+  spawnSync('./gradlew', ['--stop'], { cwd: path.join(dir, 'android') });
   done();
 
   begin(
@@ -294,7 +296,7 @@ async function walk() {
         '-cores',
         '2',
         '-memory',
-        '3072',
+        '2560',
       ]),
     );
   }
@@ -443,6 +445,11 @@ if (result) {
   console.error(
     `--- maestro (last ${LOG_LINES} lines) ---\n${tail(maestroLines, LOG_LINES)}`,
   );
+  for (const [index, emulator] of emulators.entries()) {
+    console.error(
+      `--- emulator ${index} output (last ${LOG_LINES} lines) ---\n${tail(emulator.lines, LOG_LINES)}`,
+    );
+  }
   if (server)
     console.error(
       `--- npm run dev (last ${LOG_LINES} lines) ---\n${tail(server.lines, LOG_LINES)}`,
