@@ -386,7 +386,8 @@ async function walk() {
     'an invite code of 32 lowercase hex characters',
   );
   if (topology === 'H') {
-    const page = await (await browser.newContext()).newPage();
+    const context = await browser.newContext();
+    const page = await context.newPage();
     await page.goto('http://localhost:5173');
     const read = async () =>
       (
@@ -398,6 +399,8 @@ async function walk() {
       ).trim();
     await until(async () => /^[0-9a-f]{32}$/.test(await read()), CODE);
     invite = await read();
+    // Free the runner's CPU: the open page keeps reloading and a phone went offline.
+    await context.close();
   } else {
     // Phone A's own code, read from its page over the WebView debug socket.
     adb(
@@ -456,6 +459,8 @@ async function walk() {
   const joiners = topology === 'H' ? [phoneA, phoneB] : [phoneB];
   for (const serial of joiners) {
     // A cold phone sometimes fails its first Maestro launch; one retry.
+    adb(serial, 'reconnect', 'offline');
+    adb(serial, 'wait-for-device');
     const joined =
       (await maestro(serial, 'join', { INVITE: invite })).ok ||
       (await maestro(serial, 'join', { INVITE: invite })).ok;
