@@ -367,9 +367,42 @@ async function walk() {
     await until(async () => /^[0-9a-f]{32}$/.test(await read()), CODE);
     invite = await read();
   } else {
-    const code = await maestro(phoneA, 'code');
-    invite =
-      (code.lines.join('\n').match(/INVITE=([0-9a-f]{32})\b/) ?? [])[1] ?? '';
+    // Phone A's own code, read from its page over the WebView debug socket.
+    adb(
+      phoneA,
+      'shell',
+      'monkey',
+      '-p',
+      'com.example.vote',
+      '-c',
+      'android.intent.category.LAUNCHER',
+      '1',
+    );
+    const read = async () => {
+      const sockets = adb(phoneA, 'shell', 'cat', '/proc/net/unix').stdout;
+      const socket = (sockets.match(/@(webview_devtools_remote_\d+)/) ?? [])[1];
+      if (!socket) return '';
+      adb(phoneA, 'forward', 'tcp:9222', `localabstract:${socket}`);
+      let remote;
+      try {
+        remote = await chromium.connectOverCDP('http://127.0.0.1:9222', {
+          timeout: 3000,
+        });
+        const text = await remote
+          .contexts()[0]
+          .pages()[0]
+          .locator('code.invite')
+          .first()
+          .textContent({ timeout: 1000 });
+        return (text ?? '').trim();
+      } catch {
+        return '';
+      } finally {
+        await remote?.close().catch(() => {});
+      }
+    };
+    await until(async () => /^[0-9a-f]{32}$/.test(await read()), CODE);
+    invite = await read();
   }
   if (!/^[0-9a-f]{32}$/.test(invite)) return false;
   done();

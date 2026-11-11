@@ -1,6 +1,5 @@
 # Two-phone walk flow (Starter / two phones): one step of the walk per run, chosen by `-e ACT=`.
 # ACT=join   open the app, type INVITE into the Join box, press Join (stand-in for paste).
-# ACT=code   open the app and print its own invite code as `INVITE=<code>`.
 # ACT=connected  wait for the status line EXPECT (a regex such as `2 other devices connected`).
 # ACT=vote   vote Tea and wait for Tea (1).   ACT=see   wait for Tea (1) from the other phone.
 # Run by starter-two-phones.mjs with --device <serial>. It reads the starter's button names and Join box label.
@@ -10,7 +9,7 @@ androidWebViewHierarchy: devtools
 ---
 - runFlow:
     when:
-      true: ${ACT == 'join' || ACT == 'code'}
+      true: ${ACT == 'join'}
     commands:
       - launchApp:
           label: Open the vote app
@@ -20,14 +19,6 @@ androidWebViewHierarchy: devtools
           label: App shows Tea (0)
           visible: Tea (0)
           timeout: 60000
-- runFlow:
-    when:
-      true: ${ACT == 'code'}
-    commands:
-      - copyTextFrom:
-          label: Read the invite code
-          text: '[0-9a-f]{32}'
-      - evalScript: ${ console.log('INVITE=' + maestro.copiedText) }
 - runFlow:
     when:
       true: ${ACT == 'join'}
