@@ -11,6 +11,8 @@ on:
       - .github/scripts/starter-android-attach.mjs
       - .github/scripts/starter-vote-phone-sync.mjs
       - .github/scripts/starter-vote-native-sync.yaml
+      - .github/scripts/starter-two-phones.mjs
+      - .github/scripts/starter-two-phones.yaml
       - '.github/scripts/starter-ios-reload/**'
   pull_request:
     branches:
@@ -22,6 +24,8 @@ on:
       - .github/scripts/starter-android-reload.mjs
       - .github/scripts/starter-vote-phone-sync.mjs
       - .github/scripts/starter-vote-native-sync.yaml
+      - .github/scripts/starter-two-phones.mjs
+      - .github/scripts/starter-two-phones.yaml
       - .github/scripts/starter-android-attach.mjs
       - '.github/scripts/starter-ios-reload/**'
       # The web job installs this PR's @ekrooh/bare, so package changes run it too.
@@ -32,6 +36,12 @@ on:
       - package-lock.json
       - vite.config.js
   workflow_dispatch:
+    inputs:
+      topology:
+        description: 'Starter / two phones: H = both phones join the browser room, P = phone B joins phone A'
+        type: choice
+        options: [H, P]
+        default: H
 
 permissions:
   contents: read
@@ -61,7 +71,7 @@ jobs:
         # request leaves the starter alone. Any git error falls through to true.
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ] \
-            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml .github/scripts/starter-android-reload.mjs .github/scripts/starter-vote-phone-sync.mjs .github/scripts/starter-vote-native-sync.yaml .github/scripts/starter-ios-reload; then
+            && git diff --quiet HEAD^1 HEAD -- examples/vote .github/workflows/starter.yml .github/scripts/starter-android-reload.mjs .github/scripts/starter-vote-phone-sync.mjs .github/scripts/starter-vote-native-sync.yaml .github/scripts/starter-two-phones.mjs .github/scripts/starter-two-phones.yaml .github/scripts/starter-ios-reload; then
             echo "starter=false" >> "$GITHUB_OUTPUT"
           else
             echo "starter=true" >> "$GITHUB_OUTPUT"
@@ -227,6 +237,88 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: maestro-android
+          path: ${{ runner.temp }}/maestro-debug
+
+  two-phones:
+    name: Starter / two phones
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.starter != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # No Gradle cache, so the build time resembles a first Android Studio open.
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-disabled: true
+
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0 emulator system-images;android-35;google_apis;x86_64
+
+      - name: Remove preinstalled NDKs
+        # The starter must build without an NDK (prebuilt .so files only).
+        run: |
+          sudo rm -rf "$ANDROID_HOME/ndk" "$ANDROID_HOME/ndk-bundle" "$ANDROID_SDK_ROOT/ndk" || true
+          sudo rm -rf /usr/local/lib/android/sdk/ndk || true
+
+      - name: Install the repo (Playwright)
+        run: |
+          npm ci
+          npm run playwright:install -- --with-deps
+
+      - name: Install Maestro
+        env:
+          MAESTRO_VERSION: 2.12.1
+          MAESTRO_SHA256: 54dbb0716425626604973cbb374c585ca30272375d9ce15177a1152765ddd9d7
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-$MAESTRO_VERSION/maestro.zip"
+          echo "$MAESTRO_SHA256  $RUNNER_TEMP/maestro.zip" | shasum -a 256 -c - || { echo "maestro.zip checksum mismatch" >&2; exit 1; }
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/maestro/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/maestro/bin/maestro" --version
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Get the starter
+        run: |
+          start=$SECONDS
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            cp -R examples/vote "$RUNNER_TEMP/my-app"
+          else
+            npx --yes degit@3.10.1 AndersCan/ekrooh/examples/vote#main "$RUNNER_TEMP/my-app"
+          fi
+          echo "STARTER_DIR=$RUNNER_TEMP/my-app" >> "$GITHUB_ENV"
+          echo "WALK_GET_SECONDS=$((SECONDS - start))" >> "$GITHUB_ENV"
+
+      - name: Walk Start here on two emulators
+        timeout-minutes: 20
+        env:
+          TOPOLOGY: ${{ inputs.topology || 'H' }}
+        run: node .github/scripts/starter-two-phones.mjs "$STARTER_DIR" --topology "$TOPOLOGY"
+
+      - name: Upload the Maestro output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: maestro-two-phones
           path: ${{ runner.temp }}/maestro-debug
 
   android-reload:
