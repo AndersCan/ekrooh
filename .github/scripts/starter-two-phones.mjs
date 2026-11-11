@@ -191,6 +191,7 @@ const adb = (serial, ...rest) =>
 const emulators = [];
 let server = null;
 const maestroLines = [];
+const notes = [];
 const debugOutput = path.join(
   process.env.RUNNER_TEMP || os.tmpdir(),
   'maestro-debug',
@@ -381,7 +382,12 @@ async function walk() {
     const read = async () => {
       const sockets = adb(phoneA, 'shell', 'cat', '/proc/net/unix').stdout;
       const socket = (sockets.match(/@(webview_devtools_remote_\d+)/) ?? [])[1];
-      if (!socket) return '';
+      if (!socket) {
+        notes.push(
+          `no webview socket; pid ${adb(phoneA, 'shell', 'pidof', 'com.example.vote').stdout.trim() || 'none'}`,
+        );
+        return '';
+      }
       adb(phoneA, 'forward', 'tcp:9222', `localabstract:${socket}`);
       let remote;
       try {
@@ -395,7 +401,8 @@ async function walk() {
           .first()
           .textContent({ timeout: 1000 });
         return (text ?? '').trim();
-      } catch {
+      } catch (error) {
+        notes.push(`cdp: ${String(error.message).split('\n')[0]}`);
         return '';
       } finally {
         await remote?.close().catch(() => {});
@@ -475,6 +482,7 @@ if (result) {
       `--- ${serial} [sync]/[vote] logcat (last ${LOG_LINES}) ---\n${tail(lines, LOG_LINES)}`,
     );
   }
+  console.error(`--- notes ---\n${tail(notes, LOG_LINES)}`);
   console.error(
     `--- maestro (last ${LOG_LINES} lines) ---\n${tail(maestroLines, LOG_LINES)}`,
   );
