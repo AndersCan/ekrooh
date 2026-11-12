@@ -1,0 +1,76 @@
+# Two-phone walk flow (Starter / two phones): one step of the walk per run, chosen by `-e ACT=`.
+# ACT=join   open the app, type INVITE into the Join box, press Join (stand-in for paste).
+# ACT=connected  wait for the status line EXPECT (a regex such as `2 other devices connected`).
+# ACT=vote   vote Tea and wait for Tea (1).   ACT=see   wait for Tea (1) from the other phone.
+# Run by starter-two-phones.mjs with --device <serial>. It reads the starter's button names and Join box label.
+appId: com.example.vote
+name: One step of the two-phone walk
+androidWebViewHierarchy: devtools
+---
+- runFlow:
+    when:
+      true: ${ACT == 'join'}
+    commands:
+      - launchApp:
+          label: Open the vote app
+      # Maestro 2.12.1 throws if it reads the DOM while the page navigates; wait without reading it first.
+      - evalScript: ${ (function () { var end = Date.now() + 15500; while (Date.now() < end) {} })() }
+      - extendedWaitUntil:
+          label: App shows Tea (0)
+          visible: Tea (0)
+          timeout: 60000
+- runFlow:
+    when:
+      true: ${ACT == 'join'}
+    commands:
+      - retry:
+          maxRetries: 3
+          commands:
+            - tapOn:
+                label: Focus the invite box
+                text: Invite code from another device
+            - eraseText:
+                label: Clear anything a failed try left in the box
+            - inputText:
+                label: Type the invite code
+                text: ${INVITE}
+            - assertVisible:
+                label: The invite box shows the code
+                text: ${INVITE}
+      # The soft keyboard covers the Join button on the emulator's small screen.
+      - hideKeyboard
+      - tapOn:
+          label: Join the room
+          text: Join
+      - extendedWaitUntil:
+          label: Phone is in the room
+          visible: 'Joined\. Looking for the other device…|[0-9] other devices? connected'
+          timeout: 15000
+- runFlow:
+    when:
+      true: ${ACT == 'connected'}
+    commands:
+      - extendedWaitUntil:
+          label: Phone sees the other devices
+          visible: ${EXPECT}
+          timeout: 150000
+- runFlow:
+    when:
+      true: ${ACT == 'vote'}
+    commands:
+      - tapOn:
+          label: Vote Tea
+          text: Tea (0)
+      - extendedWaitUntil:
+          label: Count goes up to Tea (1)
+          visible: Tea (1)
+          timeout: 15000
+- runFlow:
+    when:
+      true: ${ACT == 'see'}
+    commands:
+      - extendedWaitUntil:
+          label: Count from the other phone arrives
+          visible: Tea (1)
+          timeout: 120000
+      - takeScreenshot: phone-b-after-vote
