@@ -499,6 +499,27 @@ async function walk() {
     current.wanted = `both phones to go idle within ${SETTLE} s (see notes)`;
     return false;
   }
+  // Probe: start the app with plain adb and watch the transport, so a drop is seen without Maestro.
+  for (const serial of joiners) {
+    adb(serial, 'shell', 'am', 'force-stop', APP);
+    adb(
+      serial,
+      'shell',
+      'monkey',
+      '-p',
+      APP,
+      '-c',
+      'android.intent.category.LAUNCHER',
+      '1',
+    );
+    const states = [];
+    for (let i = 0; i < 20; i++) {
+      states.push((adb(serial, 'get-state').stdout ?? '').trim() || 'gone');
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    notes.push(`probe ${serial} state after app start: ${states.join(',')}`);
+    adb(serial, 'shell', 'am', 'force-stop', APP);
+  }
   for (const serial of joiners) {
     // A cold phone sometimes fails its first Maestro launch; one retry.
     adb(serial, 'reconnect', 'offline');
