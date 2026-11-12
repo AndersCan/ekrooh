@@ -325,7 +325,7 @@ async function walk() {
         '-gpu',
         'swiftshader_indirect',
         '-no-snapshot',
-        // Two phones share a 4-vCPU runner with Maestro's JVM; 2 cores each starved adbd and a phone went offline.
+        // Hypothesis, not proven: two phones share a 4-vCPU runner with Maestro's JVM, and fewer guest cores leave the host less starved.
         '-cores',
         '1',
         '-memory',
