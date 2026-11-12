@@ -34,6 +34,7 @@ const BOOT = 360;
 const APK = 60;
 const CODE = 150;
 const JOIN = 240;
+const SETTLE = 120;
 const VOTE = 300;
 const GOAL = 300;
 const KILL_GRACE_MS = 5000;
@@ -191,6 +192,29 @@ async function until(check, budget) {
   return false;
 }
 
+// Share of the last second the phone's CPUs sat idle, from two /proc/stat reads.
+async function idleShare(serial) {
+  const read = () => {
+    const fields = (
+      adb(serial, 'shell', 'head', '-1', '/proc/stat').stdout ?? ''
+    )
+      .trim()
+      .split(/\s+/)
+      .slice(1)
+      .map(Number);
+    return {
+      idle: fields[3] + (fields[4] || 0),
+      total: fields.reduce((a, b) => a + b, 0),
+    };
+  };
+  const first = read();
+  // Sampling window of a counter, not a wait for a result.
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  const second = read();
+  const total = second.total - first.total;
+  return total > 0 ? (second.idle - first.idle) / total : 0;
+}
+
 async function stop(child) {
   if (child.exitCode !== null || child.signalCode) return;
   const exited = new Promise((resolve) => child.once('exit', resolve));
@@ -245,6 +269,10 @@ async function maestro(serial, act, env = {}) {
   ]);
   const ok = await finish(state, VOTE, `maestro ${act} on ${serial}`);
   maestroLines.push(`--- ${act} on ${serial} ---`, ...state.lines);
+  if (!ok)
+    notes.push(
+      `${act} on ${serial} failed; adb devices: ${(spawnSync('adb', ['devices'], { encoding: 'utf8' }).stdout ?? '').replace(/\s+/g, ' ')}`,
+    );
   return { ok, lines: state.lines };
 }
 
@@ -325,9 +353,8 @@ async function walk() {
         '-gpu',
         'swiftshader_indirect',
         '-no-snapshot',
-        // Two phones share a 4-vCPU runner with Maestro's JVM; 2 cores each starved adbd and a phone went offline.
         '-cores',
-        '1',
+        '2',
         '-memory',
         '2560',
       ]),
@@ -458,6 +485,20 @@ async function walk() {
     'the phones to show each other connected',
   );
   const joiners = topology === 'H' ? [phoneA, phoneB] : [phoneB];
+  // A phone that just booted keeps installing and configuring for a while; Maestro's
+  // driver install on top of that dropped the adb transport ("device offline"). Join once both are idle.
+  const settledAt = Date.now();
+  const settled = await until(async () => {
+    const shares = await Promise.all(SERIALS.map(idleShare));
+    notes.push(
+      `idle ${shares.map((x) => x.toFixed(2)).join(' ')} after ${Math.round((Date.now() - settledAt) / 1000)} s`,
+    );
+    return shares.every((x) => x >= 0.8);
+  }, SETTLE);
+  if (!settled) {
+    current.wanted = `both phones to go idle within ${SETTLE} s (see notes)`;
+    return false;
+  }
   for (const serial of joiners) {
     // A cold phone sometimes fails its first Maestro launch; one retry.
     adb(serial, 'reconnect', 'offline');
