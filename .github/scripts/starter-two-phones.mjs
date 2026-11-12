@@ -39,7 +39,7 @@ const GOAL = 300;
 const KILL_GRACE_MS = 5000;
 const LOG_LINES = 40;
 const SERIALS = ['emulator-5554', 'emulator-5556'];
-// AOSP image: with google_apis, Play services churn at boot (config syncs, monitor contention in logcat) while adb drops the phone as `device offline` under Maestro's launch.
+// AOSP image. Hypothesis, not proven: with google_apis, Play services churn at boot and adb drops the phone as `device offline` under Maestro's launch; the default image has no Play services.
 const IMAGE = 'system-images;android-35;default;x86_64';
 const APP = 'com.example.vote';
 
