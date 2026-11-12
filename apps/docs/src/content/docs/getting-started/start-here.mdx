@@ -63,7 +63,30 @@ npm run sync && npm run dev
 4. When it says "1 other device connected", vote on either: the count goes up
    on both.
 
-The first Gradle sync and emulator download take several minutes.
+### Two Android emulators
+
+Same steps, with two devices. Stop `npm run dev` (Ctrl+C), then:
+
+```sh
+npm run sync && npm run dev
+```
+
+1. In Android Studio, open the `android/` folder and wait for Gradle sync to
+   finish.
+2. Device Manager > Create Device > any Pixel with API 35. Do it twice.
+3. Start both emulators, then press Run once for each: pick one in the device
+   dropdown, Run, pick the other, Run.
+4. Copy the invite code from http://localhost:5173 and paste it into both
+   emulators' "Paste a code here" box (long-press, Paste), then press Join.
+   Each says "2 other devices connected".
+5. Vote Tea on one emulator: Tea goes up on both.
+
+Measured from degit to the vote showing on both emulators: about four minutes
+(244 to 263 s over three runs of the Starter / two phones check), with Android
+Studio and an API 35 image already installed. The first connection is the slow
+step, about a minute and a half. The check builds and starts the emulators from
+the command line, so Android Studio's own first Gradle sync adds to it. The
+image download (about 1.5 GB) is not counted.
 
 ### iOS Simulator (Mac only)
 
