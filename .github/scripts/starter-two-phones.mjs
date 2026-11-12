@@ -7,7 +7,7 @@
  *   P: phone B joins phone A's room, no browser.
  * Steps 4-6 stand in for Android Studio (Gradle sync, Device Manager, Run); the
  * paste is typed through Maestro. Needs `maestro`, `adb`, `avdmanager` on PATH,
- * ANDROID_HOME, system image `system-images;android-35;google_apis;x86_64`,
+ * ANDROID_HOME, system image `system-images;android-35;default;x86_64`,
  * and `npm ci` + `npm run playwright:install` at the repo root.
  * Prints `step <n> <name>: <s> s (doc|stand-in)` and `total <s> s of 300`, and
  * writes the same table to $GITHUB_STEP_SUMMARY. A total over 300 s only warns.
@@ -39,7 +39,8 @@ const GOAL = 300;
 const KILL_GRACE_MS = 5000;
 const LOG_LINES = 40;
 const SERIALS = ['emulator-5554', 'emulator-5556'];
-const IMAGE = 'system-images;android-35;google_apis;x86_64';
+// AOSP image: with google_apis, Play services churn at boot (config syncs, monitor contention in logcat) while adb drops the phone as `device offline` under Maestro's launch.
+const IMAGE = 'system-images;android-35;default;x86_64';
 const APP = 'com.example.vote';
 
 function usage(message) {
@@ -325,9 +326,8 @@ async function walk() {
         '-gpu',
         'swiftshader_indirect',
         '-no-snapshot',
-        // Hypothesis, not proven: two phones share a 4-vCPU runner with Maestro's JVM, and fewer guest cores leave the host less starved.
         '-cores',
-        '1',
+        '2',
         '-memory',
         '2560',
       ]),

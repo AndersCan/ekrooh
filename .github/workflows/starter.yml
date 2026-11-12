@@ -267,7 +267,7 @@ jobs:
 
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
-          packages: platform-tools platforms;android-36 build-tools;36.0.0 emulator system-images;android-35;google_apis;x86_64
+          packages: platform-tools platforms;android-36 build-tools;36.0.0 emulator system-images;android-35;default;x86_64
 
       - name: Remove preinstalled NDKs
         # The starter must build without an NDK (prebuilt .so files only).
