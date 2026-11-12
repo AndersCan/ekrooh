@@ -11,7 +11,7 @@
  * reads the starter's visible text (button names, Join box label): renaming
  * those means updating this file and starter-vote-native-sync.yaml.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -138,6 +138,18 @@ async function stop(child) {
   const timer = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
   await done;
   clearTimeout(timer);
+}
+
+const DRIVER_ID = 'dev.mobile.maestro-driver-iosUITests.xctrunner';
+
+// Maestro leaves the xcodebuild that hosts its iOS driver running when it
+// gives up on "driver not ready in time". That xcodebuild keeps restarting
+// the driver ("Restarting after unexpected exit"), which kills the next
+// attempt's driver mid-flow. Stop it, and the driver app, before trying again.
+function stopIosDriver(udid) {
+  if (!udid || process.platform !== 'darwin') return;
+  spawnSync('pkill', ['-f', `xcodebuild.*${udid}`]);
+  spawnSync('xcrun', ['simctl', 'terminate', udid, DRIVER_ID]);
 }
 
 async function until(check, budget) {
@@ -284,6 +296,7 @@ async function run() {
       line.includes('driver not ready in time'),
     );
     if (maestroExit === 0 || !driverDown) break;
+    stopIosDriver(device);
   }
   if (maestroExit !== 0) {
     wanted = `the phone to join and show Tea (1) (maestro exit ${maestroExit})`;
