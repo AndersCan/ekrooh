@@ -34,7 +34,7 @@ const BOOT = 360;
 const APK = 60;
 const CODE = 150;
 const JOIN = 240;
-const JOIN_TRIES = 3;
+const JOIN_TRIES = 4;
 const ONLINE = 60;
 const VOTE = 300;
 const GOAL = 300;
@@ -194,8 +194,9 @@ async function until(check, budget) {
 }
 
 // True when adb lists the phone as a device and it reports a finished boot.
-// No `adb reconnect`: it drops a healthy phone's transport just before Maestro connects.
+// A phone adb shows offline or not at all gets `adb reconnect` until it returns.
 async function phoneOnline(serial) {
+  adb(serial, 'reconnect', 'offline');
   return until(
     () =>
       adb(serial, 'get-state').stdout.trim() === 'device' &&
@@ -339,8 +340,9 @@ async function walk() {
         '-gpu',
         'swiftshader_indirect',
         '-no-snapshot',
+        // Two phones share a 4-vCPU runner with Maestro's JVM; 2 cores each starved adbd and a phone went offline.
         '-cores',
-        '2',
+        '1',
         '-memory',
         '2560',
       ]),
@@ -479,6 +481,15 @@ async function walk() {
     for (let attempt = 0; attempt < JOIN_TRIES && !joined; attempt += 1) {
       if (!(await phoneOnline(serial))) continue;
       joined = (await maestro(serial, 'join', { INVITE: invite })).ok;
+      if (!joined) {
+        // Maestro saw the transport go offline after adb listed the phone as
+        // booted; a fresh adb server re-registers both emulators.
+        notes.push(
+          `join try ${attempt + 1} on ${serial} failed; adb devices: ${spawnSync('adb', ['devices'], { encoding: 'utf8' }).stdout.replaceAll('\n', ' | ')}`,
+        );
+        spawnSync('adb', ['kill-server']);
+        spawnSync('adb', ['start-server']);
+      }
     }
     if (!joined) return false;
   }
