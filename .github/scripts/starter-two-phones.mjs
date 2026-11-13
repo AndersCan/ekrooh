@@ -239,7 +239,7 @@ async function maestro(serial, act, env = {}) {
     serial,
     'test',
     '--debug-output',
-    debugOutput,
+    path.join(debugOutput, serial),
     '--flatten-debug-output',
     ...flags,
     path.join(root, '.github/scripts/starter-two-phones.yaml'),
@@ -458,23 +458,36 @@ async function walk() {
     'the phones to show each other connected',
   );
   const joiners = topology === 'H' ? [phoneA, phoneB] : [phoneB];
-  for (const serial of joiners) {
-    // A cold phone sometimes fails its first Maestro launch; one retry.
-    adb(serial, 'reconnect', 'offline');
-    adb(serial, 'wait-for-device');
-    const joined =
-      (await maestro(serial, 'join', { INVITE: invite })).ok ||
-      (await maestro(serial, 'join', { INVITE: invite })).ok;
-    if (!joined) return false;
-  }
+  const lapStart = Date.now();
+  const lap = (what) =>
+    console.log(
+      `  step 8 ${what}: ${Math.round((Date.now() - lapStart) / 1000)} s in`,
+    );
+  // Both phones join at once: each Maestro run is mostly waiting on its own phone.
+  const joinResults = await Promise.all(
+    joiners.map(async (serial) => {
+      // A cold phone sometimes fails its first Maestro launch; one retry.
+      adb(serial, 'reconnect', 'offline');
+      adb(serial, 'wait-for-device');
+      const ok =
+        (await maestro(serial, 'join', { INVITE: invite })).ok ||
+        (await maestro(serial, 'join', { INVITE: invite })).ok;
+      lap(`${serial} joined`);
+      return ok;
+    }),
+  );
+  if (!joinResults.every(Boolean)) return false;
   const expect =
     topology === 'H' ? '2 other devices connected' : '1 other device connected';
-  for (const serial of SERIALS) {
-    if (!(await maestro(serial, 'connected', { EXPECT: expect })).ok) {
-      current.wanted = `${serial} to show "${expect}"`;
-      return false;
-    }
-  }
+  const connectedResults = await Promise.all(
+    SERIALS.map(async (serial) => {
+      const ok = (await maestro(serial, 'connected', { EXPECT: expect })).ok;
+      lap(`${serial} shows "${expect}"`);
+      if (!ok) current.wanted = `${serial} to show "${expect}"`;
+      return ok;
+    }),
+  );
+  if (!connectedResults.every(Boolean)) return false;
   done();
 
   begin(
@@ -484,7 +497,9 @@ async function walk() {
     'phone B to show Tea (1)',
   );
   if (!(await maestro(phoneA, 'vote')).ok) return false;
+  console.log('phone A shows Tea (1)');
   if (!(await maestro(phoneB, 'see')).ok) return false;
+  console.log('phone B shows Tea (1)');
   done();
   return true;
 }
