@@ -229,6 +229,27 @@ const debugOutput = path.join(
   "maestro-debug",
 );
 
+// Prints how long each Maestro command took, from the debug output.
+function logCommandTimes(serial, act) {
+  try {
+    const dirPath = path.join(debugOutput, serial);
+    for (const name of fs.readdirSync(dirPath)) {
+      if (!/^commands.*\.json$/.test(name)) continue;
+      const entries = JSON.parse(fs.readFileSync(path.join(dirPath, name)));
+      for (const entry of entries) {
+        const command = Object.values(entry.command ?? {})[0] ?? {};
+        const label = command.label ?? Object.keys(entry.command ?? {})[0];
+        const ms = entry.metadata?.duration;
+        if (label && ms !== undefined)
+          console.log(`    ${act} ${serial} ${label}: ${ms} ms`);
+      }
+      fs.rmSync(path.join(dirPath, name));
+    }
+  } catch {
+    // No timing file: the timing is a log, not a check.
+  }
+}
+
 async function maestro(serial, act, env = {}) {
   const flags = Object.entries({ ACT: act, ...env }).flatMap(([k, v]) => [
     "-e",
@@ -246,6 +267,7 @@ async function maestro(serial, act, env = {}) {
   ]);
   const ok = await finish(state, VOTE, `maestro ${act} on ${serial}`);
   maestroLines.push(`--- ${act} on ${serial} ---`, ...state.lines);
+  logCommandTimes(serial, act);
   return { ok, lines: state.lines };
 }
 
