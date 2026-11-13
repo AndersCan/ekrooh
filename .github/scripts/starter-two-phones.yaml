@@ -1,5 +1,5 @@
 # Two-phone walk flow (Starter / two phones): one step of the walk per run, chosen by `-e ACT=`.
-# ACT=join   open the app, type INVITE into the Join box, press Join (stand-in for paste).
+# ACT=join   type INVITE into the Join box, press Join (stand-in for paste).
 # ACT=connected  wait for the status line EXPECT (a regex such as `2 other devices connected`).
 # ACT=vote   vote Tea and wait for Tea (1).   ACT=see   wait for Tea (1) from the other phone.
 # Run by starter-two-phones.mjs with --device <serial>. It reads the starter's button names and Join box label.
@@ -11,15 +11,8 @@ androidWebViewHierarchy: devtools
     when:
       true: ${ACT == 'join'}
     commands:
-      - launchApp:
-          label: Open the vote app
-      # Maestro 2.12.1 throws if it reads the DOM while the page navigates; wait without reading it first.
-      # Not a busy loop: that spun a host CPU and stalled the Simulator's loopback /login answer.
-      - repeat:
-          times: 8
-          commands:
-            - waitForAnimationToEnd:
-                timeout: 2000
+      # The walk opened the app. Maestro 2.12.1 throws if it reads the DOM while the page navigates; wait without reading it first.
+      - evalScript: ${ (function () { var end = Date.now() + Number(SETTLE_MS); while (Date.now() < end) {} })() }
       - extendedWaitUntil:
           label: App shows Tea (0)
           visible: Tea (0)
@@ -34,11 +27,19 @@ androidWebViewHierarchy: devtools
             - tapOn:
                 label: Focus the invite box
                 text: Invite code from another device
-            - eraseText:
-                label: Clear anything a failed try left in the box
             - inputText:
                 label: Type the invite code
                 text: ${INVITE}
+            # Only a failed try leaves other text in the box; clearing an empty box costs seconds.
+            - runFlow:
+                when:
+                  notVisible: ${INVITE}
+                commands:
+                  - eraseText:
+                      label: Clear what a failed try left in the box
+                  - inputText:
+                      label: Type the invite code again
+                      text: ${INVITE}
             - assertVisible:
                 label: The invite box shows the code
                 text: ${INVITE}

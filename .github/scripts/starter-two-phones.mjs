@@ -36,6 +36,7 @@ const CODE = 150;
 const JOIN = 240;
 const VOTE = 300;
 const GOAL = 300;
+const PAGE_SETTLE_MS = 15500;
 const KILL_GRACE_MS = 5000;
 const LOG_LINES = 40;
 const SERIALS = ['emulator-5554', 'emulator-5556'];
@@ -229,6 +230,27 @@ const debugOutput = path.join(
   'maestro-debug',
 );
 
+// Prints how long each Maestro command took, from the debug output.
+function logCommandTimes(serial, act) {
+  try {
+    const dirPath = path.join(debugOutput, serial);
+    for (const run of fs.readdirSync(dirPath)) {
+      const file = path.join(dirPath, run, 'commands.json');
+      if (!fs.existsSync(file)) continue;
+      for (const entry of JSON.parse(fs.readFileSync(file, 'utf8'))) {
+        const body = Object.values(entry.command ?? {})[0] ?? {};
+        const ms = entry.metadata?.duration;
+        if (body.label && ms !== undefined)
+          console.log(`    ${act} ${serial} ${body.label}: ${ms} ms`);
+      }
+      // Gone after reading, so a retry's log starts clean.
+      fs.rmSync(path.join(dirPath, run), { recursive: true });
+    }
+  } catch {
+    // No timing file: the timing is a log, not a check.
+  }
+}
+
 async function maestro(serial, act, env = {}) {
   const flags = Object.entries({ ACT: act, ...env }).flatMap(([k, v]) => [
     '-e',
@@ -239,13 +261,14 @@ async function maestro(serial, act, env = {}) {
     serial,
     'test',
     '--debug-output',
-    debugOutput,
+    path.join(debugOutput, serial),
     '--flatten-debug-output',
     ...flags,
     path.join(root, '.github/scripts/starter-two-phones.yaml'),
   ]);
   const ok = await finish(state, VOTE, `maestro ${act} on ${serial}`);
   maestroLines.push(`--- ${act} on ${serial} ---`, ...state.lines);
+  logCommandTimes(serial, act);
   return { ok, lines: state.lines };
 }
 
@@ -375,7 +398,19 @@ async function walk() {
       `install on ${serial}`,
     );
     if (!installed) return false;
+    // Run also opens the app; opening it here lets the page settle while the walk goes on.
+    adb(
+      serial,
+      'shell',
+      'monkey',
+      '-p',
+      APP,
+      '-c',
+      'android.intent.category.LAUNCHER',
+      '1',
+    );
   }
+  const openedAt = Date.now();
   done();
 
   const [phoneA, phoneB] = SERIALS;
@@ -404,16 +439,6 @@ async function walk() {
     await context.close();
   } else {
     // Phone A's own code, read from its page over the WebView debug socket.
-    adb(
-      phoneA,
-      'shell',
-      'monkey',
-      '-p',
-      'com.example.vote',
-      '-c',
-      'android.intent.category.LAUNCHER',
-      '1',
-    );
     const read = async () => {
       const sockets = adb(phoneA, 'shell', 'cat', '/proc/net/unix').stdout;
       const socket = (sockets.match(/@(webview_devtools_remote_\d+)/) ?? [])[1];
@@ -458,23 +483,37 @@ async function walk() {
     'the phones to show each other connected',
   );
   const joiners = topology === 'H' ? [phoneA, phoneB] : [phoneB];
+  const lapStart = Date.now();
+  const lap = (what) =>
+    console.log(
+      `  step 8 ${what}: ${Math.round((Date.now() - lapStart) / 1000)} s in`,
+    );
+  // One phone after the other: the second looks the room up after the first has
+  // announced it. Joined at the same moment, the phones can miss each other.
   for (const serial of joiners) {
     // A cold phone sometimes fails its first Maestro launch; one retry.
     adb(serial, 'reconnect', 'offline');
     adb(serial, 'wait-for-device');
+    // The page needs about 15 s after the app opens before Maestro may read it.
+    const settle = Math.max(0, PAGE_SETTLE_MS - (Date.now() - openedAt));
+    const env = { INVITE: invite, SETTLE_MS: String(settle) };
     const joined =
-      (await maestro(serial, 'join', { INVITE: invite })).ok ||
-      (await maestro(serial, 'join', { INVITE: invite })).ok;
+      (await maestro(serial, 'join', env)).ok ||
+      (await maestro(serial, 'join', env)).ok;
+    lap(`${serial} joined`);
     if (!joined) return false;
   }
   const expect =
     topology === 'H' ? '2 other devices connected' : '1 other device connected';
-  for (const serial of SERIALS) {
-    if (!(await maestro(serial, 'connected', { EXPECT: expect })).ok) {
-      current.wanted = `${serial} to show "${expect}"`;
-      return false;
-    }
-  }
+  const connectedResults = await Promise.all(
+    SERIALS.map(async (serial) => {
+      const ok = (await maestro(serial, 'connected', { EXPECT: expect })).ok;
+      lap(`${serial} shows "${expect}"`);
+      if (!ok) current.wanted = `${serial} to show "${expect}"`;
+      return ok;
+    }),
+  );
+  if (!connectedResults.every(Boolean)) return false;
   done();
 
   begin(
@@ -484,7 +523,9 @@ async function walk() {
     'phone B to show Tea (1)',
   );
   if (!(await maestro(phoneA, 'vote')).ok) return false;
+  console.log('phone A shows Tea (1)');
   if (!(await maestro(phoneB, 'see')).ok) return false;
+  console.log('phone B shows Tea (1)');
   done();
   return true;
 }
