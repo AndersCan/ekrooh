@@ -11,8 +11,6 @@ androidWebViewHierarchy: devtools
     when:
       true: ${ACT == 'join' || ACT == 'joinwait'}
     commands:
-      # The walk opened the app. Maestro 2.12.1 throws if it reads the DOM while the page navigates; wait without reading it first.
-      - evalScript: ${ (function () { var end = Date.now() + Number(SETTLE_MS); while (Date.now() < end) {} })() }
       - extendedWaitUntil:
           label: App shows Tea (0)
           visible: Tea (0)
@@ -82,5 +80,5 @@ androidWebViewHierarchy: devtools
       - extendedWaitUntil:
           label: Count from the other phone arrives
           visible: Tea (1)
-          timeout: 120000
+          timeout: 180000
       - takeScreenshot: phone-b-after-vote

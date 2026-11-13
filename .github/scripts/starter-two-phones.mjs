@@ -36,7 +36,6 @@ const CODE = 150;
 const JOIN = 240;
 const VOTE = 300;
 const GOAL = 300;
-const PAGE_SETTLE_MS = 15500;
 const KILL_GRACE_MS = 5000;
 const LOG_LINES = 40;
 const SERIALS = ['emulator-5554', 'emulator-5556'];
@@ -230,45 +229,54 @@ const debugOutput = path.join(
   'maestro-debug',
 );
 
-// Prints how long each Maestro command took, from the debug output.
-function logCommandTimes(serial, act) {
+// Prints how long each Maestro command took, from one run's debug folder.
+// Reads only; the folder stays for the upload step of a failed job.
+function logCommandTimes(folder, serial, act) {
   try {
-    const dirPath = path.join(debugOutput, serial);
-    for (const run of fs.readdirSync(dirPath)) {
-      const file = path.join(dirPath, run, 'commands.json');
-      if (!fs.existsSync(file)) continue;
+    const files = [
+      folder,
+      ...fs.readdirSync(folder).map((n) => path.join(folder, n)),
+    ]
+      .map((d) => path.join(d, 'commands.json'))
+      .filter((f) => fs.existsSync(f));
+    for (const file of files) {
       for (const entry of JSON.parse(fs.readFileSync(file, 'utf8'))) {
         const body = Object.values(entry.command ?? {})[0] ?? {};
         const ms = entry.metadata?.duration;
         if (body.label && ms !== undefined)
           console.log(`    ${act} ${serial} ${body.label}: ${ms} ms`);
       }
-      // Gone after reading, so a retry's log starts clean.
-      fs.rmSync(path.join(dirPath, run), { recursive: true });
     }
   } catch {
     // No timing file: the timing is a log, not a check.
   }
 }
 
+// A timeout on the wait for the other devices is not a failed join: a second Join would only wait again.
+function joinFailed(lines) {
+  return !lines.some((l) => /Phone sees the other devices.*FAILED/.test(l));
+}
+
+let maestroRuns = 0;
 async function maestro(serial, act, env = {}) {
   const flags = Object.entries({ ACT: act, ...env }).flatMap(([k, v]) => [
     '-e',
     `${k}=${v}`,
   ]);
+  const folder = path.join(debugOutput, serial, `${++maestroRuns}-${act}`);
   const state = run('maestro', [
     '--device',
     serial,
     'test',
     '--debug-output',
-    path.join(debugOutput, serial),
+    folder,
     '--flatten-debug-output',
     ...flags,
     path.join(root, '.github/scripts/starter-two-phones.yaml'),
   ]);
   const ok = await finish(state, VOTE, `maestro ${act} on ${serial}`);
   maestroLines.push(`--- ${act} on ${serial} ---`, ...state.lines);
-  logCommandTimes(serial, act);
+  logCommandTimes(folder, serial, act);
   return { ok, lines: state.lines };
 }
 
@@ -410,7 +418,6 @@ async function walk() {
       '1',
     );
   }
-  const openedAt = Date.now();
   done();
 
   const [phoneA, phoneB] = SERIALS;
@@ -493,17 +500,16 @@ async function walk() {
   const expect =
     topology === 'H' ? '2 other devices connected' : '1 other device connected';
   for (const [index, serial] of joiners.entries()) {
-    // A cold phone sometimes fails its first Maestro launch; one retry.
+    // A cold phone sometimes fails its first Maestro launch; the join gets one retry.
     adb(serial, 'reconnect', 'offline');
     adb(serial, 'wait-for-device');
-    // The page needs about 15 s after the app opens before Maestro may read it.
-    const settle = Math.max(0, PAGE_SETTLE_MS - (Date.now() - openedAt));
     // The last phone to join also waits to see the others: one Maestro start, not two.
     const act = index === joiners.length - 1 ? 'joinwait' : 'join';
-    const env = { INVITE: invite, SETTLE_MS: String(settle), EXPECT: expect };
+    const env = { INVITE: invite, EXPECT: expect };
+    const first = await maestro(serial, act, env);
     const joined =
-      (await maestro(serial, act, env)).ok ||
-      (await maestro(serial, act, env)).ok;
+      first.ok ||
+      (joinFailed(first.lines) && (await maestro(serial, act, env)).ok);
     lap(`${serial} ${act === 'joinwait' ? `shows "${expect}"` : 'joined'}`);
     if (!joined) {
       current.wanted = `${serial} to join and show "${expect}"`;
