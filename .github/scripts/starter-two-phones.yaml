@@ -12,8 +12,9 @@ androidWebViewHierarchy: devtools
       true: ${ACT == 'join' || ACT == 'joinwait'}
     commands:
       - extendedWaitUntil:
-          label: App shows Tea (0)
-          visible: Tea (0)
+          label: App shows the vote buttons
+          # A rerun may find the page scrolled with the keyboard up, so any button counts.
+          visible: '(Tea|Coffee|Water) \([0-9]+\)'
           timeout: 60000
 - runFlow:
     when:

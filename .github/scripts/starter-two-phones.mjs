@@ -33,7 +33,7 @@ const SYNC = 120;
 const READY = 120;
 const BUILD = 600;
 const BOOT = 360;
-const BOOT_IOS = 600;
+const BOOT_IOS = 900;
 const APK = 60;
 const CODE = 150;
 const JOIN = 240;
@@ -455,6 +455,23 @@ async function walk() {
     if (!(await until(() => booting.every((b) => b.exit !== null), BOOT_IOS)))
       return false;
     done();
+
+    // The first keyboard shows a slide-to-type intro sheet that covers the page and stalls Maestro's typing.
+    for (const udid of udids)
+      for (const key of [
+        'DidShowContinuousPathIntroduction',
+        'KeyboardDidShowProductivityTutorial',
+      ])
+        simctl(
+          'spawn',
+          udid,
+          'defaults',
+          'write',
+          'com.apple.keyboard.preferences',
+          key,
+          '-bool',
+          'true',
+        );
 
     begin(
       6,
