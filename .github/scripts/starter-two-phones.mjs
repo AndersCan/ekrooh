@@ -233,11 +233,9 @@ const debugOutput = path.join(
 // Reads only; the folder stays for the upload step of a failed job.
 function logCommandTimes(folder, serial, act) {
   try {
-    const files = [
-      folder,
-      ...fs.readdirSync(folder).map((n) => path.join(folder, n)),
-    ]
-      .map((d) => path.join(d, 'commands.json'))
+    const files = fs
+      .readdirSync(folder)
+      .map((n) => path.join(folder, n, 'commands.json'))
       .filter((f) => fs.existsSync(f));
     for (const file of files) {
       for (const entry of JSON.parse(fs.readFileSync(file, 'utf8'))) {
@@ -255,6 +253,12 @@ function logCommandTimes(folder, serial, act) {
 // A timeout on the wait for the other devices is not a failed join: a second Join would only wait again.
 function joinFailed(lines) {
   return !lines.some((l) => /Phone sees the other devices.*FAILED/.test(l));
+}
+
+// One try, and a second only when the first failed before the wait for the other devices.
+async function joinWithRetry(attempt) {
+  const first = await attempt();
+  return first.ok || (joinFailed(first.lines) && (await attempt()).ok);
 }
 
 let maestroRuns = 0;
@@ -506,10 +510,7 @@ async function walk() {
     // The last phone to join also waits to see the others: one Maestro start, not two.
     const act = index === joiners.length - 1 ? 'joinwait' : 'join';
     const env = { INVITE: invite, EXPECT: expect };
-    const first = await maestro(serial, act, env);
-    const joined =
-      first.ok ||
-      (joinFailed(first.lines) && (await maestro(serial, act, env)).ok);
+    const joined = await joinWithRetry(() => maestro(serial, act, env));
     lap(`${serial} ${act === 'joinwait' ? `shows "${expect}"` : 'joined'}`);
     if (!joined) {
       current.wanted = `${serial} to join and show "${expect}"`;
