@@ -489,7 +489,7 @@ jobs:
             sleep 1
           done
           [ -n "$ready" ] || { cat "$RUNNER_TEMP/dev.log"; exit 1; }
-          # Only the app's own backend (8082) may serve the page: stop the
+          # Only the app's own backend (free port) may serve the page: stop the
           # computer's 8080 backend so a page that ignores ?backend= stays on
           # "Connecting…" and the test fails.
           kill $(lsof -tiTCP:8080 -sTCP:LISTEN)
@@ -497,6 +497,11 @@ jobs:
           TEST_RUNNER_VOTE_RENDER_TS="$STARTER_DIR/src/render.ts" \
             xcodebuild test-without-building -project VoteReload.xcodeproj -scheme VoteReload \
             -destination "id=$SIM_UDID" || { tail -60 "$RUNNER_TEMP/dev.log"; exit 1; }
+          # The app picks its backend port at launch; 8082 means the free-port probe fell back.
+          port=$(xcrun simctl spawn "$SIM_UDID" log show --last 20m --style compact \
+            --predicate 'subsystem == "com.example.vote"' | sed -n 's/.*dev backend port: \([0-9][0-9]*\).*/\1/p' | tail -1)
+          echo "dev backend port: ${port:-none}"
+          [ -n "$port" ] && [ "$port" != 8082 ]
 
       - name: Upload the Maestro output
         if: failure()
