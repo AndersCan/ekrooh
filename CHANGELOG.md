@@ -9,6 +9,7 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Host invokes keep the page's timeout** (justus#717): a page invoke's `timeoutMs` now travels in `INVOKE_REQUEST` (clamped to 10 min) and bounds the worklet's wait for the host, which used to give up at 30 s. A Face ID or passcode prompt the person answers after 30 s no longer fails.
 - The page transport starts over on the next request after a `/login` that only timed out (the server answered late and left a session cookie), instead of staying on "Connecting…" until the app is foregrounded. A rejected `/login` still stays given up.
 
 ### Added

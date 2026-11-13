@@ -287,6 +287,7 @@ function validateHeader(header: Record<string, unknown>): MessageHeader {
           event: header.event,
           requestId: asOptionalString(header.requestId),
           args: asOptionalRecord(header.args),
+          timeoutMs: asOptionalTimeout(header.timeoutMs),
         });
       }
       break;
@@ -360,6 +361,14 @@ function validateHeader(header: Record<string, unknown>): MessageHeader {
 /** Only allowlisted, schema-known fields are carried forward. Unknown wire
  * fields are dropped so attacker-controlled keys (e.g. `__proto__` or an
  * arbitrary `args` key) never ride into plugin args/result objects. */
+const MAX_INVOKE_TIMEOUT_MS = 600_000;
+
+function asOptionalTimeout(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.min(value, MAX_INVOKE_TIMEOUT_MS)
+    : undefined;
+}
+
 function mergeHeader<T extends MessageHeader>(
   parsed: Record<string, unknown>,
   known: T,

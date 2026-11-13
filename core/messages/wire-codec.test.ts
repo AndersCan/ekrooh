@@ -225,6 +225,27 @@ describe('MessageProtocol encode/decode', () => {
     expect(decoded.payload.byteLength).toBe(MAX_FRAME_BYTES - 128);
   });
 
+  it.each([
+    [300_000, 300_000],
+    [10_000_000, 600_000],
+    [0, undefined],
+    [-5, undefined],
+    [Number.NaN, undefined],
+    ['300', undefined],
+  ])('decodes an invoke timeoutMs of %s as %s', (sent, expected) => {
+    const protocol = new MessageProtocol();
+    const header = {
+      type: 'INVOKE_REQUEST',
+      pluginId: 'core.health',
+      event: 'health.ping',
+      timeoutMs: sent,
+    } as unknown as MessageHeader;
+    const decoded = protocol.decode(
+      protocol.encode(MessageType.ENVELOPE, header, null),
+    );
+    expect((decoded.header as { timeoutMs?: number }).timeoutMs).toBe(expected);
+  });
+
   it('drops unknown and prototype-polluting header fields on decode', () => {
     const protocol = new MessageProtocol();
     const header = {

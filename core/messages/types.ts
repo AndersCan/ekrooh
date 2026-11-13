@@ -65,6 +65,8 @@ export type PluginInvokeRequestHeader = HeaderBase & {
   pluginId: string;
   event: string;
   args?: Record<string, unknown>;
+  /** The caller's wait in ms; a host-delegated call waits as long. */
+  timeoutMs?: number;
 };
 
 export type PluginInvokeResponseHeader = HeaderBase & {

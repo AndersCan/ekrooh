@@ -493,6 +493,7 @@ export function createPluginBus(messenger: ProtocolMessenger): PluginBus {
             pluginId: envelope.pluginId,
             event: envelope.event,
             args: envelope.args,
+            timeoutMs: envelope.timeoutMs,
           } as InvokeRequest,
           envelope.payload ?? null,
           envelope.timeoutMs,
