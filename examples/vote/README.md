@@ -43,7 +43,7 @@ Edit `src/render.ts`: the options are at the top, the buttons below. The browser
 2. In the project folder, run `npm run sync` once (it builds the app backend and native parts), then `npm run dev` and leave it running.
 3. In Android Studio, open the `android/` folder and wait for Gradle sync to finish.
 4. Pick a device: Device Manager > Create Device > any Pixel with API 35. Press Run.
-5. For two emulators, create a second device, press Run on it too and paste the invite code into both. [Start here](https://anderscan.github.io/ekrooh/getting-started/start-here/) has the steps and the measured time (about four minutes).
+5. For two emulators, create a second device, press Run on it too and paste the invite code into both. [Start here](https://anderscan.github.io/ekrooh/getting-started/start-here/) has the steps and the measured time (four to five and a half minutes).
 6. Edit `src/render.ts` and save. The emulator shows the change in a few seconds.
 
 A USB phone (debugging on) and release builds show the page from the last `npm run sync`; run it again after an edit.
