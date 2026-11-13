@@ -140,3 +140,35 @@ test('pickIphone takes the newest available iOS runtime and an iPhone type', () 
     runtime: 'com.apple.CoreSimulator.SimRuntime.iOS-18-2',
   });
 });
+
+test('pickIphone skips a newer runtime that is not iOS', () => {
+  const list = {
+    runtimes: [
+      {
+        identifier: 'com.apple.CoreSimulator.SimRuntime.iOS-9-3',
+        version: '9.3',
+        isAvailable: true,
+      },
+      {
+        identifier: 'com.apple.CoreSimulator.SimRuntime.iOS-26-0',
+        version: '26.0',
+        isAvailable: true,
+      },
+      {
+        identifier: 'com.apple.CoreSimulator.SimRuntime.xrOS-26-1',
+        version: '26.1',
+        isAvailable: true,
+      },
+    ],
+    devicetypes: [
+      {
+        identifier: 'com.apple.CoreSimulator.SimDeviceType.iPhone-17',
+        name: 'iPhone 17',
+      },
+    ],
+  };
+  assert.equal(
+    pickIphone(list).runtime,
+    'com.apple.CoreSimulator.SimRuntime.iOS-26-0',
+  );
+});

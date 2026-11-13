@@ -59,9 +59,7 @@ function pickIphone(list) {
       b.version.localeCompare(a.version, undefined, { numeric: true }),
     )[0];
   const deviceType = list.devicetypes.find((d) => d.name.startsWith('iPhone'));
-  return runtime && deviceType
-    ? { deviceType: deviceType.identifier, runtime: runtime.identifier }
-    : null;
+  return { deviceType: deviceType.identifier, runtime: runtime.identifier };
 }
 
 function usage(message) {
@@ -89,9 +87,6 @@ if (ios && topology === 'P') {
   usage(
     "topology P reads phone A's code over the Android WebView debug socket; iOS supports H only",
   );
-}
-if (ios && process.platform !== 'darwin') {
-  usage('--platform ios needs macOS with Xcode');
 }
 if (!fs.existsSync(path.join(dir, 'package.json'))) {
   usage(`${dir} has no package.json: pass a fresh copy of the starter`);
@@ -435,11 +430,6 @@ async function walk() {
       'both Simulators to finish booting',
     );
     const picked = pickIphone(JSON.parse(simctl('list', '--json').stdout));
-    if (!picked) {
-      current.wanted =
-        'an iPhone Simulator: install an iOS runtime in Xcode > Settings > Components';
-      return false;
-    }
     for (const name of ['phone0', 'phone1']) {
       const created = simctl('create', name, picked.deviceType, picked.runtime);
       if (created.status !== 0) {
@@ -452,10 +442,9 @@ async function walk() {
       simctl('boot', udid);
       return run('xcrun', ['simctl', 'bootstatus', udid, '-b']);
     });
-    if (!(await until(() => booting.every((b) => b.exit !== null), BOOT_IOS)))
-      return false;
-    done();
-
+    for (const [index, state] of booting.entries())
+      if (!(await finish(state, BOOT_IOS, `bootstatus ${udids[index]}`)))
+        return false;
     // The first keyboard shows a slide-to-type intro sheet that covers the page and stalls Maestro's typing.
     for (const udid of udids)
       for (const key of [
@@ -472,6 +461,7 @@ async function walk() {
           '-bool',
           'true',
         );
+    done();
 
     begin(
       6,
@@ -484,13 +474,11 @@ async function walk() {
       'vote-build/Build/Products/Debug-iphonesimulator/Vote.app',
     );
     for (const udid of udids) {
-      const installed = simctl('install', udid, app);
-      if (installed.status !== 0) {
-        current.wanted = `install on ${udid}: ${installed.stderr}`;
-        return false;
-      }
+      const install = run('xcrun', ['simctl', 'install', udid, app]);
+      if (!(await finish(install, INSTALL, `install on ${udid}`))) return false;
       // Run also opens the app; opening it here lets the page settle while the walk goes on.
-      simctl('launch', udid, APP);
+      const launch = run('xcrun', ['simctl', 'launch', udid, APP]);
+      if (!(await finish(launch, INSTALL, `launch on ${udid}`))) return false;
     }
     done();
   } else {
@@ -755,22 +743,11 @@ if (result) {
   console.error(
     `two phones: FAIL at step ${current.n} ${current.name} after ${total} s: ${current.wanted}`,
   );
-  for (const serial of ios ? udids : SERIALS) {
-    const log = ios
-      ? (simctl(
-          'spawn',
-          serial,
-          'log',
-          'show',
-          '--last',
-          '20m',
-          '--style',
-          'compact',
-        ).stdout ?? '')
-      : (adb(serial, 'logcat', '-d').stdout ?? '');
+  for (const serial of ios ? [] : SERIALS) {
+    const log = adb(serial, 'logcat', '-d').stdout ?? '';
     const lines = log.split('\n').filter((l) => /\[(sync|vote)\]/.test(l));
     console.error(
-      `--- ${serial} [sync]/[vote] log (last ${LOG_LINES}) ---\n${tail(lines, LOG_LINES)}`,
+      `--- ${serial} [sync]/[vote] logcat (last ${LOG_LINES}) ---\n${tail(lines, LOG_LINES)}`,
     );
   }
   console.error(`--- notes ---\n${tail(notes, LOG_LINES)}`);
