@@ -388,11 +388,14 @@ export function createWorkletRuntime(
     maxInflightPerChannel: options.maxInflightPerChannel,
     maxInflightPerPlugin: options.maxInflightPerPlugin,
     serialPlugins: options.serialPlugins,
-    // The event's own host deadline (`timeoutMs`) must reach the bridge, or
-    // every delegated call falls back to the bridge default.
+    // The event's own host deadline (`timeoutMs`) wins; else the page's invoke
+    // timeout, or every delegated call falls back to the bridge default.
     delegateToHost: (header, payload, timeoutMs) =>
-      hostBridge?.invokeOnHost(header, payload, timeoutMs) ??
-      Promise.resolve(null),
+      hostBridge?.invokeOnHost(
+        header,
+        payload,
+        timeoutMs ?? header.timeoutMs,
+      ) ?? Promise.resolve(null),
     getHostCapabilities: () =>
       hostBridge?.queryCapabilities() ?? Promise.resolve([]),
   });
