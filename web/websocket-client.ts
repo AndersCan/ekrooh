@@ -214,6 +214,7 @@ export function createWebSocketTransport(
    * collapsing login rejection, login timeout and retry exhaustion into a
    * single string. */
   let loginFailureDetail: string | null = null;
+  let loginTimedOut = false;
 
   /** Error text for requests lost to a terminal give-up. */
   function gaveUpMessage(): string {
@@ -454,6 +455,7 @@ export function createWebSocketTransport(
   async function bootstrap() {
     if (shouldLogin && !loggedIn) {
       loginFailureDetail = null;
+      loginTimedOut = false;
       try {
         let outcome = await postLogin();
         if (outcome === 'spent') {
@@ -472,6 +474,7 @@ export function createWebSocketTransport(
           // Login rejected or timed out; the machine may retry the socket, but
           // there is no token-URL fallback — a token must never be placed in a
           // URL (the loopback server rejects `?token=`).
+          loginTimedOut = outcome === 'timeout';
           loginFailureDetail =
             outcome === 'timeout'
               ? `session login timed out after ${loginTimeoutMs}ms`
@@ -507,6 +510,12 @@ export function createWebSocketTransport(
       }
       if (machine.isGaveUp()) {
         emitTransportError(header, gaveUpMessage());
+        // A login that was only slow (the server answered after our timeout)
+        // leaves a valid cookie behind; the next request starts over instead
+        // of leaving the page on "Connecting…" until the app is foregrounded.
+        // A rejected login stays given up, so a polling page does not post
+        // /login every second.
+        if (shouldLogin && !loggedIn && loginTimedOut) machine.sendWake();
         return;
       }
       if (machine.isReplaced()) {

@@ -258,6 +258,130 @@ describe('createWebSocketTransport /login bootstrap', () => {
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
+  it('logs in again on the next request after a slow /login made it give up', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+    let release: (response: Response) => void = () => {};
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise<Response>((resolve) => (release = resolve)),
+      )
+      .mockImplementation(async () => ({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      loginTimeoutMs: 10,
+    });
+    const headers: PluginInvokeResponseHeader[] = [];
+    transport.subscribe((message) => headers.push(message.header as never));
+    const ping = (requestId: string) =>
+      transport.send(
+        MessageType.ENVELOPE,
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          requestId,
+        },
+        null,
+      );
+    ping('slow');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(headers.map((h) => h.requestId)).toEqual(['slow']);
+    expect(FakeWebSocket.instances).toHaveLength(0);
+
+    release({ ok: true } as Response);
+    ping('again');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    lastSocket().open();
+    expect(lastSocket().url).toBe('ws://test');
+    ping('connected');
+    expect(lastSocket().sent).toHaveLength(1);
+  });
+
+  it('does not start over on the next request after the socket gave up', async () => {
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+      minBootWindowMs: 0,
+    });
+    await nextTick();
+    lastSocket().close();
+    await nextTick();
+    await nextTick();
+    const ping = (requestId: string) =>
+      transport.send(
+        MessageType.ENVELOPE,
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          requestId,
+        },
+        null,
+      );
+    ping('after-give-up');
+    await nextTick();
+    await nextTick();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it('does not post /login again on the next request after /login was rejected', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 401 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = createWebSocketTransport('ws://test');
+    await nextTick();
+    await nextTick();
+    for (const requestId of ['a', 'b', 'c']) {
+      transport.send(
+        MessageType.ENVELOPE,
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          requestId,
+        },
+        null,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays given up when the /login after a timed-out one throws', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+      .mockImplementation(async () => {
+        throw new Error('connection refused');
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      loginTimeoutMs: 10,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    for (const requestId of ['a', 'b', 'c']) {
+      transport.send(
+        MessageType.ENVELOPE,
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          requestId,
+        },
+        null,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    // One restart after the timeout; the thrown /login then stays given up.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('does not call /login when no credential is injected', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);

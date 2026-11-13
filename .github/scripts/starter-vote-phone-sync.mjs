@@ -11,7 +11,7 @@
  * reads the starter's visible text (button names, Join box label): renaming
  * those means updating this file and starter-vote-native-sync.yaml.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -36,6 +36,7 @@ const DRIVER_ATTEMPTS = 2;
 const SYNCED = 150;
 const OVERALL = 800; // START + READY + ANNOUNCED + PHONE + SYNCED = 780 s
 const KILL_GRACE_MS = 5000;
+const DRIVER_EXIT = 10; // seconds to wait for the old xcodebuild to exit
 const LOG_LINES = 60;
 const MAESTRO_LINES = 40;
 
@@ -138,6 +139,29 @@ async function stop(child) {
   const timer = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
   await done;
   clearTimeout(timer);
+}
+
+const DRIVER_ID = 'dev.mobile.maestro-driver-iosUITests.xctrunner';
+
+// Maestro leaves the xcodebuild that hosts its iOS driver running when it
+// gives up on "driver not ready in time". That xcodebuild keeps restarting
+// the driver ("Restarting after unexpected exit"), which kills the next
+// attempt's driver mid-flow. Stop it, and the driver app, before trying again.
+async function stopIosDriver(udid) {
+  if (!udid || process.platform !== 'darwin') return;
+  const pattern = `xcodebuild.*${udid}`;
+  const killed = spawnSync('pkill', ['-f', pattern]).status === 0;
+  const terminated =
+    spawnSync('xcrun', ['simctl', 'terminate', udid, DRIVER_ID]).status === 0;
+  // pkill does not wait: the old xcodebuild must be gone before the new driver starts.
+  const gone = await until(
+    () => spawnSync('pgrep', ['-f', pattern]).status !== 0,
+    DRIVER_EXIT,
+  );
+  console.log(
+    `stopped the leftover iOS driver: xcodebuild ${killed ? 'killed' : 'not running'}, ` +
+      `driver app ${terminated ? 'terminated' : 'not running'}, xcodebuild ${gone ? 'gone' : 'still running'}`,
+  );
 }
 
 async function until(check, budget) {
@@ -284,6 +308,7 @@ async function run() {
       line.includes('driver not ready in time'),
     );
     if (maestroExit === 0 || !driverDown) break;
+    await stopIosDriver(device);
   }
   if (maestroExit !== 0) {
     wanted = `the phone to join and show Tea (1) (maestro exit ${maestroExit})`;
