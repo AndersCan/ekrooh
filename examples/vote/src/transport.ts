@@ -8,7 +8,7 @@ import { backendPort } from './backend-port';
  * On a phone the page is served by the app backend's loopback server, so the
  * transport uses the page's own origin. From Vite it uses the dev backend on
  * this computer (scripts/dev.mjs starts it on 8080), or the port in `?backend=`
- * (the iOS Simulator debug app runs its own backend on 8082).
+ * (the iOS Simulator debug app runs its own backend on a free port).
  */
 const port = backendPort(
   import.meta.env.DEV ? location.search : '',

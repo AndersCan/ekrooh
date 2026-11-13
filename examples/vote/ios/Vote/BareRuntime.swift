@@ -1,5 +1,6 @@
 import BareHost
 import BareKit
+import Darwin
 import SafariServices
 import os
 import WebKit
@@ -40,11 +41,12 @@ final class BareRuntime {
   #if DEBUG
   // With `npm run dev` running, the debug app loads the page from Vite and runs
   // its backend in dev mode. The page port must match scripts/dev.mjs; the
-  // backend port must stay free of the Mac's dev backends (8080, 8081).
+  // backend port is a free loopback port chosen per launch: every Simulator
+  // shares the Mac's loopback, so a fixed port would be taken by the first one.
   private static let devServerHost = "127.0.0.1"
   private static let devServerPort = 5173
   private static let devServerURL = "http://\(devServerHost):\(devServerPort)"
-  private static let devBackendPort = 8082
+  private static let fallbackBackendPort = 8082
   // Logged with `privacy: .public` so the CI job can print which page the app loaded.
   private static let log = Logger(subsystem: "com.example.vote", category: "dev")
   #endif
@@ -185,16 +187,48 @@ final class BareRuntime {
   }
 
   #if DEBUG
+  /// A port nothing listens on, from binding 127.0.0.1:0; nil when any step fails.
+  private static func freeLoopbackPort() -> Int? {
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    if fd < 0 { return nil }
+    defer { close(fd) }
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = 0
+    address.sin_addr.s_addr = inet_addr("127.0.0.1")
+    let bound = withUnsafePointer(to: &address) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+      }
+    }
+    if bound != 0 { return nil }
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let named = withUnsafeMutablePointer(to: &address) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        getsockname(fd, $0, &length)
+      }
+    }
+    if named != 0 { return nil }
+    return Int(UInt16(bigEndian: address.sin_port))
+  }
+
   private func startDev(webView: WKWebView) {
+    let freePort = Self.freeLoopbackPort()
+    if freePort == nil {
+      Self.log.notice("no free loopback port, falling back to \(Self.fallbackBackendPort)")
+    }
+    let backendPort = freePort ?? Self.fallbackBackendPort
+    Self.log.notice("dev backend port: \(backendPort, privacy: .public)")
     guard
       startWorklet([
         "webassets=\(webAssetsPath)", "storage=\(storagePath)", "cache=\(cachePath)",
-        "mode=dev", "port=\(Self.devBackendPort)", "origin=\(Self.devServerURL)",
+        "mode=dev", "port=\(backendPort)", "origin=\(Self.devServerURL)",
       ])
     else { return }
     navigationDelegate?.allowedHost = Self.devServerHost
     navigationDelegate?.allowedPort = Self.devServerPort
-    if let url = URL(string: "\(Self.devServerURL)/?backend=\(Self.devBackendPort)") {
+    if let url = URL(string: "\(Self.devServerURL)/?backend=\(backendPort)") {
       webView.load(URLRequest(url: url))
     }
   }
