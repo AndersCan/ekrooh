@@ -612,6 +612,7 @@ type: 'INVOKE_REQUEST';
 pluginId: string;
 event: string;
 args?: Record<string, unknown>;
+timeoutMs?: number;
 };
 type PluginInvokeResponseHeader = HeaderBase & {
 type: 'INVOKE_RESPONSE';
