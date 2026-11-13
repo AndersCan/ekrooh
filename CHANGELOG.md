@@ -7,6 +7,10 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The page transport starts over on the next request after a `/login` that only timed out (the server answered late and left a session cookie), instead of staying on "Connecting…" until the app is foregrounded. A rejected `/login` still stays given up.
+
 ### Added
 
 - `createWebSocketTransport` returns an optional `ready()` that resolves once the socket is open, or the transport gave up, closed or was replaced. Await it before the first call so the invoke deadline measures the round trip, not the connect.

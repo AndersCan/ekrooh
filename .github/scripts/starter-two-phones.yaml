@@ -14,7 +14,12 @@ androidWebViewHierarchy: devtools
       - launchApp:
           label: Open the vote app
       # Maestro 2.12.1 throws if it reads the DOM while the page navigates; wait without reading it first.
-      - evalScript: ${ (function () { var end = Date.now() + 15500; while (Date.now() < end) {} })() }
+      # Not a busy loop: that spun a host CPU and stalled the Simulator's loopback /login answer.
+      - repeat:
+          times: 8
+          commands:
+            - waitForAnimationToEnd:
+                timeout: 2000
       - extendedWaitUntil:
           label: App shows Tea (0)
           visible: Tea (0)

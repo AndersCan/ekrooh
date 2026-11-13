@@ -301,6 +301,56 @@ describe('createWebSocketTransport /login bootstrap', () => {
     expect(lastSocket().sent).toHaveLength(1);
   });
 
+  it('does not start over on the next request after the socket gave up', async () => {
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      maxRetries: 0,
+      minBootWindowMs: 0,
+    });
+    await nextTick();
+    lastSocket().close();
+    await nextTick();
+    await nextTick();
+    const ping = (requestId: string) =>
+      transport.send(
+        MessageType.ENVELOPE,
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          requestId,
+        },
+        null,
+      );
+    ping('after-give-up');
+    await nextTick();
+    await nextTick();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it('does not post /login again on the next request after /login was rejected', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 401 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = createWebSocketTransport('ws://test');
+    await nextTick();
+    await nextTick();
+    for (const requestId of ['a', 'b', 'c']) {
+      transport.send(
+        MessageType.ENVELOPE,
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          requestId,
+        },
+        null,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual(['/login']);
+  });
+
   it('does not call /login when no credential is injected', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);
