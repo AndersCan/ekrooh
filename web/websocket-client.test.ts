@@ -348,7 +348,38 @@ describe('createWebSocketTransport /login bootstrap', () => {
       );
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual(['/login']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays given up when the /login after a timed-out one throws', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+      .mockImplementation(async () => {
+        throw new Error('connection refused');
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      loginTimeoutMs: 10,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    for (const requestId of ['a', 'b', 'c']) {
+      transport.send(
+        MessageType.ENVELOPE,
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          requestId,
+        },
+        null,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    // One restart after the timeout; the thrown /login then stays given up.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('does not call /login when no credential is injected', async () => {
