@@ -480,7 +480,7 @@ async function walk() {
     8,
     'paste the code and Join (paste + Join)',
     'doc',
-    'the phones to show each other connected',
+    'the last phone to join and show the others connected',
   );
   const joiners = topology === 'H' ? [phoneA, phoneB] : [phoneB];
   const lapStart = Date.now();
@@ -490,30 +490,26 @@ async function walk() {
     );
   // One phone after the other: the second looks the room up after the first has
   // announced it. Joined at the same moment, the phones can miss each other.
-  for (const serial of joiners) {
+  const expect =
+    topology === 'H' ? '2 other devices connected' : '1 other device connected';
+  for (const [index, serial] of joiners.entries()) {
     // A cold phone sometimes fails its first Maestro launch; one retry.
     adb(serial, 'reconnect', 'offline');
     adb(serial, 'wait-for-device');
     // The page needs about 15 s after the app opens before Maestro may read it.
     const settle = Math.max(0, PAGE_SETTLE_MS - (Date.now() - openedAt));
-    const env = { INVITE: invite, SETTLE_MS: String(settle) };
+    // The last phone to join also waits to see the others: one Maestro start, not two.
+    const act = index === joiners.length - 1 ? 'joinwait' : 'join';
+    const env = { INVITE: invite, SETTLE_MS: String(settle), EXPECT: expect };
     const joined =
-      (await maestro(serial, 'join', env)).ok ||
-      (await maestro(serial, 'join', env)).ok;
-    lap(`${serial} joined`);
-    if (!joined) return false;
+      (await maestro(serial, act, env)).ok ||
+      (await maestro(serial, act, env)).ok;
+    lap(`${serial} ${act === 'joinwait' ? `shows "${expect}"` : 'joined'}`);
+    if (!joined) {
+      current.wanted = `${serial} to join and show "${expect}"`;
+      return false;
+    }
   }
-  const expect =
-    topology === 'H' ? '2 other devices connected' : '1 other device connected';
-  const connectedResults = await Promise.all(
-    SERIALS.map(async (serial) => {
-      const ok = (await maestro(serial, 'connected', { EXPECT: expect })).ok;
-      lap(`${serial} shows "${expect}"`);
-      if (!ok) current.wanted = `${serial} to show "${expect}"`;
-      return ok;
-    }),
-  );
-  if (!connectedResults.every(Boolean)) return false;
   done();
 
   begin(
@@ -522,10 +518,16 @@ async function walk() {
     'doc',
     'phone B to show Tea (1)',
   );
-  if (!(await maestro(phoneA, 'vote')).ok) return false;
-  console.log('phone A shows Tea (1)');
-  if (!(await maestro(phoneB, 'see')).ok) return false;
-  console.log('phone B shows Tea (1)');
+  // B's Maestro starts now so its startup overlaps A's vote; A's run also checks A sees B.
+  const seen = maestro(phoneB, 'see');
+  const voted = await maestro(phoneA, 'vote', { EXPECT: expect });
+  if (voted.ok) console.log('phone A shows Tea (1)');
+  const seenOk = (await seen).ok;
+  if (seenOk) console.log('phone B shows Tea (1)');
+  if (!voted.ok || !seenOk) {
+    current.wanted = `A to show "${expect}" and Tea (1), B to show Tea (1)`;
+    return false;
+  }
   done();
   return true;
 }

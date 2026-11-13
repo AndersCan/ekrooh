@@ -1,7 +1,7 @@
 # Two-phone walk flow (Starter / two phones): one step of the walk per run, chosen by `-e ACT=`.
 # ACT=join   type INVITE into the Join box, press Join (stand-in for paste).
-# ACT=connected  wait for the status line EXPECT (a regex such as `2 other devices connected`).
-# ACT=vote   vote Tea and wait for Tea (1).   ACT=see   wait for Tea (1) from the other phone.
+# ACT=joinwait  as join, then wait for the status line EXPECT (a regex such as `2 other devices connected`).
+# ACT=vote   wait for EXPECT, vote Tea and wait for Tea (1).   ACT=see   wait for Tea (1) from the other phone.
 # Run by starter-two-phones.mjs with --device <serial>. It reads the starter's button names and Join box label.
 appId: com.example.vote
 name: One step of the two-phone walk
@@ -9,7 +9,7 @@ androidWebViewHierarchy: devtools
 ---
 - runFlow:
     when:
-      true: ${ACT == 'join'}
+      true: ${ACT == 'join' || ACT == 'joinwait'}
     commands:
       # The walk opened the app. Maestro 2.12.1 throws if it reads the DOM while the page navigates; wait without reading it first.
       - evalScript: ${ (function () { var end = Date.now() + Number(SETTLE_MS); while (Date.now() < end) {} })() }
@@ -19,7 +19,7 @@ androidWebViewHierarchy: devtools
           timeout: 60000
 - runFlow:
     when:
-      true: ${ACT == 'join'}
+      true: ${ACT == 'join' || ACT == 'joinwait'}
     commands:
       - retry:
           maxRetries: 3
@@ -54,7 +54,7 @@ androidWebViewHierarchy: devtools
           timeout: 15000
 - runFlow:
     when:
-      true: ${ACT == 'connected'}
+      true: ${ACT == 'joinwait'}
     commands:
       - extendedWaitUntil:
           label: Phone sees the other devices
@@ -64,6 +64,10 @@ androidWebViewHierarchy: devtools
     when:
       true: ${ACT == 'vote'}
     commands:
+      - extendedWaitUntil:
+          label: Phone sees the other devices
+          visible: ${EXPECT}
+          timeout: 150000
       - tapOn:
           label: Vote Tea
           text: Tea (0)
