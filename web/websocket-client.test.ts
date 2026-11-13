@@ -258,6 +258,49 @@ describe('createWebSocketTransport /login bootstrap', () => {
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
+  it('logs in again on the next request after a slow /login made it give up', async () => {
+    vi.stubGlobal('window', { __ekrooh: { bootstrap: 'one-time-nonce' } });
+    let release: (response: Response) => void = () => {};
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise<Response>((resolve) => (release = resolve)),
+      )
+      .mockImplementation(async () => ({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const transport = createWebSocketTransport({
+      url: 'ws://test',
+      loginTimeoutMs: 10,
+    });
+    const headers: PluginInvokeResponseHeader[] = [];
+    transport.subscribe((message) => headers.push(message.header as never));
+    const ping = (requestId: string) =>
+      transport.send(
+        MessageType.ENVELOPE,
+        {
+          type: 'INVOKE_REQUEST',
+          pluginId: 'core.health',
+          event: 'health.ping',
+          requestId,
+        },
+        null,
+      );
+    ping('slow');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(headers.map((h) => h.requestId)).toEqual(['slow']);
+    expect(FakeWebSocket.instances).toHaveLength(0);
+
+    release({ ok: true } as Response);
+    ping('again');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    lastSocket().open();
+    expect(lastSocket().url).toBe('ws://test');
+    ping('connected');
+    expect(lastSocket().sent).toHaveLength(1);
+  });
+
   it('does not call /login when no credential is injected', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal('fetch', fetchMock);

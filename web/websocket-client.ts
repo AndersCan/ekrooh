@@ -507,6 +507,10 @@ export function createWebSocketTransport(
       }
       if (machine.isGaveUp()) {
         emitTransportError(header, gaveUpMessage());
+        // A login that was only slow (the server answered after our timeout)
+        // leaves a valid cookie behind; the next request starts over instead
+        // of leaving the page on "Connecting…" until the app is foregrounded.
+        if (shouldLogin && !loggedIn) machine.sendWake();
         return;
       }
       if (machine.isReplaced()) {
