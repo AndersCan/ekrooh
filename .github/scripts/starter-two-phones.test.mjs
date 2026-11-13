@@ -10,12 +10,13 @@ const source = fs.readFileSync(
   'utf8',
 );
 const pick = (re) => source.match(re)[0];
-const { logCommandTimes, joinFailed } = new Function(
+const { logCommandTimes, joinFailed, joinWithRetry } = new Function(
   'fs',
   'path',
   `${pick(/function logCommandTimes[\s\S]*?\n}\n/)}
 ${pick(/function joinFailed[\s\S]*?\n}\n/)}
-return { logCommandTimes, joinFailed };`,
+${pick(/async function joinWithRetry[\s\S]*?\n}\n/)}
+return { logCommandTimes, joinFailed, joinWithRetry };`,
 )(fs, path);
 
 test('a failed run keeps its screenshots and logs for the upload step', () => {
@@ -51,7 +52,49 @@ test('a timeout on the wait for the other devices is not retried', () => {
   );
 });
 
+test('a passed wait for the other devices is not a failed join', () => {
+  assert.equal(
+    joinFailed(['  Phone sees the other devices... COMPLETED']),
+    true,
+  );
+});
+
 test('any other failure is retried', () => {
   assert.equal(joinFailed(['tapOn Join the room FAILED']), true);
   assert.equal(joinFailed([]), true);
+});
+
+const attempts = (...results) => {
+  const calls = [];
+  return {
+    calls,
+    attempt: async () => {
+      calls.push(1);
+      return results[calls.length - 1];
+    },
+  };
+};
+
+test('a timeout on the wait for the other devices is not joined again', async () => {
+  const a = attempts(
+    { ok: false, lines: ['  Phone sees the other devices... FAILED'] },
+    { ok: true, lines: [] },
+  );
+  assert.equal(await joinWithRetry(a.attempt), false);
+  assert.equal(a.calls.length, 1);
+});
+
+test('a failed join is tried once more', async () => {
+  const a = attempts(
+    { ok: false, lines: ['  Join the room... FAILED'] },
+    { ok: true, lines: [] },
+  );
+  assert.equal(await joinWithRetry(a.attempt), true);
+  assert.equal(a.calls.length, 2);
+});
+
+test('a join that passes is not run again', async () => {
+  const a = attempts({ ok: true, lines: [] });
+  assert.equal(await joinWithRetry(a.attempt), true);
+  assert.equal(a.calls.length, 1);
 });
