@@ -2,9 +2,11 @@
 /**
  * Two phones vote in sync: follows Start here's commands in order on a fresh
  * starter copy, with two Android emulators on this machine, and times every step.
- * `node .github/scripts/starter-two-phones.mjs <fresh starter copy> [--topology H|P]`
+ * `node .github/scripts/starter-two-phones.mjs <fresh starter copy> [--platform android|ios] [--topology H|P]`
  *   H (default): both phones join the browser page's room (Start here's paste step).
- *   P: phone B joins phone A's room, no browser.
+ *   P: phone B joins phone A's room, no browser (Android only).
+ * --platform ios runs two iPhone Simulators on a Mac instead: steps 4-6 stand in for
+ * Xcode's Run build, the device menu and Run; needs `xcrun`, `xcodebuild`, `maestro`.
  * Steps 4-6 stand in for Android Studio (Gradle sync, Device Manager, Run); the
  * paste is typed through Maestro. Needs `maestro`, `adb`, `avdmanager` on PATH,
  * ANDROID_HOME, system image `system-images;android-35;default;x86_64`,
@@ -31,10 +33,16 @@ const SYNC = 120;
 const READY = 120;
 const BUILD = 600;
 const BOOT = 360;
+const BOOT_IOS = 600;
 const APK = 60;
 const CODE = 150;
 const JOIN = 240;
 const VOTE = 300;
+// Maestro's iOS driver takes minutes to start on a hosted Mac (452 s for one run in Starter / ios).
+const VOTE_IOS = 480;
+const DRIVER_EXIT = 10;
+const DRIVER_ATTEMPTS = 2;
+const DRIVER_ID = 'dev.mobile.maestro-driver-iosUITests.xctrunner';
 const GOAL = 300;
 const KILL_GRACE_MS = 5000;
 const LOG_LINES = 40;
@@ -42,6 +50,19 @@ const SERIALS = ['emulator-5554', 'emulator-5556'];
 // AOSP image. Hypothesis, not proven: with google_apis, Play services churn at boot and adb drops the phone as `device offline` under Maestro's launch; the default image has no Play services.
 const IMAGE = 'system-images;android-35;default;x86_64';
 const APP = 'com.example.vote';
+
+// The newest available iOS runtime and the first iPhone device type, from `xcrun simctl list --json`.
+function pickIphone(list) {
+  const runtime = list.runtimes
+    .filter((r) => r.isAvailable && r.identifier.includes('.iOS-'))
+    .sort((a, b) =>
+      b.version.localeCompare(a.version, undefined, { numeric: true }),
+    )[0];
+  const deviceType = list.devicetypes.find((d) => d.name.startsWith('iPhone'));
+  return runtime && deviceType
+    ? { deviceType: deviceType.identifier, runtime: runtime.identifier }
+    : null;
+}
 
 function usage(message) {
   console.error(message);
@@ -51,11 +72,26 @@ function usage(message) {
 const args = process.argv.slice(2);
 const topologyAt = args.indexOf('--topology');
 const topology = topologyAt === -1 ? 'H' : args.splice(topologyAt, 2)[1];
+const platformAt = args.indexOf('--platform');
+const platform = platformAt === -1 ? 'android' : args.splice(platformAt, 2)[1];
+const ios = platform === 'ios';
 const dir = args[0] ? path.resolve(args[0]) : null;
-if (!dir || !['H', 'P'].includes(topology)) {
+if (
+  !dir ||
+  !['H', 'P'].includes(topology) ||
+  !['android', 'ios'].includes(platform)
+) {
   usage(
-    'usage: node .github/scripts/starter-two-phones.mjs <starter-dir> [--topology H|P]',
+    'usage: node .github/scripts/starter-two-phones.mjs <starter-dir> [--platform android|ios] [--topology H|P]',
   );
+}
+if (ios && topology === 'P') {
+  usage(
+    "topology P reads phone A's code over the Android WebView debug socket; iOS supports H only",
+  );
+}
+if (ios && process.platform !== 'darwin') {
+  usage('--platform ios needs macOS with Xcode');
 }
 if (!fs.existsSync(path.join(dir, 'package.json'))) {
   usage(`${dir} has no package.json: pass a fresh copy of the starter`);
@@ -69,19 +105,23 @@ const onPath = (name) =>
   (process.env.PATH ?? '')
     .split(path.delimiter)
     .some((entry) => entry && fs.existsSync(path.join(entry, name)));
-for (const [name, hint] of [
-  ['maestro', 'install Maestro 2.12.1'],
-  ['adb', 'install the Android platform-tools'],
-  ['avdmanager', 'install the Android command-line tools'],
-]) {
-  if (!onPath(name)) usage(`${name} not found: ${hint}`);
-}
-const sdk = process.env.ANDROID_HOME;
-if (!sdk) usage('ANDROID_HOME is not set');
-const emulatorBin = path.join(sdk, 'emulator', 'emulator');
-if (!fs.existsSync(emulatorBin)) usage(`emulator not found at ${emulatorBin}`);
-if (!fs.existsSync(path.join(sdk, ...IMAGE.split(';')))) {
-  usage(`system image ${IMAGE} is not installed: sdkmanager "${IMAGE}"`);
+if (!onPath('maestro')) usage('maestro not found: install Maestro 2.12.1');
+let emulatorBin = '';
+if (!ios) {
+  for (const [name, hint] of [
+    ['adb', 'install the Android platform-tools'],
+    ['avdmanager', 'install the Android command-line tools'],
+  ]) {
+    if (!onPath(name)) usage(`${name} not found: ${hint}`);
+  }
+  const sdk = process.env.ANDROID_HOME;
+  if (!sdk) usage('ANDROID_HOME is not set');
+  emulatorBin = path.join(sdk, 'emulator', 'emulator');
+  if (!fs.existsSync(emulatorBin))
+    usage(`emulator not found at ${emulatorBin}`);
+  if (!fs.existsSync(path.join(sdk, ...IMAGE.split(';')))) {
+    usage(`system image ${IMAGE} is not installed: sdkmanager "${IMAGE}"`);
+  }
 }
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.join(
   root,
@@ -217,10 +257,28 @@ async function finish(state, budget, what) {
   return true;
 }
 
+// Maestro leaves the xcodebuild that hosts its iOS driver running when it gives up on
+// "driver not ready in time", and that one kills the next attempt's driver mid-flow.
+async function stopIosDriver(udid) {
+  const pattern = `xcodebuild.*${udid}`;
+  spawnSync('pkill', ['-f', pattern]);
+  spawnSync('xcrun', ['simctl', 'terminate', udid, DRIVER_ID]);
+  // pkill does not wait: the old xcodebuild must be gone before the new driver starts.
+  await until(
+    () => spawnSync('pgrep', ['-f', pattern]).status !== 0,
+    DRIVER_EXIT,
+  );
+}
+
+const simctl = (...rest) =>
+  spawnSync('xcrun', ['simctl', ...rest], { encoding: 'utf8' });
+
 const adb = (serial, ...rest) =>
   spawnSync('adb', ['-s', serial, ...rest], { encoding: 'utf8' });
 
 const emulators = [];
+// Simulator UDIDs, filled by step 5 on iOS.
+const udids = [];
 let server = null;
 const maestroLines = [];
 const notes = [];
@@ -278,10 +336,30 @@ async function maestro(serial, act, env = {}) {
     ...flags,
     path.join(root, '.github/scripts/starter-two-phones.yaml'),
   ]);
-  const ok = await finish(state, VOTE, `maestro ${act} on ${serial}`);
+  const ok = await finish(
+    state,
+    ios ? VOTE_IOS : VOTE,
+    `maestro ${act} on ${serial}`,
+  );
   maestroLines.push(`--- ${act} on ${serial} ---`, ...state.lines);
   logCommandTimes(folder, serial, act);
   return { ok, lines: state.lines };
+}
+
+// iOS: no two Maestro runs overlap, and a leftover driver of either Simulator is stopped first.
+// A run whose driver never came up has not started its flow, so it gets one more try.
+async function maestroIos(udid, act, env = {}) {
+  let result = { ok: false, lines: [] };
+  for (let attempt = 1; attempt <= DRIVER_ATTEMPTS; attempt++) {
+    for (const id of udids) await stopIosDriver(id);
+    result = await maestro(udid, act, env);
+    if (
+      result.ok ||
+      !result.lines.some((l) => l.includes('driver not ready in time'))
+    )
+      break;
+  }
+  return result;
 }
 
 async function walk() {
@@ -315,116 +393,201 @@ async function walk() {
     return false;
   done();
 
-  begin(
-    4,
-    'gradle build (Studio sync + Run build)',
-    'stand-in',
-    './gradlew assembleDebug to finish',
-  );
-  const gradle = run('./gradlew', ['assembleDebug'], {
-    cwd: path.join(dir, 'android'),
-  });
-  if (!(await finish(gradle, BUILD, 'assembleDebug'))) {
-    maestroLines.push('--- gradle ---', ...gradle.lines);
-    return false;
-  }
-  // The Gradle daemon would hold memory the second emulator needs.
-  spawnSync('./gradlew', ['--stop'], { cwd: path.join(dir, 'android') });
-  done();
-
-  begin(
-    5,
-    'create and boot two emulators (Device Manager)',
-    'stand-in',
-    'both emulators to finish booting',
-  );
-  for (const [i, serial] of SERIALS.entries()) {
-    const name = `phone${i}`;
-    const created = spawnSync(
-      'avdmanager',
-      ['create', 'avd', '-n', name, '-k', IMAGE, '-d', 'pixel', '--force'],
-      { input: 'no\n', encoding: 'utf8' },
+  const scratch = process.env.RUNNER_TEMP || os.tmpdir();
+  if (ios) {
+    begin(
+      4,
+      'xcodebuild (Xcode package download + Run build)',
+      'stand-in',
+      'xcodebuild to finish',
     );
-    if (created.status !== 0) {
-      current.wanted = `avdmanager create ${name}: ${created.stderr || created.stdout}`;
+    // Fresh derived-data and package folders: the BareHost package download counts, as the Gradle cache being off does on Android.
+    const build = run(
+      'xcodebuild',
+      [
+        '-project',
+        'ios/Vote.xcodeproj',
+        '-scheme',
+        'Vote',
+        '-configuration',
+        'Debug',
+        '-destination',
+        'generic/platform=iOS Simulator',
+        '-derivedDataPath',
+        path.join(scratch, 'vote-build'),
+        '-clonedSourcePackagesDirPath',
+        path.join(scratch, 'vote-packages'),
+        'CODE_SIGNING_ALLOWED=NO',
+        'build',
+      ],
+      { cwd: dir },
+    );
+    if (!(await finish(build, BUILD, 'xcodebuild'))) {
+      maestroLines.push('--- xcodebuild ---', ...build.lines);
       return false;
     }
-    emulators.push(
-      run(emulatorBin, [
-        '-avd',
-        name,
-        '-port',
-        serial.split('-')[1],
-        '-no-window',
-        '-no-audio',
-        '-no-boot-anim',
-        '-gpu',
-        'swiftshader_indirect',
-        '-no-snapshot',
-        '-cores',
-        '2',
-        '-memory',
-        '2560',
-      ]),
+    done();
+
+    begin(
+      5,
+      'create and boot two Simulators (Xcode device menu)',
+      'stand-in',
+      'both Simulators to finish booting',
     );
-  }
-  const booted = await until(
-    () =>
-      SERIALS.every(
-        (serial) =>
-          adb(
-            serial,
-            'shell',
-            'getprop',
-            'sys.boot_completed',
-          ).stdout.trim() === '1',
-      ),
-    BOOT,
-  );
-  if (!booted) return false;
-  for (const serial of SERIALS) {
-    for (const key of [
-      'window_animation_scale',
-      'transition_animation_scale',
-      'animator_duration_scale',
-    ]) {
-      adb(serial, 'shell', 'settings', 'put', 'global', key, '0');
+    const picked = pickIphone(JSON.parse(simctl('list', '--json').stdout));
+    if (!picked) {
+      current.wanted =
+        'an iPhone Simulator: install an iOS runtime in Xcode > Settings > Components';
+      return false;
     }
-  }
-  done();
+    for (const name of ['phone0', 'phone1']) {
+      const created = simctl('create', name, picked.deviceType, picked.runtime);
+      if (created.status !== 0) {
+        current.wanted = `simctl create ${name}: ${created.stderr}`;
+        return false;
+      }
+      udids.push(created.stdout.trim());
+    }
+    const booting = udids.map((udid) => {
+      simctl('boot', udid);
+      return run('xcrun', ['simctl', 'bootstatus', udid, '-b']);
+    });
+    if (!(await until(() => booting.every((b) => b.exit !== null), BOOT_IOS)))
+      return false;
+    done();
 
-  begin(
-    6,
-    'install the app on both (Run)',
-    'stand-in',
-    'the app to install on both emulators',
-  );
-  const apk = path.join(
-    dir,
-    'android/app/build/outputs/apk/debug/app-debug.apk',
-  );
-  for (const serial of SERIALS) {
-    const installed = await finish(
-      run('adb', ['-s', serial, 'install', '-r', apk]),
-      APK,
-      `install on ${serial}`,
+    begin(
+      6,
+      'install and open the app on both (Run)',
+      'stand-in',
+      'the app to install and open on both Simulators',
     );
-    if (!installed) return false;
-    // Run also opens the app; opening it here lets the page settle while the walk goes on.
-    adb(
-      serial,
-      'shell',
-      'monkey',
-      '-p',
-      APP,
-      '-c',
-      'android.intent.category.LAUNCHER',
-      '1',
+    const app = path.join(
+      scratch,
+      'vote-build/Build/Products/Debug-iphonesimulator/Vote.app',
     );
-  }
-  done();
+    for (const udid of udids) {
+      const installed = simctl('install', udid, app);
+      if (installed.status !== 0) {
+        current.wanted = `install on ${udid}: ${installed.stderr}`;
+        return false;
+      }
+      // Run also opens the app; opening it here lets the page settle while the walk goes on.
+      simctl('launch', udid, APP);
+    }
+    done();
+  } else {
+    begin(
+      4,
+      'gradle build (Studio sync + Run build)',
+      'stand-in',
+      './gradlew assembleDebug to finish',
+    );
+    const gradle = run('./gradlew', ['assembleDebug'], {
+      cwd: path.join(dir, 'android'),
+    });
+    if (!(await finish(gradle, BUILD, 'assembleDebug'))) {
+      maestroLines.push('--- gradle ---', ...gradle.lines);
+      return false;
+    }
+    // The Gradle daemon would hold memory the second emulator needs.
+    spawnSync('./gradlew', ['--stop'], { cwd: path.join(dir, 'android') });
+    done();
 
-  const [phoneA, phoneB] = SERIALS;
+    begin(
+      5,
+      'create and boot two emulators (Device Manager)',
+      'stand-in',
+      'both emulators to finish booting',
+    );
+    for (const [i, serial] of SERIALS.entries()) {
+      const name = `phone${i}`;
+      const created = spawnSync(
+        'avdmanager',
+        ['create', 'avd', '-n', name, '-k', IMAGE, '-d', 'pixel', '--force'],
+        { input: 'no\n', encoding: 'utf8' },
+      );
+      if (created.status !== 0) {
+        current.wanted = `avdmanager create ${name}: ${created.stderr || created.stdout}`;
+        return false;
+      }
+      emulators.push(
+        run(emulatorBin, [
+          '-avd',
+          name,
+          '-port',
+          serial.split('-')[1],
+          '-no-window',
+          '-no-audio',
+          '-no-boot-anim',
+          '-gpu',
+          'swiftshader_indirect',
+          '-no-snapshot',
+          '-cores',
+          '2',
+          '-memory',
+          '2560',
+        ]),
+      );
+    }
+    const booted = await until(
+      () =>
+        SERIALS.every(
+          (serial) =>
+            adb(
+              serial,
+              'shell',
+              'getprop',
+              'sys.boot_completed',
+            ).stdout.trim() === '1',
+        ),
+      BOOT,
+    );
+    if (!booted) return false;
+    for (const serial of SERIALS) {
+      for (const key of [
+        'window_animation_scale',
+        'transition_animation_scale',
+        'animator_duration_scale',
+      ]) {
+        adb(serial, 'shell', 'settings', 'put', 'global', key, '0');
+      }
+    }
+    done();
+
+    begin(
+      6,
+      'install the app on both (Run)',
+      'stand-in',
+      'the app to install on both emulators',
+    );
+    const apk = path.join(
+      dir,
+      'android/app/build/outputs/apk/debug/app-debug.apk',
+    );
+    for (const serial of SERIALS) {
+      const installed = await finish(
+        run('adb', ['-s', serial, 'install', '-r', apk]),
+        APK,
+        `install on ${serial}`,
+      );
+      if (!installed) return false;
+      // Run also opens the app; opening it here lets the page settle while the walk goes on.
+      adb(
+        serial,
+        'shell',
+        'monkey',
+        '-p',
+        APP,
+        '-c',
+        'android.intent.category.LAUNCHER',
+        '1',
+      );
+    }
+    done();
+  }
+
+  const [phoneA, phoneB] = ios ? udids : SERIALS;
   let invite = '';
   begin(
     7,
@@ -505,12 +668,16 @@ async function walk() {
     topology === 'H' ? '2 other devices connected' : '1 other device connected';
   for (const [index, serial] of joiners.entries()) {
     // A cold phone sometimes fails its first Maestro launch; the join gets one retry.
-    adb(serial, 'reconnect', 'offline');
-    adb(serial, 'wait-for-device');
+    if (!ios) {
+      adb(serial, 'reconnect', 'offline');
+      adb(serial, 'wait-for-device');
+    }
     // The last phone to join also waits to see the others: one Maestro start, not two.
     const act = index === joiners.length - 1 ? 'joinwait' : 'join';
     const env = { INVITE: invite, EXPECT: expect };
-    const joined = await joinWithRetry(() => maestro(serial, act, env));
+    const joined = await joinWithRetry(() =>
+      ios ? maestroIos(serial, act, env) : maestro(serial, act, env),
+    );
     lap(`${serial} ${act === 'joinwait' ? `shows "${expect}"` : 'joined'}`);
     if (!joined) {
       current.wanted = `${serial} to join and show "${expect}"`;
@@ -525,11 +692,14 @@ async function walk() {
     'doc',
     'phone B to show Tea (1)',
   );
-  // B's Maestro starts now so its startup overlaps A's vote; A's run also checks A sees B.
-  const seen = maestro(phoneB, 'see');
-  const voted = await maestro(phoneA, 'vote', { EXPECT: expect });
+  // Android: B's Maestro starts now so its startup overlaps A's vote; A's run also checks A sees B.
+  // iOS: the Maestro driver binds a fixed port, so the runs go one after the other.
+  const seen = ios ? null : maestro(phoneB, 'see');
+  const voted = ios
+    ? await maestroIos(phoneA, 'vote', { EXPECT: expect })
+    : await maestro(phoneA, 'vote', { EXPECT: expect });
   if (voted.ok) console.log('phone A shows Tea (1)');
-  const seenOk = (await seen).ok;
+  const seenOk = (ios ? await maestroIos(phoneB, 'see') : await seen).ok;
   if (seenOk) console.log('phone B shows Tea (1)');
   if (!voted.ok || !seenOk) {
     current.wanted = `A to show "${expect}" and Tea (1), B to show Tea (1)`;
@@ -548,7 +718,7 @@ const total =
   Math.round((Date.now() - startedAt) / 1000) +
   (rows[0]?.n === 0 ? rows[0].s : 0);
 const table = [
-  `Two phones, topology ${topology}`,
+  `Two phones, ${platform}, topology ${topology}`,
   '',
   '| step | name | seconds | kind |',
   '| --- | --- | ---: | --- |',
@@ -568,11 +738,22 @@ if (result) {
   console.error(
     `two phones: FAIL at step ${current.n} ${current.name} after ${total} s: ${current.wanted}`,
   );
-  for (const serial of SERIALS) {
-    const log = adb(serial, 'logcat', '-d').stdout ?? '';
+  for (const serial of ios ? udids : SERIALS) {
+    const log = ios
+      ? (simctl(
+          'spawn',
+          serial,
+          'log',
+          'show',
+          '--last',
+          '20m',
+          '--style',
+          'compact',
+        ).stdout ?? '')
+      : (adb(serial, 'logcat', '-d').stdout ?? '');
     const lines = log.split('\n').filter((l) => /\[(sync|vote)\]/.test(l));
     console.error(
-      `--- ${serial} [sync]/[vote] logcat (last ${LOG_LINES}) ---\n${tail(lines, LOG_LINES)}`,
+      `--- ${serial} [sync]/[vote] log (last ${LOG_LINES}) ---\n${tail(lines, LOG_LINES)}`,
     );
   }
   console.error(`--- notes ---\n${tail(notes, LOG_LINES)}`);
@@ -590,7 +771,7 @@ if (result) {
     );
 }
 
-for (const serial of SERIALS) adb(serial, 'emu', 'kill');
+if (!ios) for (const serial of SERIALS) adb(serial, 'emu', 'kill');
 for (const emulator of emulators) await stop(emulator.child);
 await browser.close().catch(() => {});
 if (server) await stop(server.child);
