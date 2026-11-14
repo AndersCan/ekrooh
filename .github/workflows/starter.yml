@@ -40,7 +40,7 @@ on:
   workflow_dispatch:
     inputs:
       topology:
-        description: 'Starter / two phones: H = both phones join the browser room, P = phone B joins phone A'
+        description: 'Starter / two phones: H = both phones join the browser room, P = phone B joins phone A. Starter / two iPhones always runs H'
         type: choice
         options: [H, P]
         default: H
@@ -49,7 +49,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The starter is copied out of the repo (degit on main, cp on pull requests).
@@ -324,6 +324,62 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: maestro-two-phones
+          path: ${{ runner.temp }}/maestro-debug
+
+  two-iphones:
+    name: Starter / two iPhones
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.starter != 'false' && github.event_name != 'pull_request' }}
+    runs-on: macos-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install the repo (Playwright)
+        run: |
+          npm ci
+          npm run playwright:install
+
+      - name: Install Maestro
+        env:
+          MAESTRO_VERSION: 2.12.1
+          MAESTRO_SHA256: 54dbb0716425626604973cbb374c585ca30272375d9ce15177a1152765ddd9d7
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-$MAESTRO_VERSION/maestro.zip"
+          echo "$MAESTRO_SHA256  $RUNNER_TEMP/maestro.zip" | shasum -a 256 -c - || { echo "maestro.zip checksum mismatch" >&2; exit 1; }
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/maestro/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/maestro/bin/maestro" --version
+
+      - name: Get the starter
+        run: |
+          start=$SECONDS
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            cp -R examples/vote "$RUNNER_TEMP/my-app"
+          else
+            npx --yes degit@3.10.1 AndersCan/ekrooh/examples/vote#main "$RUNNER_TEMP/my-app"
+          fi
+          echo "STARTER_DIR=$RUNNER_TEMP/my-app" >> "$GITHUB_ENV"
+          echo "WALK_GET_SECONDS=$((SECONDS - start))" >> "$GITHUB_ENV"
+
+      - name: Walk Start here on two iPhone Simulators
+        timeout-minutes: 65
+        env:
+          MAESTRO_DRIVER_STARTUP_TIMEOUT: '180000'
+        run: node .github/scripts/starter-two-phones.mjs "$STARTER_DIR" --platform ios
+
+      - name: Upload the Maestro output
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: maestro-two-iphones
           path: ${{ runner.temp }}/maestro-debug
 
   android-reload:

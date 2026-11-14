@@ -2,7 +2,7 @@
 # ACT=join   type INVITE into the Join box, press Join (stand-in for paste).
 # ACT=joinwait  as join, then wait for the status line EXPECT (a regex such as `2 other devices connected`).
 # ACT=vote   wait for EXPECT, vote Tea and wait for Tea (1).   ACT=see   wait for Tea (1) from the other phone.
-# Run by starter-two-phones.mjs with --device <serial>. It reads the starter's button names and Join box label.
+# Run by starter-two-phones.mjs with --device <serial or Simulator UDID>. It reads the starter's button names and Join box label.
 appId: com.example.vote
 name: One step of the two-phone walk
 androidWebViewHierarchy: devtools
@@ -12,8 +12,9 @@ androidWebViewHierarchy: devtools
       true: ${ACT == 'join' || ACT == 'joinwait'}
     commands:
       - extendedWaitUntil:
-          label: App shows Tea (0)
-          visible: Tea (0)
+          label: App shows the vote buttons
+          # A rerun may find the page scrolled with the keyboard up, so any button counts.
+          visible: '(Tea|Coffee|Water) \([0-9]+\)'
           timeout: 60000
 - runFlow:
     when:
@@ -42,7 +43,12 @@ androidWebViewHierarchy: devtools
                 label: The invite box shows the code
                 text: ${INVITE}
       # The soft keyboard covers the Join button on the emulator's small screen.
-      - hideKeyboard
+      # hideKeyboard fails on the iOS Simulator, where Join stays visible above the keyboard.
+      - runFlow:
+          when:
+            platform: Android
+          commands:
+            - hideKeyboard
       - tapOn:
           label: Join the room
           text: Join

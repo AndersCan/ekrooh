@@ -10,13 +10,14 @@ const source = fs.readFileSync(
   'utf8',
 );
 const pick = (re) => source.match(re)[0];
-const { logCommandTimes, joinFailed, joinWithRetry } = new Function(
+const { logCommandTimes, joinFailed, joinWithRetry, pickIphone } = new Function(
   'fs',
   'path',
   `${pick(/function logCommandTimes[\s\S]*?\n}\n/)}
 ${pick(/function joinFailed[\s\S]*?\n}\n/)}
 ${pick(/async function joinWithRetry[\s\S]*?\n}\n/)}
-return { logCommandTimes, joinFailed, joinWithRetry };`,
+${pick(/function pickIphone[\s\S]*?\n}\n/)}
+return { logCommandTimes, joinFailed, joinWithRetry, pickIphone };`,
 )(fs, path);
 
 test('a failed run keeps its screenshots and logs for the upload step', () => {
@@ -97,4 +98,77 @@ test('a join that passes is not run again', async () => {
   const a = attempts({ ok: true, lines: [] });
   assert.equal(await joinWithRetry(a.attempt), true);
   assert.equal(a.calls.length, 1);
+});
+
+test('pickIphone takes the newest available iOS runtime and an iPhone type', () => {
+  const list = {
+    runtimes: [
+      {
+        identifier: 'com.apple.CoreSimulator.SimRuntime.iOS-17-5',
+        version: '17.5',
+        isAvailable: true,
+      },
+      {
+        identifier: 'com.apple.CoreSimulator.SimRuntime.iOS-18-2',
+        version: '18.2',
+        isAvailable: true,
+      },
+      {
+        identifier: 'com.apple.CoreSimulator.SimRuntime.iOS-26-0',
+        version: '26.0',
+        isAvailable: false,
+      },
+      {
+        identifier: 'com.apple.CoreSimulator.SimRuntime.watchOS-11-0',
+        version: '11.0',
+        isAvailable: true,
+      },
+    ],
+    devicetypes: [
+      {
+        identifier: 'com.apple.CoreSimulator.SimDeviceType.iPad-Pro',
+        name: 'iPad Pro',
+      },
+      {
+        identifier: 'com.apple.CoreSimulator.SimDeviceType.iPhone-16',
+        name: 'iPhone 16',
+      },
+    ],
+  };
+  assert.deepEqual(pickIphone(list), {
+    deviceType: 'com.apple.CoreSimulator.SimDeviceType.iPhone-16',
+    runtime: 'com.apple.CoreSimulator.SimRuntime.iOS-18-2',
+  });
+});
+
+test('pickIphone skips a newer runtime that is not iOS', () => {
+  const list = {
+    runtimes: [
+      {
+        identifier: 'com.apple.CoreSimulator.SimRuntime.iOS-9-3',
+        version: '9.3',
+        isAvailable: true,
+      },
+      {
+        identifier: 'com.apple.CoreSimulator.SimRuntime.iOS-26-0',
+        version: '26.0',
+        isAvailable: true,
+      },
+      {
+        identifier: 'com.apple.CoreSimulator.SimRuntime.xrOS-26-1',
+        version: '26.1',
+        isAvailable: true,
+      },
+    ],
+    devicetypes: [
+      {
+        identifier: 'com.apple.CoreSimulator.SimDeviceType.iPhone-17',
+        name: 'iPhone 17',
+      },
+    ],
+  };
+  assert.equal(
+    pickIphone(list).runtime,
+    'com.apple.CoreSimulator.SimRuntime.iOS-26-0',
+  );
 });
