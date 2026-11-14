@@ -461,9 +461,9 @@ async function walk() {
       }
       udids.push(created.stdout.trim());
     }
-    const booting = udids.map(startBoot);
-    for (const [index, state] of booting.entries())
-      if (!(await finish(state, BOOT_IOS, `bootstatus ${udids[index]}`)))
+    // One at a time: two parallel boots starve each other on the runner (10-14 min each, and the second launch then hangs).
+    for (const udid of udids)
+      if (!(await finish(startBoot(udid), BOOT_IOS, `bootstatus ${udid}`)))
         return false;
     // The first keyboard shows a slide-to-type intro sheet that covers the page and stalls Maestro's typing.
     for (const udid of udids)
@@ -499,8 +499,15 @@ async function walk() {
         return false;
       // Run also opens the app; opening it here lets the page settle while the walk goes on.
       const launch = run('xcrun', ['simctl', 'launch', udid, APP]);
-      if (!(await finish(launch, INSTALL_IOS, `launch on ${udid}`)))
+      if (!(await finish(launch, INSTALL_IOS, `launch on ${udid}`))) {
+        maestroLines.push(
+          `--- launch on ${udid} ---`,
+          ...launch.lines,
+          '--- simctl list devices ---',
+          ...simctl('list', 'devices').stdout.split('\n'),
+        );
         return false;
+      }
     }
     done();
   } else {
