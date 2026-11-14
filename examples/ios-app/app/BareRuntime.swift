@@ -142,8 +142,10 @@ final class BareRuntime {
       var timedOut = false
       while !Task.isCancelled {
         // Deadline first, so a forced 0 s timeout (UI test) shows the message
-        // even when the handoff is already on disk.
-        if !timedOut && Date() >= deadline {
+        // even when the handoff is already on disk. The message waits for the
+        // WebView to be in a window: a page loaded into a detached view at
+        // launch can miss the accessibility tree the UI test reads.
+        if !timedOut && Date() >= deadline && webView.window != nil {
           timedOut = true
           BareHostLogger.log("Timed out waiting for worklet handoff; still polling")
           webView.loadHTMLString(
