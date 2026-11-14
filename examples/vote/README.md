@@ -59,6 +59,7 @@ iOS needs a Mac. On Linux or Windows, skip this section; web and Android work fu
 3. Open `ios/Vote.xcodeproj` in Xcode. The first open downloads packages; this takes a few minutes.
 4. Pick a Simulator and press Run. No Apple account is needed.
 5. Edit `src/render.ts` and save. The Simulator shows the change in a few seconds.
+6. For two Simulators, press Run on a second iPhone and paste the invite code into both. [Start here](https://anderscan.github.io/ekrooh/getting-started/start-here/) has the steps and the measured time (about 30 minutes on a hosted Mac, mostly Simulator boot).
 
 A real iPhone and release builds show the page from the last `npm run sync`; run it again after an edit.
 

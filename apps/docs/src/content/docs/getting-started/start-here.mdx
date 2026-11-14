@@ -101,6 +101,25 @@ The first connection goes over the public network and can take a minute. If
 the status says "Still looking for the other device", wait a little, then
 restart both (votes start from zero after a restart).
 
+### Two iPhone Simulators (Mac only)
+
+Follow the iOS Simulator steps above, with these changes:
+
+2. Pick one iPhone Simulator and press Run. Then pick a different iPhone and
+   press Run again. Xcode closes Vote on the first Simulator: open it again from
+   that Simulator's home screen. Both show Tea (0) Coffee (0) Water (0).
+3. Copy the invite code from http://localhost:5173 and paste it into both
+   Simulators' "Paste a code here" box, then press Join. Each says "2 other
+   devices connected".
+4. Vote Tea on one Simulator: Tea goes up on both.
+
+Measured on GitHub's Mac runner from degit to the vote showing on both
+Simulators: 1828 s in the one passing run that recorded each step (about 30
+minutes), and only 2 of 9 runs passed. Of that, creating, booting and opening the
+app on the two Simulators took 1170 s and the build 52 s; the steps you type
+took 608 s. The runner is a 3-vCPU Mac, so a laptop will be faster. Xcode's first
+package download is counted (it is part of the build).
+
 ## Next
 
 - What each file does, a USB phone, a real iPhone: the
