@@ -369,6 +369,9 @@ jobs:
           echo "STARTER_DIR=$RUNNER_TEMP/my-app" >> "$GITHUB_ENV"
           echo "WALK_GET_SECONDS=$((SECONDS - start))" >> "$GITHUB_ENV"
 
+      - name: Stop Spotlight indexing
+        run: sudo mdutil -a -i off || true
+
       - name: Walk Start here on two iPhone Simulators
         timeout-minutes: 65
         env:

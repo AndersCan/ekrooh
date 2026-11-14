@@ -479,6 +479,9 @@ async function walk() {
       return false;
     }
     simctl('shutdown', 'all');
+    // The build leaves its daemons resident; on a 7 GB runner two booting Simulators then swap (load average 600 in runs 43612214425 and 43594567337).
+    for (const name of ['XCBBuildService', 'SWBBuildService', 'swift-build'])
+      spawnSync('pkill', ['-x', name]);
     udids.push(...installed.slice(0, 2).map((d) => d.udid));
     const booting = udids.map(startBoot);
     for (const [index, state] of booting.entries())
@@ -528,7 +531,7 @@ async function walk() {
           encoding: 'utf8',
           timeout: 30_000,
         });
-        const load = spawnSync('top', ['-l', '1', '-n', '12', '-o', 'cpu'], {
+        const load = spawnSync('top', ['-l', '1', '-n', '15', '-o', 'mem'], {
           encoding: 'utf8',
           timeout: 30_000,
         }).stdout?.split('\n');
