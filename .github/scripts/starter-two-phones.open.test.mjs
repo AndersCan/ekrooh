@@ -1,50 +1,50 @@
-import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
-import fs from "node:fs";
-import { test } from "node:test";
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import { test } from 'node:test';
 
 const source = fs.readFileSync(
-  new URL("./starter-two-phones.mjs", import.meta.url),
-  "utf8",
+  new URL('./starter-two-phones.mjs', import.meta.url),
+  'utf8',
 );
 const body = source.match(/function openSimulators[\s\S]*?\n}\n/)[0];
 const load = (simctl, run, current, udids) =>
   new Function(
-    "simctl",
-    "run",
-    "current",
-    "udids",
-    "pickIphone",
+    'simctl',
+    'run',
+    'current',
+    'udids',
+    'pickIphone',
     `${body}\nreturn openSimulators;`,
-  )(simctl, run, current, udids, () => ({ deviceType: "d", runtime: "r" }));
+  )(simctl, run, current, udids, () => ({ deviceType: 'd', runtime: 'r' }));
 
-test("a failed simctl create stops before any boot and says which phone", () => {
+test('a failed simctl create stops before any boot and says which phone', () => {
   const current = {};
   const calls = [];
   const simctl = (...args) => {
     calls.push(args[0]);
-    if (args[0] === "list") return { stdout: "{}" };
-    return args[1] === "phone1"
-      ? { status: 1, stderr: "no runtime" }
-      : { status: 0, stdout: "UDID-A\n" };
+    if (args[0] === 'list') return { stdout: '{}' };
+    return args[1] === 'phone1'
+      ? { status: 1, stderr: 'no runtime' }
+      : { status: 0, stdout: 'UDID-A\n' };
   };
   const open = load(
     simctl,
-    () => assert.fail("no boot after a failed create"),
+    () => assert.fail('no boot after a failed create'),
     current,
     [],
   );
   assert.equal(open(), undefined);
-  assert.equal(current.wanted, "simctl create phone1: no runtime");
-  assert.deepEqual(calls, ["list", "create", "create"]);
+  assert.equal(current.wanted, 'simctl create phone1: no runtime');
+  assert.deepEqual(calls, ['list', 'create', 'create']);
 });
 
-test("each Simulator logs its own boot time when its bootstatus exits", () => {
+test('each Simulator logs its own boot time when its bootstatus exits', () => {
   const udids = [];
   const children = [];
   const simctl = (...args) =>
-    args[0] === "list"
-      ? { stdout: "{}" }
+    args[0] === 'list'
+      ? { stdout: '{}' }
       : { status: 0, stdout: `UDID-${args[1]}\n` };
   const run = () => {
     const child = new EventEmitter();
@@ -57,14 +57,51 @@ test("each Simulator logs its own boot time when its bootstatus exits", () => {
   try {
     const booting = load(simctl, run, {}, udids)();
     assert.equal(booting.length, 2);
-    assert.deepEqual(udids, ["UDID-phone0", "UDID-phone1"]);
-    children[1].emit("exit", 0);
-    children[0].emit("exit", 0);
+    assert.deepEqual(udids, ['UDID-phone0', 'UDID-phone1']);
+    children[1].emit('exit', 0);
+    children[0].emit('exit', 0);
   } finally {
     console.log = log;
   }
   assert.deepEqual(
-    lines.map((l) => l.replace(/\d+ s$/, "N s")),
-    ["  boot UDID-phone1: N s", "  boot UDID-phone0: N s"],
+    lines.map((l) => l.replace(/\d+ s$/, 'N s')),
+    ['  boot UDID-phone1: N s', '  boot UDID-phone0: N s'],
   );
+});
+
+const pickBody = (re) => source.match(re)[0];
+
+test('the harness total grows with every maestro() run', async () => {
+  const maestroSource = pickBody(/async function maestro\(serial[\s\S]*?\n}\n/);
+  const addSource = pickBody(/function addHarness[\s\S]*?\n}\n/);
+  const clock = [0, 100, 200, 400];
+  const make = new Function(
+    'path',
+    'run',
+    'finish',
+    'logCommandTimes',
+    'Date',
+    `let harnessMs = 0; let maestroRuns = 0; const maestroLines = [];
+const debugOutput = 'd'; const root = 'r'; const ios = true; const VOTE = 1; const VOTE_IOS = 2;
+${addSource}
+${maestroSource}
+return { maestro, total: () => harnessMs };`,
+  );
+  const times = [...clock];
+  const fakeDate = { now: () => times.shift() };
+  const { maestro, total } = make(
+    { join: (...parts) => parts.join('/') },
+    () => ({ lines: [] }),
+    async () => true,
+    () => 50,
+    fakeDate,
+  );
+  await maestro('A', 'see');
+  assert.equal(total(), 50);
+  await maestro('A', 'vote');
+  assert.equal(total(), 50 + 150);
+});
+
+test('the developer-path line is asked for with the walk platform, so Android prints none', () => {
+  assert.match(source, /developerLine\(ios, total, harnessMs\)/);
 });
