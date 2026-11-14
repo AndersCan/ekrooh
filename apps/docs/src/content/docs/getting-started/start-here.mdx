@@ -83,7 +83,9 @@ not counted.
 
 ### iOS Simulator (Mac only)
 
-Needs Xcode from the App Store. Stop `npm run dev` (Ctrl+C), then:
+Needs Xcode from the App Store. Open the Simulator first so it starts while
+you sync and build: in Xcode, choose Xcode > Open Developer Tool > Simulator.
+Its first start takes a few minutes. Stop `npm run dev` (Ctrl+C), then:
 
 ```sh
 npm run sync && npm run dev
@@ -104,6 +106,10 @@ restart both (votes start from zero after a restart).
 ### Two iPhone Simulators (Mac only)
 
 Follow the iOS Simulator steps above, with these changes:
+
+- Before `npm run sync`: also open a second iPhone. In Simulator choose
+  File > Open Simulator and pick a different iPhone. Both start at the same
+  time.
 
 2. Pick one iPhone Simulator and press Run. Then pick a different iPhone and
    press Run again. Xcode closes Vote on the first Simulator: open it again from

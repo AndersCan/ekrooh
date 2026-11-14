@@ -285,7 +285,9 @@ const debugOutput = path.join(
 
 // Prints how long each Maestro command took, from one run's debug folder.
 // Reads only; the folder stays for the upload step of a failed job.
+// Returns the sum of the command durations in ms (0 without a timing file).
 function logCommandTimes(folder, serial, act) {
+  let sum = 0;
   try {
     const files = fs
       .readdirSync(folder)
@@ -295,13 +297,16 @@ function logCommandTimes(folder, serial, act) {
       for (const entry of JSON.parse(fs.readFileSync(file, 'utf8'))) {
         const body = Object.values(entry.command ?? {})[0] ?? {};
         const ms = entry.metadata?.duration;
-        if (body.label && ms !== undefined)
+        if (body.label && ms !== undefined) {
           console.log(`    ${act} ${serial} ${body.label}: ${ms} ms`);
+          sum += ms;
+        }
       }
     }
   } catch {
     // No timing file: the timing is a log, not a check.
   }
+  return sum;
 }
 
 // A timeout on the wait for the other devices is not a failed join: a second Join would only wait again.
@@ -316,12 +321,15 @@ async function joinWithRetry(attempt) {
 }
 
 let maestroRuns = 0;
+// Ms the Maestro runs spent outside their commands (driver start-up): the robot's wait, not the developer's.
+let harnessMs = 0;
 async function maestro(serial, act, env = {}) {
   const flags = Object.entries({ ACT: act, ...env }).flatMap(([k, v]) => [
     '-e',
     `${k}=${v}`,
   ]);
   const folder = path.join(debugOutput, serial, `${++maestroRuns}-${act}`);
+  const runStart = Date.now();
   const state = run('maestro', [
     '--device',
     serial,
@@ -338,7 +346,8 @@ async function maestro(serial, act, env = {}) {
     `maestro ${act} on ${serial}`,
   );
   maestroLines.push(`--- ${act} on ${serial} ---`, ...state.lines);
-  logCommandTimes(folder, serial, act);
+  const commandsMs = logCommandTimes(folder, serial, act);
+  harnessMs += Math.max(0, Date.now() - runStart - commandsMs);
   return { ok, lines: state.lines };
 }
 
@@ -358,10 +367,37 @@ async function maestroIos(udid, act, env = {}) {
   return result;
 }
 
+// iOS: Start here opens both Simulators before npm run sync, so they boot while sync and the build run.
+function openSimulators() {
+  const picked = pickIphone(JSON.parse(simctl('list', '--json').stdout));
+  for (const name of ['phone0', 'phone1']) {
+    const created = simctl('create', name, picked.deviceType, picked.runtime);
+    if (created.status !== 0) {
+      current.wanted = `simctl create ${name}: ${created.stderr}`;
+      return undefined;
+    }
+    udids.push(created.stdout.trim());
+  }
+  return udids.map((udid) => {
+    const bootStart = Date.now();
+    simctl('boot', udid);
+    const state = run('xcrun', ['simctl', 'bootstatus', udid, '-b']);
+    state.child.once('exit', () =>
+      console.log(
+        `  boot ${udid}: ${Math.round((Date.now() - bootStart) / 1000)} s`,
+      ),
+    );
+    return state;
+  });
+}
+
 async function walk() {
   begin(1, 'npm install', 'doc', 'npm install to finish');
   if (!(await finish(run('npm', ['ci'], { cwd: dir }), INSTALL, 'npm install')))
     return false;
+  // A create failure fails under step 1.
+  const booting = ios ? openSimulators() : [];
+  if (!booting) return false;
   done();
 
   begin(2, 'npm run sync', 'doc', 'npm run sync to finish');
@@ -426,23 +462,10 @@ async function walk() {
 
     begin(
       5,
-      'create and boot two Simulators (Xcode device menu)',
+      'both Simulators ready (opened before npm run sync)',
       'stand-in',
       'both Simulators to finish booting',
     );
-    const picked = pickIphone(JSON.parse(simctl('list', '--json').stdout));
-    for (const name of ['phone0', 'phone1']) {
-      const created = simctl('create', name, picked.deviceType, picked.runtime);
-      if (created.status !== 0) {
-        current.wanted = `simctl create ${name}: ${created.stderr}`;
-        return false;
-      }
-      udids.push(created.stdout.trim());
-    }
-    const booting = udids.map((udid) => {
-      simctl('boot', udid);
-      return run('xcrun', ['simctl', 'bootstatus', udid, '-b']);
-    });
     for (const [index, state] of booting.entries())
       if (!(await finish(state, BOOT_IOS, `bootstatus ${udids[index]}`)))
         return false;
@@ -722,6 +745,11 @@ const result = await walk().catch((error) => {
   return false;
 });
 
+// Seconds a developer waits: the total minus the Maestro driver start-up.
+function developerPath({ totalSeconds, harness }) {
+  return totalSeconds - Math.round(harness / 1000);
+}
+
 const total =
   Math.round((Date.now() - startedAt) / 1000) +
   (rows[0]?.n === 0 ? rows[0].s : 0);
@@ -739,6 +767,10 @@ if (process.env.GITHUB_STEP_SUMMARY)
 
 if (result) {
   console.log(`total ${total} s of ${GOAL} (stand-in steps: 4,5,6)`);
+  if (ios)
+    console.log(
+      `developer path ${developerPath({ totalSeconds: total, harness: harnessMs })} s`,
+    );
   if (total > GOAL)
     console.log(`::warning::Two-phone walk took ${total} s, over ${GOAL} s`);
   console.log('two phones: PASS');

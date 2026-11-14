@@ -10,14 +10,21 @@ const source = fs.readFileSync(
   'utf8',
 );
 const pick = (re) => source.match(re)[0];
-const { logCommandTimes, joinFailed, joinWithRetry, pickIphone } = new Function(
+const {
+  logCommandTimes,
+  developerPath,
+  joinFailed,
+  joinWithRetry,
+  pickIphone,
+} = new Function(
   'fs',
   'path',
   `${pick(/function logCommandTimes[\s\S]*?\n}\n/)}
+${pick(/function developerPath[\s\S]*?\n}\n/)}
 ${pick(/function joinFailed[\s\S]*?\n}\n/)}
 ${pick(/async function joinWithRetry[\s\S]*?\n}\n/)}
 ${pick(/function pickIphone[\s\S]*?\n}\n/)}
-return { logCommandTimes, joinFailed, joinWithRetry, pickIphone };`,
+return { logCommandTimes, developerPath, joinFailed, joinWithRetry, pickIphone };`,
 )(fs, path);
 
 test('a failed run keeps its screenshots and logs for the upload step', () => {
@@ -171,4 +178,35 @@ test('pickIphone skips a newer runtime that is not iOS', () => {
     pickIphone(list).runtime,
     'com.apple.CoreSimulator.SimRuntime.iOS-26-0',
   );
+});
+
+test('the developer path is the total minus the Maestro start-up', () => {
+  assert.equal(developerPath({ totalSeconds: 1000, harness: 400_400 }), 600);
+  assert.equal(developerPath({ totalSeconds: 300, harness: 0 }), 300);
+});
+
+test('logCommandTimes returns the summed command durations', () => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-sum-'));
+  for (const [name, ms] of [
+    ['a', 1500],
+    ['b', 2500],
+  ]) {
+    fs.mkdirSync(path.join(folder, name));
+    fs.writeFileSync(
+      path.join(folder, name, 'commands.json'),
+      JSON.stringify([
+        {
+          command: { tapOnElement: { label: name } },
+          metadata: { duration: ms },
+        },
+      ]),
+    );
+  }
+  const log = console.log;
+  console.log = () => {};
+  try {
+    assert.equal(logCommandTimes(folder, 's', 'act'), 4000);
+  } finally {
+    console.log = log;
+  }
 });
