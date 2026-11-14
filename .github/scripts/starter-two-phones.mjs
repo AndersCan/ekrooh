@@ -34,6 +34,7 @@ const READY = 120;
 const BUILD = 600;
 const BOOT = 360;
 const BOOT_IOS = 900;
+const INSTALL_IOS = 600;
 const APK = 60;
 const CODE = 150;
 const JOIN = 240;
@@ -475,10 +476,10 @@ async function walk() {
     );
     for (const udid of udids) {
       const install = run('xcrun', ['simctl', 'install', udid, app]);
-      if (!(await finish(install, INSTALL, `install on ${udid}`))) return false;
+      if (!(await finish(install, INSTALL_IOS, `install on ${udid}`))) return false;
       // Run also opens the app; opening it here lets the page settle while the walk goes on.
       const launch = run('xcrun', ['simctl', 'launch', udid, APP]);
-      if (!(await finish(launch, INSTALL, `launch on ${udid}`))) return false;
+      if (!(await finish(launch, INSTALL_IOS, `launch on ${udid}`))) return false;
     }
     done();
   } else {
