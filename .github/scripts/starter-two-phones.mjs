@@ -266,6 +266,20 @@ async function stopIosDriver(udid) {
   );
 }
 
+// What a hung launch leaves in the log: its own output and the state of the two Simulators.
+function launchDump(udid, launchLines, listed, udids) {
+  return [
+    `--- launch on ${udid} ---`,
+    ...launchLines,
+    '--- simctl list devices (these two) ---',
+    ...(listed.error
+      ? [String(listed.error)]
+      : (listed.stdout ?? '')
+          .split('\n')
+          .filter((l) => udids.some((u) => l.includes(u)))),
+  ];
+}
+
 const simctl = (...rest) =>
   spawnSync('xcrun', ['simctl', ...rest], { encoding: 'utf8' });
 
@@ -499,8 +513,14 @@ async function walk() {
         return false;
       // Run also opens the app; opening it here lets the page settle while the walk goes on.
       const launch = run('xcrun', ['simctl', 'launch', udid, APP]);
-      if (!(await finish(launch, INSTALL_IOS, `launch on ${udid}`)))
+      if (!(await finish(launch, INSTALL_IOS, `launch on ${udid}`))) {
+        const listed = spawnSync('xcrun', ['simctl', 'list', 'devices'], {
+          encoding: 'utf8',
+          timeout: 30_000,
+        });
+        maestroLines.push(...launchDump(udid, launch.lines, listed, udids));
         return false;
+      }
     }
     done();
   } else {

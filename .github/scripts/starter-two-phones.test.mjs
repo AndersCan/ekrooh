@@ -18,6 +18,7 @@ const {
   joinFailed,
   joinWithRetry,
   pickIphone,
+  launchDump,
 } = new Function(
   'fs',
   'path',
@@ -27,8 +28,9 @@ ${pick(/function developerPath[\s\S]*?\n}\n/)}
 ${pick(/function developerLine[\s\S]*?\n}\n/)}
 ${pick(/function joinFailed[\s\S]*?\n}\n/)}
 ${pick(/async function joinWithRetry[\s\S]*?\n}\n/)}
+${pick(/function launchDump[\s\S]*?\n}\n/)}
 ${pick(/function pickIphone[\s\S]*?\n}\n/)}
-return { logCommandTimes, developerPath, addHarness, developerLine, joinFailed, joinWithRetry, pickIphone };`,
+return { logCommandTimes, developerPath, addHarness, developerLine, joinFailed, joinWithRetry, pickIphone, launchDump };`,
 )(fs, path);
 
 test('a failed run keeps its screenshots and logs for the upload step', () => {
@@ -224,4 +226,40 @@ test('harness time adds each run up and never counts a negative share', () => {
 test('the developer path line is printed on iOS only', () => {
   assert.equal(developerLine(true, 500, 100_000), 'developer path 400 s');
   assert.equal(developerLine(false, 500, 100_000), undefined);
+});
+
+test('a hung launch logs its output and only the two Simulators', () => {
+  const list = [
+    '== Devices ==',
+    '    phone0 (AAA-1) (Booted)',
+    '    phone1 (BBB-2) (Booted)',
+    '    iPhone 17 (CCC-3) (Shutdown)',
+  ].join('\n');
+  assert.deepEqual(
+    launchDump('BBB-2', ['waiting'], { stdout: list }, ['AAA-1', 'BBB-2']),
+    [
+      '--- launch on BBB-2 ---',
+      'waiting',
+      '--- simctl list devices (these two) ---',
+      '    phone0 (AAA-1) (Booted)',
+      '    phone1 (BBB-2) (Booted)',
+    ],
+  );
+});
+
+test('a timed-out device list shows the error instead of an empty section', () => {
+  assert.deepEqual(
+    launchDump(
+      'BBB-2',
+      ['waiting'],
+      { error: new Error('spawnSync ETIMEDOUT') },
+      ['AAA-1', 'BBB-2'],
+    ),
+    [
+      '--- launch on BBB-2 ---',
+      'waiting',
+      '--- simctl list devices (these two) ---',
+      'Error: spawnSync ETIMEDOUT',
+    ],
+  );
 });
