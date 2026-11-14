@@ -113,12 +113,8 @@ Follow the iOS Simulator steps above, with these changes:
    devices connected".
 4. Vote Tea on one Simulator: Tea goes up on both.
 
-Measured on GitHub's Mac runner from degit to the vote showing on both
-Simulators: 1828 s in the one passing run that recorded each step (about 30
-minutes), and only 2 of 9 runs passed. Of that, creating, booting and opening the
-app on the two Simulators took 1170 s and the build 52 s; the steps you type
-took 608 s. The runner is a 3-vCPU Mac, so a laptop will be faster. Xcode's first
-package download is counted (it is part of the build).
+Measured on GitHub's 3-vCPU Mac runner, from degit to the vote showing on both
+Simulators: 1828 to 2115 s (30 to 35 minutes) over three passing runs.
 
 ## Next
 
