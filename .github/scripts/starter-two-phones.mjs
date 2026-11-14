@@ -267,12 +267,16 @@ async function stopIosDriver(udid) {
 }
 
 // What a hung launch leaves in the log: its own output and the state of the two Simulators.
-function launchDump(udid, launchLines, deviceList, udids) {
+function launchDump(udid, launchLines, listed, udids) {
   return [
     `--- launch on ${udid} ---`,
     ...launchLines,
     '--- simctl list devices (these two) ---',
-    ...deviceList.split('\n').filter((l) => udids.some((u) => l.includes(u))),
+    ...(listed.error
+      ? [String(listed.error)]
+      : (listed.stdout ?? '')
+          .split('\n')
+          .filter((l) => udids.some((u) => l.includes(u)))),
   ];
 }
 
@@ -514,9 +518,7 @@ async function walk() {
           encoding: 'utf8',
           timeout: 30_000,
         });
-        maestroLines.push(
-          ...launchDump(udid, launch.lines, listed.stdout ?? '', udids),
-        );
+        maestroLines.push(...launchDump(udid, launch.lines, listed, udids));
         return false;
       }
     }
