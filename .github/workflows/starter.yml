@@ -329,7 +329,7 @@ jobs:
   two-iphones:
     name: Starter / two iPhones
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.starter != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.starter != 'false' && github.event_name != 'pull_request' }}
     runs-on: macos-latest
     timeout-minutes: 75
     steps:
