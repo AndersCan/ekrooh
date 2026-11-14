@@ -236,10 +236,18 @@ test('a hung launch logs its output and only the two Simulators', () => {
     '    iPhone 17 (CCC-3) (Shutdown)',
   ].join('\n');
   assert.deepEqual(
-    launchDump('BBB-2', ['waiting'], { stdout: list }, ['AAA-1', 'BBB-2']),
+    launchDump(
+      'BBB-2',
+      ['waiting'],
+      { stdout: list },
+      ['AAA-1', 'BBB-2'],
+      ['Load Avg: 9.1'],
+    ),
     [
       '--- launch on BBB-2 ---',
       'waiting',
+      '--- load ---',
+      'Load Avg: 9.1',
       '--- simctl list devices (these two) ---',
       '    phone0 (AAA-1) (Booted)',
       '    phone1 (BBB-2) (Booted)',
@@ -258,6 +266,7 @@ test('a timed-out device list shows the error instead of an empty section', () =
     [
       '--- launch on BBB-2 ---',
       'waiting',
+      '--- load ---',
       '--- simctl list devices (these two) ---',
       'Error: spawnSync ETIMEDOUT',
     ],

@@ -267,10 +267,12 @@ async function stopIosDriver(udid) {
 }
 
 // What a hung launch leaves in the log: its own output and the state of the two Simulators.
-function launchDump(udid, launchLines, listed, udids) {
+function launchDump(udid, launchLines, listed, udids, load) {
   return [
     `--- launch on ${udid} ---`,
     ...launchLines,
+    '--- load ---',
+    ...(load ?? []),
     '--- simctl list devices (these two) ---',
     ...(listed.error
       ? [String(listed.error)]
@@ -466,15 +468,18 @@ async function walk() {
       'stand-in',
       'both Simulators to finish booting',
     );
-    const picked = pickIphone(JSON.parse(simctl('list', '--json').stdout));
-    for (const name of ['phone0', 'phone1']) {
-      const created = simctl('create', name, picked.deviceType, picked.runtime);
-      if (created.status !== 0) {
-        current.wanted = `simctl create ${name}: ${created.stderr}`;
-        return false;
-      }
-      udids.push(created.stdout.trim());
+    // The runner image ships iPhone Simulators whose first-boot work is done; a created one migrates its data while it boots.
+    const listing = JSON.parse(simctl('list', '--json').stdout);
+    const picked = pickIphone(listing);
+    const installed = (listing.devices[picked.runtime] ?? []).filter(
+      (d) => d.isAvailable && d.name.startsWith('iPhone'),
+    );
+    if (installed.length < 2) {
+      current.wanted = `two installed iPhone Simulators on ${picked.runtime}, found ${installed.length}`;
+      return false;
     }
+    simctl('shutdown', 'all');
+    udids.push(...installed.slice(0, 2).map((d) => d.udid));
     const booting = udids.map(startBoot);
     for (const [index, state] of booting.entries())
       if (!(await finish(state, BOOT_IOS, `bootstatus ${udids[index]}`)))
@@ -508,9 +513,14 @@ async function walk() {
       'vote-build/Build/Products/Debug-iphonesimulator/Vote.app',
     );
     for (const udid of udids) {
+      const installStart = Date.now();
       const install = run('xcrun', ['simctl', 'install', udid, app]);
       if (!(await finish(install, INSTALL_IOS, `install on ${udid}`)))
         return false;
+      console.log(
+        `  install ${udid}: ${Math.round((Date.now() - installStart) / 1000)} s`,
+      );
+      const launchStart = Date.now();
       // Run also opens the app; opening it here lets the page settle while the walk goes on.
       const launch = run('xcrun', ['simctl', 'launch', udid, APP]);
       if (!(await finish(launch, INSTALL_IOS, `launch on ${udid}`))) {
@@ -518,9 +528,18 @@ async function walk() {
           encoding: 'utf8',
           timeout: 30_000,
         });
-        maestroLines.push(...launchDump(udid, launch.lines, listed, udids));
+        const load = spawnSync('top', ['-l', '1', '-n', '12', '-o', 'cpu'], {
+          encoding: 'utf8',
+          timeout: 30_000,
+        }).stdout?.split('\n');
+        maestroLines.push(
+          ...launchDump(udid, launch.lines, listed, udids, load),
+        );
         return false;
       }
+      console.log(
+        `  launch ${udid}: ${Math.round((Date.now() - launchStart) / 1000)} s`,
+      );
     }
     done();
   } else {
