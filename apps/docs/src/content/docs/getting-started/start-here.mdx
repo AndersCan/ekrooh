@@ -119,8 +119,10 @@ Follow the iOS Simulator steps above, with these changes:
    devices connected".
 4. Vote Tea on one Simulator: Tea goes up on both.
 
-Measured on GitHub's 3-vCPU Mac runner, from degit to the vote showing on both
-Simulators: 1828 to 2115 s (30 to 35 minutes) over three passing runs.
+Measured on GitHub's 3-vCPU Mac runner over two passing runs: 435 to 482 s
+from degit to the vote showing on both Simulators. Of that, 136 to 161 s is the
+test robot starting up, which you don't wait for, so the steps you do take 299
+to 321 s. A Simulator's first start was 82 to 155 s of it.
 
 ## Next
 
