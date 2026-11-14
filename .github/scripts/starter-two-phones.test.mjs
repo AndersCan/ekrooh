@@ -10,14 +10,25 @@ const source = fs.readFileSync(
   'utf8',
 );
 const pick = (re) => source.match(re)[0];
-const { logCommandTimes, joinFailed, joinWithRetry, pickIphone } = new Function(
+const {
+  logCommandTimes,
+  developerPath,
+  addHarness,
+  developerLine,
+  joinFailed,
+  joinWithRetry,
+  pickIphone,
+} = new Function(
   'fs',
   'path',
   `${pick(/function logCommandTimes[\s\S]*?\n}\n/)}
+${pick(/function addHarness[\s\S]*?\n}\n/)}
+${pick(/function developerPath[\s\S]*?\n}\n/)}
+${pick(/function developerLine[\s\S]*?\n}\n/)}
 ${pick(/function joinFailed[\s\S]*?\n}\n/)}
 ${pick(/async function joinWithRetry[\s\S]*?\n}\n/)}
 ${pick(/function pickIphone[\s\S]*?\n}\n/)}
-return { logCommandTimes, joinFailed, joinWithRetry, pickIphone };`,
+return { logCommandTimes, developerPath, addHarness, developerLine, joinFailed, joinWithRetry, pickIphone };`,
 )(fs, path);
 
 test('a failed run keeps its screenshots and logs for the upload step', () => {
@@ -171,4 +182,46 @@ test('pickIphone skips a newer runtime that is not iOS', () => {
     pickIphone(list).runtime,
     'com.apple.CoreSimulator.SimRuntime.iOS-26-0',
   );
+});
+
+test('the developer path is the total minus the Maestro start-up', () => {
+  assert.equal(developerPath({ totalSeconds: 1000, harness: 400_400 }), 600);
+  assert.equal(developerPath({ totalSeconds: 300, harness: 0 }), 300);
+});
+
+test('logCommandTimes returns the summed command durations', () => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-sum-'));
+  for (const [name, ms] of [
+    ['a', 1500],
+    ['b', 2500],
+  ]) {
+    fs.mkdirSync(path.join(folder, name));
+    fs.writeFileSync(
+      path.join(folder, name, 'commands.json'),
+      JSON.stringify([
+        {
+          command: { tapOnElement: { label: name } },
+          metadata: { duration: ms },
+        },
+      ]),
+    );
+  }
+  const log = console.log;
+  console.log = () => {};
+  try {
+    assert.equal(logCommandTimes(folder, 's', 'act'), 4000);
+  } finally {
+    console.log = log;
+  }
+});
+
+test('harness time adds each run up and never counts a negative share', () => {
+  assert.equal(addHarness(0, 5000, 3000), 2000);
+  assert.equal(addHarness(2000, 6000, 1000), 7000);
+  assert.equal(addHarness(2000, 1000, 4000), 2000);
+});
+
+test('the developer path line is printed on iOS only', () => {
+  assert.equal(developerLine(true, 500, 100_000), 'developer path 400 s');
+  assert.equal(developerLine(false, 500, 100_000), undefined);
 });

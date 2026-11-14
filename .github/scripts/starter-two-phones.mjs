@@ -285,7 +285,9 @@ const debugOutput = path.join(
 
 // Prints how long each Maestro command took, from one run's debug folder.
 // Reads only; the folder stays for the upload step of a failed job.
+// Returns the sum of the command durations in ms (0 without a timing file).
 function logCommandTimes(folder, serial, act) {
+  let sum = 0;
   try {
     const files = fs
       .readdirSync(folder)
@@ -295,13 +297,16 @@ function logCommandTimes(folder, serial, act) {
       for (const entry of JSON.parse(fs.readFileSync(file, 'utf8'))) {
         const body = Object.values(entry.command ?? {})[0] ?? {};
         const ms = entry.metadata?.duration;
-        if (body.label && ms !== undefined)
+        if (body.label && ms !== undefined) {
           console.log(`    ${act} ${serial} ${body.label}: ${ms} ms`);
+          sum += ms;
+        }
       }
     }
   } catch {
     // No timing file: the timing is a log, not a check.
   }
+  return sum;
 }
 
 // A timeout on the wait for the other devices is not a failed join: a second Join would only wait again.
@@ -316,12 +321,15 @@ async function joinWithRetry(attempt) {
 }
 
 let maestroRuns = 0;
+// Ms the Maestro runs spent outside their commands (driver start-up): the robot's wait, not the developer's.
+let harnessMs = 0;
 async function maestro(serial, act, env = {}) {
   const flags = Object.entries({ ACT: act, ...env }).flatMap(([k, v]) => [
     '-e',
     `${k}=${v}`,
   ]);
   const folder = path.join(debugOutput, serial, `${++maestroRuns}-${act}`);
+  const runStart = Date.now();
   const state = run('maestro', [
     '--device',
     serial,
@@ -338,7 +346,8 @@ async function maestro(serial, act, env = {}) {
     `maestro ${act} on ${serial}`,
   );
   maestroLines.push(`--- ${act} on ${serial} ---`, ...state.lines);
-  logCommandTimes(folder, serial, act);
+  const commandsMs = logCommandTimes(folder, serial, act);
+  harnessMs = addHarness(harnessMs, Date.now() - runStart, commandsMs);
   return { ok, lines: state.lines };
 }
 
@@ -356,6 +365,19 @@ async function maestroIos(udid, act, env = {}) {
       break;
   }
   return result;
+}
+
+// Boots one Simulator and logs how long its bootstatus took.
+function startBoot(udid) {
+  const bootStart = Date.now();
+  simctl('boot', udid);
+  const state = run('xcrun', ['simctl', 'bootstatus', udid, '-b']);
+  state.child.once('exit', () =>
+    console.log(
+      `  boot ${udid}: ${Math.round((Date.now() - bootStart) / 1000)} s`,
+    ),
+  );
+  return state;
 }
 
 async function walk() {
@@ -439,10 +461,7 @@ async function walk() {
       }
       udids.push(created.stdout.trim());
     }
-    const booting = udids.map((udid) => {
-      simctl('boot', udid);
-      return run('xcrun', ['simctl', 'bootstatus', udid, '-b']);
-    });
+    const booting = udids.map(startBoot);
     for (const [index, state] of booting.entries())
       if (!(await finish(state, BOOT_IOS, `bootstatus ${udids[index]}`)))
         return false;
@@ -722,6 +741,23 @@ const result = await walk().catch((error) => {
   return false;
 });
 
+// The harness total plus one Maestro run's ms outside its commands.
+function addHarness(total, runMs, commandsMs) {
+  return total + Math.max(0, runMs - commandsMs);
+}
+
+// The developer-path line, iOS only.
+function developerLine(isIos, totalSeconds, harness) {
+  return isIos
+    ? `developer path ${developerPath({ totalSeconds, harness })} s`
+    : undefined;
+}
+
+// Seconds a developer waits: the total minus the Maestro driver start-up.
+function developerPath({ totalSeconds, harness }) {
+  return totalSeconds - Math.round(harness / 1000);
+}
+
 const total =
   Math.round((Date.now() - startedAt) / 1000) +
   (rows[0]?.n === 0 ? rows[0].s : 0);
@@ -739,6 +775,8 @@ if (process.env.GITHUB_STEP_SUMMARY)
 
 if (result) {
   console.log(`total ${total} s of ${GOAL} (stand-in steps: 4,5,6)`);
+  const line = developerLine(ios, total, harnessMs);
+  if (line) console.log(line);
   if (total > GOAL)
     console.log(`::warning::Two-phone walk took ${total} s, over ${GOAL} s`);
   console.log('two phones: PASS');
