@@ -11,17 +11,17 @@
  * reads the starter's visible text (button names, Join box label): renaming
  * those means updating this file and starter-vote-native-sync.yaml.
  */
-import { spawn, spawnSync } from 'node:child_process';
-import crypto from 'node:crypto';
-import fs from 'node:fs';
-import os from 'node:os';
-import readline from 'node:readline';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { spawn, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import readline from "node:readline";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  '../..',
+  "../..",
 );
 
 // Budgets in seconds. Every wait is on what the page or a process shows, never a sleep.
@@ -47,50 +47,50 @@ function usage(message) {
 }
 
 const args = process.argv.slice(2);
-const deviceAt = args.indexOf('--device');
+const deviceAt = args.indexOf("--device");
 const device = deviceAt === -1 ? null : args.splice(deviceAt, 2)[1];
 const dir = args[0];
 if (
   !dir ||
   (deviceAt !== -1 && !device) ||
-  !fs.existsSync(path.join(dir, 'package.json'))
+  !fs.existsSync(path.join(dir, "package.json"))
 ) {
   usage(
-    'usage: node .github/scripts/starter-vote-phone-sync.mjs <starter-dir> [--device <id>]',
+    "usage: node .github/scripts/starter-vote-phone-sync.mjs <starter-dir> [--device <id>]",
   );
 }
-if (fs.existsSync(path.join(dir, '.dev-storage'))) {
+if (fs.existsSync(path.join(dir, ".dev-storage"))) {
   usage(
     `${dir}/.dev-storage exists: the check needs fresh devices; use a fresh copy of the starter`,
   );
 }
-const maestroFound = (process.env.PATH ?? '')
+const maestroFound = (process.env.PATH ?? "")
   .split(path.delimiter)
-  .some((entry) => entry && fs.existsSync(path.join(entry, 'maestro')));
-if (!maestroFound) usage('maestro not found: install Maestro 2.12.1');
+  .some((entry) => entry && fs.existsSync(path.join(entry, "maestro")));
+if (!maestroFound) usage("maestro not found: install Maestro 2.12.1");
 
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.join(
   root,
-  '.playwright-browsers',
+  ".playwright-browsers",
 );
 let chromium;
 try {
-  ({ chromium } = await import('@playwright/test'));
+  ({ chromium } = await import("@playwright/test"));
 } catch {
-  usage('Playwright not found: run npm ci at the repo root');
+  usage("Playwright not found: run npm ci at the repo root");
 }
 let Hyperswarm;
 try {
-  ({ default: Hyperswarm } = await import('hyperswarm'));
+  ({ default: Hyperswarm } = await import("hyperswarm"));
 } catch {
-  usage('hyperswarm not found: run npm ci at the repo root');
+  usage("hyperswarm not found: run npm ci at the repo root");
 }
 // Before any server starts, so a missing browser is a usage error.
 let browser;
 try {
   browser = await chromium.launch();
 } catch {
-  usage('Chromium not installed: run npm run playwright:install');
+  usage("Chromium not installed: run npm run playwright:install");
 }
 
 const startedAt = Date.now();
@@ -114,18 +114,18 @@ function passed() {
 // would leave the dev server and Bare running after the journey.
 function startServer(args) {
   const lines = [];
-  const child = spawn('node', ['scripts/dev.mjs', ...args], {
+  const child = spawn("node", ["scripts/dev.mjs", ...args], {
     cwd: dir,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ["ignore", "pipe", "pipe"],
   });
   const state = { child, lines, exited: null, ready: false };
   for (const stream of [child.stdout, child.stderr]) {
-    readline.createInterface({ input: stream }).on('line', (line) => {
+    readline.createInterface({ input: stream }).on("line", (line) => {
       lines.push(line);
-      if (line.includes('vote ready:')) state.ready = true;
+      if (line.includes("vote ready:")) state.ready = true;
     });
   }
-  child.on('exit', (code, signal) => {
+  child.on("exit", (code, signal) => {
     state.exited = `exit code ${code ?? signal}`;
   });
   return state;
@@ -133,34 +133,34 @@ function startServer(args) {
 
 async function stop(child) {
   if (child.exitCode !== null || child.signalCode) return;
-  const done = new Promise((resolve) => child.once('exit', resolve));
-  child.kill('SIGTERM');
+  const done = new Promise((resolve) => child.once("exit", resolve));
+  child.kill("SIGTERM");
   // Kill timer: gives the child a moment to stop, then forces it.
-  const timer = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
+  const timer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
   await done;
   clearTimeout(timer);
 }
 
-const DRIVER_ID = 'dev.mobile.maestro-driver-iosUITests.xctrunner';
+const DRIVER_ID = "dev.mobile.maestro-driver-iosUITests.xctrunner";
 
 // Maestro leaves the xcodebuild that hosts its iOS driver running when it
 // gives up on "driver not ready in time". That xcodebuild keeps restarting
 // the driver ("Restarting after unexpected exit"), which kills the next
 // attempt's driver mid-flow. Stop it, and the driver app, before trying again.
 async function stopIosDriver(udid) {
-  if (!udid || process.platform !== 'darwin') return;
+  if (!udid || process.platform !== "darwin") return;
   const pattern = `xcodebuild.*${udid}`;
-  const killed = spawnSync('pkill', ['-f', pattern]).status === 0;
+  const killed = spawnSync("pkill", ["-f", pattern]).status === 0;
   const terminated =
-    spawnSync('xcrun', ['simctl', 'terminate', udid, DRIVER_ID]).status === 0;
+    spawnSync("xcrun", ["simctl", "terminate", udid, DRIVER_ID]).status === 0;
   // pkill does not wait: the old xcodebuild must be gone before the new driver starts.
   const gone = await until(
-    () => spawnSync('pgrep', ['-f', pattern]).status !== 0,
+    () => spawnSync("pgrep", ["-f", pattern]).status !== 0,
     DRIVER_EXIT,
   );
   console.log(
-    `stopped the leftover iOS driver: xcodebuild ${killed ? 'killed' : 'not running'}, ` +
-      `driver app ${terminated ? 'terminated' : 'not running'}, xcodebuild ${gone ? 'gone' : 'still running'}`,
+    `stopped the leftover iOS driver: xcodebuild ${killed ? "killed" : "not running"}, ` +
+      `driver app ${terminated ? "terminated" : "not running"}, xcodebuild ${gone ? "gone" : "still running"}`,
   );
 }
 
@@ -176,10 +176,10 @@ async function until(check, budget) {
 
 async function roomFound(room) {
   const swarm = new Hyperswarm();
-  swarm.on('error', () => {});
+  swarm.on("error", () => {});
   try {
     const topic = crypto
-      .createHash('sha256')
+      .createHash("sha256")
       .update(`ekrooh/sync/v1\n${room}`)
       .digest();
     const deadline = Date.now() + ANNOUNCED * 1000;
@@ -194,30 +194,30 @@ async function roomFound(room) {
   }
 }
 
-const server = startServer(['--second']);
+const server = startServer(["--second"]);
 let page = null;
 const pageErrors = [];
 let maestro = null;
 const maestroLines = [];
 
 async function pageText() {
-  if (!page) return '(no page yet)';
+  if (!page) return "(no page yet)";
   try {
-    const text = await page.locator('#app').innerText({ timeout: 2000 });
-    return text.replace(/\s*\n\s*/g, ' | ');
+    const text = await page.locator("#app").innerText({ timeout: 2000 });
+    return text.replace(/\s*\n\s*/g, " | ");
   } catch {
-    return '(page not readable)';
+    return "(page not readable)";
   }
 }
 
 async function fail() {
   const failedStage = stage;
   const second = await pageText();
-  const tail = (lines, count) => lines.slice(-count).join('\n');
+  const tail = (lines, count) => lines.slice(-count).join("\n");
   console.error(
     `phone sync: FAIL at ${failedStage} after ${seconds()} s: ${wanted}\n` +
       `second peer page (${port}): ${second}\n` +
-      `page errors: ${pageErrors.length ? pageErrors.join(' ; ') : 'none'}\n` +
+      `page errors: ${pageErrors.length ? pageErrors.join(" ; ") : "none"}\n` +
       `--- maestro (last ${MAESTRO_LINES} lines) ---\n${tail(maestroLines, MAESTRO_LINES)}\n` +
       `--- node scripts/dev.mjs --second (last ${LOG_LINES} lines) ---\n${tail(server.lines, LOG_LINES)}`,
   );
@@ -225,7 +225,7 @@ async function fail() {
 
 async function buttonShown(name) {
   return page
-    .getByRole('button', { name, exact: true })
+    .getByRole("button", { name, exact: true })
     .isVisible()
     .catch(() => false);
 }
@@ -235,12 +235,12 @@ async function textOf(locator) {
     (await locator
       .first()
       .textContent({ timeout: 1000 })
-      .catch(() => '')) ?? ''
+      .catch(() => "")) ?? ""
   );
 }
 
 async function run() {
-  begin('start', 'the second peer to print "vote ready:"');
+  begin("start", 'the second peer to print "vote ready:"');
   const started = await until(() => server.ready || server.exited, START);
   if (server.exited) {
     wanted = `the second peer to keep running (${server.exited})`;
@@ -249,14 +249,14 @@ async function run() {
   if (!started) return false;
   passed();
 
-  begin('ready', 'the second peer page to show Tea (0) and an invite code');
+  begin("ready", "the second peer page to show Tea (0) and an invite code");
   page = await (await browser.newContext()).newPage();
-  page.on('pageerror', (error) => pageErrors.push(error.message));
+  page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto(`http://localhost:${port}`);
-  const invite = () => textOf(page.locator('code.invite'));
+  const invite = () => textOf(page.locator("code.invite"));
   const ready = await until(
     async () =>
-      (await buttonShown('Tea (0)')) && (await invite()).trim() !== '',
+      (await buttonShown("Tea (0)")) && (await invite()).trim() !== "",
     READY,
   );
   if (!ready) return false;
@@ -265,15 +265,15 @@ async function run() {
   // A device that joins a room before the other device's announce reaches the
   // DHT never finds it (the next lookup is 10+ minutes away), so wait until
   // the room can be looked up.
-  begin('announced', "the second peer's room to be found on the DHT");
+  begin("announced", "the second peer's room to be found on the DHT");
   const code = (await invite()).trim();
   if (!(await roomFound(code))) return false;
   passed();
 
-  begin('phone', 'the phone to join and show Tea (1)');
+  begin("phone", "the phone to join and show Tea (1)");
   const debugOutput = path.join(
     process.env.RUNNER_TEMP || os.tmpdir(),
-    'maestro-debug',
+    "maestro-debug",
   );
   // A slow Simulator sometimes never brings Maestro's iOS driver up; the flow
   // has not started then, so one more attempt is safe.
@@ -282,30 +282,30 @@ async function run() {
     maestroExit = null;
     maestroLines.length = 0;
     maestro = spawn(
-      'maestro',
+      "maestro",
       [
-        ...(device ? ['--device', device] : []),
-        'test',
-        '--debug-output',
+        ...(device ? ["--device", device] : []),
+        "test",
+        "--debug-output",
         debugOutput,
-        '--flatten-debug-output',
-        '-e',
+        "--flatten-debug-output",
+        "-e",
         `INVITE=${code}`,
-        path.join(root, '.github/scripts/starter-vote-native-sync.yaml'),
+        path.join(root, ".github/scripts/starter-vote-native-sync.yaml"),
       ],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      { stdio: ["ignore", "pipe", "pipe"] },
     );
-    maestro.on('exit', (exitCode, signal) => {
+    maestro.on("exit", (exitCode, signal) => {
       maestroExit = exitCode ?? signal;
     });
     for (const stream of [maestro.stdout, maestro.stderr]) {
       readline
         .createInterface({ input: stream })
-        .on('line', (line) => maestroLines.push(line));
+        .on("line", (line) => maestroLines.push(line));
     }
     if (!(await until(() => maestroExit !== null, PHONE))) return false;
     const driverDown = maestroLines.some((line) =>
-      line.includes('driver not ready in time'),
+      line.includes("driver not ready in time"),
     );
     if (maestroExit === 0 || !driverDown) break;
     await stopIosDriver(device);
@@ -317,11 +317,11 @@ async function run() {
   passed();
 
   begin(
-    'synced',
-    'the second peer page to show Tea (1), Coffee (0), Water (0)',
+    "synced",
+    "the second peer page to show Tea (1), Coffee (0), Water (0)",
   );
   const synced = await until(async () => {
-    for (const name of ['Tea (1)', 'Coffee (0)', 'Water (0)']) {
+    for (const name of ["Tea (1)", "Coffee (0)", "Water (0)"]) {
       if (!(await buttonShown(name))) return false;
     }
     return true;
@@ -334,13 +334,13 @@ async function run() {
 // Overall cap: fail at whatever stage is current.
 const result = await Promise.race([
   run().catch((error) => {
-    wanted = `${wanted} (${error.message.split('\n')[0]})`;
+    wanted = `${wanted} (${error.message.split("\n")[0]})`;
     return false;
   }),
   new Promise((resolve) => setTimeout(() => resolve(false), OVERALL * 1000)),
 ]);
 
-if (result) console.log('phone sync: PASS');
+if (result) console.log("phone sync: PASS");
 else await fail();
 
 if (maestro) await stop(maestro);

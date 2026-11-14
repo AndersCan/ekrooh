@@ -11,8 +11,8 @@
  * archive. Run it after `npm run prebuilds`. Exits non-zero on any
  * difference.
  */
-import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   lstatSync,
   mkdtempSync,
@@ -20,20 +20,20 @@ import {
   readdirSync,
   rmSync,
   writeFileSync,
-} from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+} from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  '../..',
+  "../..",
 );
 const lock = JSON.parse(
-  readFileSync(path.join(root, 'scripts/prebuilds.lock.json'), 'utf8'),
+  readFileSync(path.join(root, "scripts/prebuilds.lock.json"), "utf8"),
 );
-const pin = lock.spm['BareKit.xcframework.zip'];
-const expectedDir = path.join(root, 'prebuilds/ios/BareKit.xcframework');
+const pin = lock.spm["BareKit.xcframework.zip"];
+const expectedDir = path.join(root, "prebuilds/ios/BareKit.xcframework");
 
 /** relative path → sha256 (or 'dir' / 'symlink') for every entry under dir. */
 function tree(dir) {
@@ -43,38 +43,38 @@ function tree(dir) {
       const child = path.posix.join(rel, name);
       const abs = path.join(dir, child);
       const stat = lstatSync(abs);
-      if (stat.isSymbolicLink()) out.set(child, 'symlink');
+      if (stat.isSymbolicLink()) out.set(child, "symlink");
       else if (stat.isDirectory()) {
-        out.set(child, 'dir');
+        out.set(child, "dir");
         walk(child);
       } else {
         out.set(
           child,
-          createHash('sha256').update(readFileSync(abs)).digest('hex'),
+          createHash("sha256").update(readFileSync(abs)).digest("hex"),
         );
       }
     }
   };
-  walk('');
+  walk("");
   return out;
 }
 
-const tmp = mkdtempSync(path.join(os.tmpdir(), 'ekrooh-spm-'));
+const tmp = mkdtempSync(path.join(os.tmpdir(), "ekrooh-spm-"));
 try {
   const res = await fetch(pin.url);
   if (!res.ok) throw new Error(`GET ${pin.url} -> ${res.status}`);
   const bytes = Buffer.from(await res.arrayBuffer());
-  const actual = createHash('sha256').update(bytes).digest('hex');
+  const actual = createHash("sha256").update(bytes).digest("hex");
   if (actual !== pin.sha256) {
     throw new Error(`spm zip sha256 ${actual} != lockfile ${pin.sha256}`);
   }
-  const zip = path.join(tmp, 'BareKit.xcframework.zip');
+  const zip = path.join(tmp, "BareKit.xcframework.zip");
   writeFileSync(zip, bytes);
-  const out = path.join(tmp, 'out');
-  execFileSync('unzip', ['-q', zip, '-d', out], { stdio: 'inherit' });
+  const out = path.join(tmp, "out");
+  execFileSync("unzip", ["-q", zip, "-d", out], { stdio: "inherit" });
 
   const want = tree(expectedDir);
-  const got = tree(path.join(out, 'BareKit.xcframework'));
+  const got = tree(path.join(out, "BareKit.xcframework"));
   const diffs = [];
   for (const [p, h] of want)
     if (got.get(p) !== h) diffs.push(`differs or missing: ${p}`);
@@ -83,7 +83,7 @@ try {
   if (diffs.length > 0) {
     throw new Error(
       `The SwiftPM BareKit.xcframework.zip is not the verified prebuild:\n  ` +
-        diffs.join('\n  '),
+        diffs.join("\n  "),
     );
   }
   console.log(

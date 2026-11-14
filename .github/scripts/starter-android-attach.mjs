@@ -24,9 +24,9 @@ export async function attachTry({ android, pkg, attemptMs, resetAttach }) {
   try {
     [device] = await within(attemptMs, android.devices());
   } catch (error) {
-    return { error: String(error.message).split('\n')[0] };
+    return { error: String(error.message).split("\n")[0] };
   }
-  if (!device) return { error: 'Playwright sees no device' };
+  if (!device) return { error: "Playwright sees no device" };
   let webView;
   try {
     webView = await within(
@@ -34,14 +34,14 @@ export async function attachTry({ android, pkg, attemptMs, resetAttach }) {
       device.webView({ pkg }, { timeout: 2000 }),
     );
   } catch (error) {
-    return { error: String(error.message).split('\n')[0] };
+    return { error: String(error.message).split("\n")[0] };
   }
   try {
     return { page: await within(attemptMs, webView.page()) };
   } catch (error) {
     // A new app process opens a new devtools socket and so a new webview
     // object; closing the device makes the next devices() build a fresh one.
-    const message = String(error.message).split('\n')[0];
+    const message = String(error.message).split("\n")[0];
     const restartError = await resetAttach(device);
     return {
       error: restartError
