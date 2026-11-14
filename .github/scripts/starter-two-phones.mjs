@@ -367,36 +367,23 @@ async function maestroIos(udid, act, env = {}) {
   return result;
 }
 
-// iOS: Start here opens both Simulators before npm run sync, so they boot while sync and the build run.
-function openSimulators() {
-  const picked = pickIphone(JSON.parse(simctl('list', '--json').stdout));
-  for (const name of ['phone0', 'phone1']) {
-    const created = simctl('create', name, picked.deviceType, picked.runtime);
-    if (created.status !== 0) {
-      current.wanted = `simctl create ${name}: ${created.stderr}`;
-      return undefined;
-    }
-    udids.push(created.stdout.trim());
-  }
-  return udids.map((udid) => {
-    const bootStart = Date.now();
-    const state = run('xcrun', ['simctl', 'bootstatus', udid, '-b']);
-    state.child.once('exit', () =>
-      console.log(
-        `  boot ${udid}: ${Math.round((Date.now() - bootStart) / 1000)} s`,
-      ),
-    );
-    return state;
-  });
+// Boots one Simulator and logs how long its bootstatus took.
+function startBoot(udid) {
+  const bootStart = Date.now();
+  simctl('boot', udid);
+  const state = run('xcrun', ['simctl', 'bootstatus', udid, '-b']);
+  state.child.once('exit', () =>
+    console.log(
+      `  boot ${udid}: ${Math.round((Date.now() - bootStart) / 1000)} s`,
+    ),
+  );
+  return state;
 }
 
 async function walk() {
   begin(1, 'npm install', 'doc', 'npm install to finish');
   if (!(await finish(run('npm', ['ci'], { cwd: dir }), INSTALL, 'npm install')))
     return false;
-  // A create failure fails under step 1.
-  const booting = ios ? openSimulators() : [];
-  if (!booting) return false;
   done();
 
   begin(2, 'npm run sync', 'doc', 'npm run sync to finish');
@@ -461,10 +448,20 @@ async function walk() {
 
     begin(
       5,
-      'both Simulators ready (opened before npm run sync)',
+      'create and boot two Simulators (Xcode device menu)',
       'stand-in',
       'both Simulators to finish booting',
     );
+    const picked = pickIphone(JSON.parse(simctl('list', '--json').stdout));
+    for (const name of ['phone0', 'phone1']) {
+      const created = simctl('create', name, picked.deviceType, picked.runtime);
+      if (created.status !== 0) {
+        current.wanted = `simctl create ${name}: ${created.stderr}`;
+        return false;
+      }
+      udids.push(created.stdout.trim());
+    }
+    const booting = udids.map(startBoot);
     for (const [index, state] of booting.entries())
       if (!(await finish(state, BOOT_IOS, `bootstatus ${udids[index]}`)))
         return false;
