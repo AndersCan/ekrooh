@@ -29,7 +29,8 @@ const root = path.resolve(
 
 // Budgets in seconds. Every wait is on what a process or page shows, never a sleep.
 const INSTALL = 240;
-const SYNC = 120;
+// iOS: the two Simulators boot during sync on a 3-vCPU runner, which slows it.
+const SYNC = 300;
 const READY = 120;
 const BUILD = 600;
 const BOOT = 360;
