@@ -299,6 +299,7 @@ const emulators = [];
 // Simulator UDIDs, filled by step 5 on iOS.
 const udids = [];
 let server = null;
+let stopSampler = () => {};
 const maestroLines = [];
 const notes = [];
 const debugOutput = path.join(
@@ -388,6 +389,28 @@ async function maestroIos(udid, act, env = {}) {
       break;
   }
   return result;
+}
+
+// Every minute prints what holds the Mac's CPU and memory, so a slow boot names its cause.
+function startLoadSampler() {
+  const sample = () => {
+    const out = (cmd, args) =>
+      spawnSync(cmd, args, { encoding: 'utf8', timeout: 60_000 }).stdout ?? '';
+    const top = out('top', ['-l', '2', '-n', '8', '-o', 'cpu', '-s', '2'])
+      .split('\n')
+      .slice(-14)
+      .join('\n');
+    const pressure = out('memory_pressure')
+      .split('\n')
+      .filter((l) => l.includes('free percentage'))
+      .join('');
+    const swap = out('sysctl', ['vm.swapusage']).trim();
+    const procs = out('ps', ['-axo', 'comm']).split('\n').length;
+    console.log(`--- load ${procs} processes; ${pressure}; ${swap}\n${top}`);
+  };
+  const timer = setInterval(sample, 60_000);
+  timer.unref();
+  return () => clearInterval(timer);
 }
 
 // Boots one Simulator and logs how long its bootstatus took.
@@ -485,9 +508,10 @@ async function walk() {
     }
     simctl('shutdown', 'all');
     udids.push(...installed.map((d) => d.udid));
-    const booting = udids.map(startBoot);
-    for (const [index, state] of booting.entries())
-      if (!(await finish(state, BOOT_IOS, `bootstatus ${udids[index]}`)))
+    stopSampler = startLoadSampler();
+    // One at a time: two parallel boots starve each other on the Mac's 3 cores.
+    for (const udid of udids)
+      if (!(await finish(startBoot(udid), BOOT_IOS, `bootstatus ${udid}`)))
         return false;
     // The first keyboard shows a slide-to-type intro sheet that covers the page and stalls Maestro's typing.
     for (const udid of udids)
