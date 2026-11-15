@@ -63,10 +63,10 @@ function pickIphone(list) {
   return { deviceType: deviceType.identifier, runtime: runtime.identifier };
 }
 
-// Two available iPhone Simulators the image already ships on a runtime, base models before Pro, Max, Plus and Air:
-// the Mac runs out of memory with two large ones booted (267 MB unused, swapping), and a base model renders fewer pixels.
+// Two available iPhone Simulators the image already ships on a runtime, base models before Pro (which includes Pro Max) and Air:
+// the failing launch ran with 267 MB of memory unused and swapping; whether smaller models help is checked by the dispatched runs.
 function installedIphones(list, runtime) {
-  const large = (d) => /Pro|Max|Plus|Air/.test(d.name);
+  const large = (d) => /Pro|Air/.test(d.name);
   const phones = (list.devices[runtime] ?? []).filter(
     (d) => d.isAvailable && d.name.startsWith('iPhone'),
   );
