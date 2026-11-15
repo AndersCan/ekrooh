@@ -501,6 +501,7 @@ async function walk() {
     // Boot the iPhone Simulators the runner image ships instead of creating new ones.
     const listing = JSON.parse(simctl('list', '--json').stdout);
     const picked = pickIphone(listing);
+    console.log(`  runtime ${picked.runtime}`);
     const installed = installedIphones(listing, picked.runtime);
     if (installed.length < 2) {
       current.wanted = `two installed iPhone Simulators on ${picked.runtime}, found ${installed.length}`;
