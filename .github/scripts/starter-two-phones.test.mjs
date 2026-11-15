@@ -211,6 +211,12 @@ test('installedIphones takes two available iPhones and skips iPads and unavailab
     ['c', 'd'],
   );
   assert.deepEqual(installedIphones(list, 'missing'), []);
+  list.devices[rt].push(device('f', 'iPhone 16e'), device('g', 'iPhone 17'));
+  assert.deepEqual(
+    installedIphones(list, rt).map((d) => d.udid),
+    ['f', 'g'],
+    'base models come before Pro, Max and Air',
+  );
 });
 
 test('the developer path is the total minus the Maestro start-up', () => {

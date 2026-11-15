@@ -63,11 +63,17 @@ function pickIphone(list) {
   return { deviceType: deviceType.identifier, runtime: runtime.identifier };
 }
 
-// The first two available iPhone Simulators the image already ships on a runtime.
+// Two available iPhone Simulators the image already ships on a runtime, base models before Pro, Max, Plus and Air:
+// the Mac runs out of memory with two large ones booted (267 MB unused, swapping), and a base model renders fewer pixels.
 function installedIphones(list, runtime) {
-  return (list.devices[runtime] ?? [])
-    .filter((d) => d.isAvailable && d.name.startsWith('iPhone'))
-    .slice(0, 2);
+  const large = (d) => /Pro|Max|Plus|Air/.test(d.name);
+  const phones = (list.devices[runtime] ?? []).filter(
+    (d) => d.isAvailable && d.name.startsWith('iPhone'),
+  );
+  return [...phones.filter((d) => !large(d)), ...phones.filter(large)].slice(
+    0,
+    2,
+  );
 }
 
 function usage(message) {
@@ -485,9 +491,9 @@ async function walk() {
     }
     simctl('shutdown', 'all');
     udids.push(...installed.map((d) => d.udid));
-    // One at a time: two parallel boots starve each other on the Mac's 3 cores.
-    for (const udid of udids)
-      if (!(await finish(startBoot(udid), BOOT_IOS, `bootstatus ${udid}`)))
+    const booting = udids.map(startBoot);
+    for (const [index, state] of booting.entries())
+      if (!(await finish(state, BOOT_IOS, `bootstatus ${udids[index]}`)))
         return false;
     // The first keyboard shows a slide-to-type intro sheet that covers the page and stalls Maestro's typing.
     for (const udid of udids)
