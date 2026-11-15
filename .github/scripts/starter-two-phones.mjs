@@ -299,7 +299,6 @@ const emulators = [];
 // Simulator UDIDs, filled by step 5 on iOS.
 const udids = [];
 let server = null;
-let stopSampler = () => {};
 const maestroLines = [];
 const notes = [];
 const debugOutput = path.join(
@@ -389,36 +388,6 @@ async function maestroIos(udid, act, env = {}) {
       break;
   }
   return result;
-}
-
-// Every minute prints what holds the Mac's CPU and memory, so a slow boot names its cause.
-function startLoadSampler() {
-  const sample = () => {
-    const out = (cmd, args) =>
-      spawnSync(cmd, args, { encoding: 'utf8', timeout: 60_000 }).stdout ?? '';
-    const top = out('top', ['-l', '2', '-n', '8', '-o', 'cpu', '-s', '2'])
-      .split('\n')
-      .slice(-14)
-      .join('\n');
-    const pressure = out('memory_pressure')
-      .split('\n')
-      .filter((l) => l.includes('free percentage'))
-      .join('');
-    const swap = out('sysctl', ['vm.swapusage']).trim();
-    const ps = out('ps', ['-axo', 'stat=,comm=']).split('\n').filter(Boolean);
-    const census = new Map();
-    for (const line of ps) {
-      if (!line.startsWith('R')) continue;
-      const name = path.basename(line.slice(line.indexOf(' ') + 1).trim());
-      census.set(name, (census.get(name) ?? 0) + 1);
-    }
-    const running = [...census].sort((a, b) => b[1] - a[1]).slice(0, 12)
-      .map(([name, n]) => `${name} x${n}`).join(', ');
-    console.log(`--- load ${ps.length} processes; ${pressure}; ${swap}\nrunning: ${running}\n${top}`);
-  };
-  const timer = setInterval(sample, 60_000);
-  timer.unref();
-  return () => clearInterval(timer);
 }
 
 // Boots one Simulator and logs how long its bootstatus took.
@@ -516,7 +485,6 @@ async function walk() {
     }
     simctl('shutdown', 'all');
     udids.push(...installed.map((d) => d.udid));
-    stopSampler = startLoadSampler();
     // One at a time: two parallel boots starve each other on the Mac's 3 cores.
     for (const udid of udids)
       if (!(await finish(startBoot(udid), BOOT_IOS, `bootstatus ${udid}`)))
