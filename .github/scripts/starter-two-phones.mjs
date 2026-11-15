@@ -405,8 +405,16 @@ function startLoadSampler() {
       .filter((l) => l.includes('free percentage'))
       .join('');
     const swap = out('sysctl', ['vm.swapusage']).trim();
-    const procs = out('ps', ['-axo', 'comm']).split('\n').length;
-    console.log(`--- load ${procs} processes; ${pressure}; ${swap}\n${top}`);
+    const ps = out('ps', ['-axo', 'stat=,comm=']).split('\n').filter(Boolean);
+    const census = new Map();
+    for (const line of ps) {
+      if (!line.startsWith('R')) continue;
+      const name = path.basename(line.slice(line.indexOf(' ') + 1).trim());
+      census.set(name, (census.get(name) ?? 0) + 1);
+    }
+    const running = [...census].sort((a, b) => b[1] - a[1]).slice(0, 12)
+      .map(([name, n]) => `${name} x${n}`).join(', ');
+    console.log(`--- load ${ps.length} processes; ${pressure}; ${swap}\nrunning: ${running}\n${top}`);
   };
   const timer = setInterval(sample, 60_000);
   timer.unref();
