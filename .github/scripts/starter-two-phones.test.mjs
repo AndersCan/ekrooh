@@ -18,6 +18,7 @@ const {
   joinFailed,
   joinWithRetry,
   pickIphone,
+  installedIphones,
   launchDump,
 } = new Function(
   'fs',
@@ -29,8 +30,9 @@ ${pick(/function developerLine[\s\S]*?\n}\n/)}
 ${pick(/function joinFailed[\s\S]*?\n}\n/)}
 ${pick(/async function joinWithRetry[\s\S]*?\n}\n/)}
 ${pick(/function launchDump[\s\S]*?\n}\n/)}
+${pick(/function installedIphones[\s\S]*?\n}\n/)}
 ${pick(/function pickIphone[\s\S]*?\n}\n/)}
-return { logCommandTimes, developerPath, addHarness, developerLine, joinFailed, joinWithRetry, pickIphone, launchDump };`,
+return { logCommandTimes, developerPath, addHarness, developerLine, joinFailed, joinWithRetry, pickIphone, installedIphones, launchDump };`,
 )(fs, path);
 
 test('a failed run keeps its screenshots and logs for the upload step', () => {
@@ -184,6 +186,31 @@ test('pickIphone skips a newer runtime that is not iOS', () => {
     pickIphone(list).runtime,
     'com.apple.CoreSimulator.SimRuntime.iOS-26-0',
   );
+});
+
+test('installedIphones takes two available iPhones and skips iPads and unavailable ones', () => {
+  const rt = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
+  const device = (udid, name, isAvailable = true) => ({
+    udid,
+    name,
+    isAvailable,
+  });
+  const list = {
+    devices: {
+      [rt]: [
+        device('a', 'iPad Pro'),
+        device('b', 'iPhone 17', false),
+        device('c', 'iPhone 17 Pro'),
+        device('d', 'iPhone 17 Pro Max'),
+        device('e', 'iPhone Air'),
+      ],
+    },
+  };
+  assert.deepEqual(
+    installedIphones(list, rt).map((d) => d.udid),
+    ['c', 'd'],
+  );
+  assert.deepEqual(installedIphones(list, 'missing'), []);
 });
 
 test('the developer path is the total minus the Maestro start-up', () => {

@@ -63,6 +63,13 @@ function pickIphone(list) {
   return { deviceType: deviceType.identifier, runtime: runtime.identifier };
 }
 
+// The first two available iPhone Simulators the image already ships on a runtime.
+function installedIphones(list, runtime) {
+  return (list.devices[runtime] ?? [])
+    .filter((d) => d.isAvailable && d.name.startsWith('iPhone'))
+    .slice(0, 2);
+}
+
 function usage(message) {
   console.error(message);
   process.exit(2);
@@ -468,21 +475,16 @@ async function walk() {
       'stand-in',
       'both Simulators to finish booting',
     );
-    // The runner image ships iPhone Simulators whose first-boot work is done; a created one migrates its data while it boots.
+    // Boot the iPhone Simulators the runner image ships instead of creating new ones.
     const listing = JSON.parse(simctl('list', '--json').stdout);
     const picked = pickIphone(listing);
-    const installed = (listing.devices[picked.runtime] ?? []).filter(
-      (d) => d.isAvailable && d.name.startsWith('iPhone'),
-    );
+    const installed = installedIphones(listing, picked.runtime);
     if (installed.length < 2) {
       current.wanted = `two installed iPhone Simulators on ${picked.runtime}, found ${installed.length}`;
       return false;
     }
     simctl('shutdown', 'all');
-    // The build leaves its daemons resident; on a 7 GB runner two booting Simulators then swap (load average 600 in runs 43612214425 and 43594567337).
-    for (const name of ['XCBBuildService', 'SWBBuildService', 'swift-build'])
-      spawnSync('pkill', ['-x', name]);
-    udids.push(...installed.slice(0, 2).map((d) => d.udid));
+    udids.push(...installed.map((d) => d.udid));
     const booting = udids.map(startBoot);
     for (const [index, state] of booting.entries())
       if (!(await finish(state, BOOT_IOS, `bootstatus ${udids[index]}`)))
