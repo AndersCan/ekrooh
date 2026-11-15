@@ -18,6 +18,7 @@ const {
   joinFailed,
   joinWithRetry,
   pickIphone,
+  installedIphones,
   launchDump,
 } = new Function(
   'fs',
@@ -29,8 +30,9 @@ ${pick(/function developerLine[\s\S]*?\n}\n/)}
 ${pick(/function joinFailed[\s\S]*?\n}\n/)}
 ${pick(/async function joinWithRetry[\s\S]*?\n}\n/)}
 ${pick(/function launchDump[\s\S]*?\n}\n/)}
+${pick(/function installedIphones[\s\S]*?\n}\n/)}
 ${pick(/function pickIphone[\s\S]*?\n}\n/)}
-return { logCommandTimes, developerPath, addHarness, developerLine, joinFailed, joinWithRetry, pickIphone, launchDump };`,
+return { logCommandTimes, developerPath, addHarness, developerLine, joinFailed, joinWithRetry, pickIphone, installedIphones, launchDump };`,
 )(fs, path);
 
 test('a failed run keeps its screenshots and logs for the upload step', () => {
@@ -186,6 +188,31 @@ test('pickIphone skips a newer runtime that is not iOS', () => {
   );
 });
 
+test('installedIphones takes two available iPhones and skips iPads and unavailable ones', () => {
+  const rt = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
+  const device = (udid, name, isAvailable = true) => ({
+    udid,
+    name,
+    isAvailable,
+  });
+  const list = {
+    devices: {
+      [rt]: [
+        device('a', 'iPad Pro'),
+        device('b', 'iPhone 17', false),
+        device('c', 'iPhone 17 Pro'),
+        device('d', 'iPhone 17 Pro Max'),
+        device('e', 'iPhone Air'),
+      ],
+    },
+  };
+  assert.deepEqual(
+    installedIphones(list, rt).map((d) => d.udid),
+    ['c', 'd'],
+  );
+  assert.deepEqual(installedIphones(list, 'missing'), []);
+});
+
 test('the developer path is the total minus the Maestro start-up', () => {
   assert.equal(developerPath({ totalSeconds: 1000, harness: 400_400 }), 600);
   assert.equal(developerPath({ totalSeconds: 300, harness: 0 }), 300);
@@ -236,10 +263,18 @@ test('a hung launch logs its output and only the two Simulators', () => {
     '    iPhone 17 (CCC-3) (Shutdown)',
   ].join('\n');
   assert.deepEqual(
-    launchDump('BBB-2', ['waiting'], { stdout: list }, ['AAA-1', 'BBB-2']),
+    launchDump(
+      'BBB-2',
+      ['waiting'],
+      { stdout: list },
+      ['AAA-1', 'BBB-2'],
+      ['Load Avg: 9.1'],
+    ),
     [
       '--- launch on BBB-2 ---',
       'waiting',
+      '--- load ---',
+      'Load Avg: 9.1',
       '--- simctl list devices (these two) ---',
       '    phone0 (AAA-1) (Booted)',
       '    phone1 (BBB-2) (Booted)',
@@ -258,6 +293,7 @@ test('a timed-out device list shows the error instead of an empty section', () =
     [
       '--- launch on BBB-2 ---',
       'waiting',
+      '--- load ---',
       '--- simctl list devices (these two) ---',
       'Error: spawnSync ETIMEDOUT',
     ],
