@@ -18,7 +18,7 @@ const {
   joinFailed,
   joinWithRetry,
   pickIphone,
-  installedIphones,
+  installedIphone,
   launchDump,
 } = new Function(
   'fs',
@@ -30,9 +30,9 @@ ${pick(/function developerLine[\s\S]*?\n}\n/)}
 ${pick(/function joinFailed[\s\S]*?\n}\n/)}
 ${pick(/async function joinWithRetry[\s\S]*?\n}\n/)}
 ${pick(/function launchDump[\s\S]*?\n}\n/)}
-${pick(/function installedIphones[\s\S]*?\n}\n/)}
+${pick(/function installedIphone[\s\S]*?\n}\n/)}
 ${pick(/function pickIphone[\s\S]*?\n}\n/)}
-return { logCommandTimes, developerPath, addHarness, developerLine, joinFailed, joinWithRetry, pickIphone, installedIphones, launchDump };`,
+return { logCommandTimes, developerPath, addHarness, developerLine, joinFailed, joinWithRetry, pickIphone, installedIphone, launchDump };`,
 )(fs, path);
 
 test('a failed run keeps its screenshots and logs for the upload step', () => {
@@ -188,7 +188,7 @@ test('pickIphone skips a newer runtime that is not iOS', () => {
   );
 });
 
-test('installedIphones takes two available iPhones and skips iPads and unavailable ones', () => {
+test('installedIphone takes one available iPhone and skips iPads and unavailable ones', () => {
   const rt = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
   const device = (udid, name, isAvailable = true) => ({
     udid,
@@ -206,16 +206,13 @@ test('installedIphones takes two available iPhones and skips iPads and unavailab
       ],
     },
   };
-  assert.deepEqual(
-    installedIphones(list, rt).map((d) => d.udid),
-    ['c', 'd'],
-  );
-  assert.deepEqual(installedIphones(list, 'missing'), []);
+  assert.equal(installedIphone(list, rt).udid, 'c');
+  assert.equal(installedIphone(list, 'missing'), undefined);
   list.devices[rt].push(device('f', 'iPhone 16e'), device('g', 'iPhone 17'));
-  assert.deepEqual(
-    installedIphones(list, rt).map((d) => d.udid),
-    ['f', 'g'],
-    'base models come before Pro, Max and Air',
+  assert.equal(
+    installedIphone(list, rt).udid,
+    'f',
+    'a base model comes before Pro, Max and Air',
   );
 });
 

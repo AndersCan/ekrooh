@@ -40,7 +40,7 @@ on:
   workflow_dispatch:
     inputs:
       topology:
-        description: 'Starter / two phones: H = both phones join the browser room, P = phone B joins phone A. Starter / two iPhones always runs H'
+        description: 'Starter / two phones: H = both phones join the browser room, P = phone B joins phone A. Starter / iPhone and browser always runs H'
         type: choice
         options: [H, P]
         default: H
@@ -326,8 +326,8 @@ jobs:
           name: maestro-two-phones
           path: ${{ runner.temp }}/maestro-debug
 
-  two-iphones:
-    name: Starter / two iPhones
+  iphone-browser:
+    name: Starter / iPhone and browser
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.starter != 'false' && github.event_name != 'pull_request' }}
     runs-on: macos-latest
@@ -369,7 +369,7 @@ jobs:
           echo "STARTER_DIR=$RUNNER_TEMP/my-app" >> "$GITHUB_ENV"
           echo "WALK_GET_SECONDS=$((SECONDS - start))" >> "$GITHUB_ENV"
 
-      - name: Walk Start here on two iPhone Simulators
+      - name: Walk Start here on an iPhone Simulator and a browser page
         timeout-minutes: 65
         env:
           MAESTRO_DRIVER_STARTUP_TIMEOUT: '180000'
@@ -379,7 +379,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: maestro-two-iphones
+          name: maestro-iphone-browser
           path: ${{ runner.temp }}/maestro-debug
 
   android-reload:
