@@ -23,11 +23,11 @@ Votes are shared over p2p (`@ekrooh/bare/sync`). Each device counts its own vote
 
 On one computer, run `npm run dev:second` in a second terminal and open http://localhost:5174 as the second device.
 
-Votes start from zero when the app restarts. If the status still says "Looking for the other device" after a minute, wait a little, then restart both apps: the first connection over the public network can be slow. A device that crashed can still show as connected until it comes back.
+Votes start from zero when the app restarts or you save `worklet/`. If the status still says "Looking for the other device" after a minute, wait a little, then restart both apps: the first connection over the public network can be slow. A device that crashed can still show as connected until it comes back.
 
 ## Change the page
 
-Edit `src/render.ts`: the options are at the top, the buttons below. The browser, the Android emulator and the iOS Simulator reload on save. Devices count any option id, so a phone needs no new `npm run sync` when you change options. Run `npm run sync` and press Run again only after you change `worklet/`.
+Edit `src/render.ts`: the options are at the top, the buttons below. The browser, the Android emulator and the iOS Simulator reload on save. Devices count any option id, so a phone needs no new `npm run sync` when you change options. Saving `worklet/` restarts the app backend in the browser and the Android emulator. The iPhone Simulator still needs `npm run sync` and Run again after a `worklet/` edit. Native packages, a USB phone, a real iPhone and release builds also need `npm run sync`.
 
 | File                     | What it is                                                                                             |
 | ------------------------ | ------------------------------------------------------------------------------------------------------ |

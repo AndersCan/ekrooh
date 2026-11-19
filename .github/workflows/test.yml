@@ -215,7 +215,7 @@ jobs:
         # The ~70 MB runtime ships as its own artifact so each ekrooh release
         # stays small on Maven Central, which limits monthly release size
         # (ADR 0007). Fail if it creeps back into bare-host.
-        if: matrix.host == 'linux'
+        if: env.RUN == 'true' && matrix.host == 'linux'
         run: |
           AAR=android/build/outputs/aar/bare-host-release.aar
           if unzip -l "$AAR" | grep -qE "libbare-kit\.so|libs/classes\.jar"; then
