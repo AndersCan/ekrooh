@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
  * Two devices vote: starts two copies of the vote starter, joins the second to
- * the first by invite code, votes once on each and passes only when both show
+ * the first by invite code, votes once on each (with the second's backend paused while the first votes) and passes only when both show
  * Tea (1), Coffee (1), Water (0). CI runs it in the Starter / web job; by hand:
  * `node .github/scripts/starter-vote-journey.mjs <fresh starter copy>` after
  * `npm ci` at the repo root and in the copy. It reads the starter's visible
  * text (button names, status line, Join box label): renaming those means
  * updating this file.
  */
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import readline from 'node:readline';
@@ -28,7 +28,12 @@ const JOIN = 15;
 const CONNECTED = 120;
 const VOTE = 15;
 const SYNCED = 30;
-const OVERALL = 345; // the budgets above add up to 330 s
+// Phone B's backend stays paused this long: past the swarm's retries of a lost
+// device (about 1, 5 and 15 s).
+const PAUSED = 25;
+const PEER_LOST = 60;
+const CAUGHT_UP = 30;
+const OVERALL = 475; // the budgets above add up to 460 s
 const KILL_GRACE_MS = 5000;
 const LOG_LINES = 60;
 
@@ -153,6 +158,7 @@ async function roomFound(room) {
 
 const servers = { a: startServer([]), b: startServer(['--second']) };
 let pages = null;
+let contexts = null;
 const pageErrors = [];
 
 async function pageText(page) {
@@ -210,10 +216,8 @@ async function run() {
   passed();
 
   begin('ready', 'both pages to show Tea (0) and an invite code');
-  pages = {
-    a: await (await browser.newContext()).newPage(),
-    b: await (await browser.newContext()).newPage(),
-  };
+  contexts = { a: await browser.newContext(), b: await browser.newContext() };
+  pages = { a: await contexts.a.newPage(), b: await contexts.b.newPage() };
   for (const page of Object.values(pages)) {
     page.on('pageerror', (error) => pageErrors.push(error.message));
   }
@@ -271,11 +275,51 @@ async function run() {
   if (!connected) return false;
   passed();
 
+  // Phone B's backend stops (its Bare process is paused), phone A sees B leave
+  // and votes, B resumes and must show the vote. Page B stays up; a browser
+  // context's setOffline would leave the P2P link, which Bare owns, untouched.
+  begin('offline vote', 'page B to show Tea (1) after its backend resumes');
+  const bare = Number(
+    execFileSync('pgrep', ['-P', String(servers.b.child.pid)])
+      .toString()
+      .trim()
+      .split('\n')
+      .at(-1),
+  );
+  process.kill(bare, 'SIGSTOP');
+  const pausedAt = Date.now();
+  let wantedAfterResume;
+  if (
+    !(await until(
+      async () => (await status(pages.a)).includes('No other device yet'),
+      PEER_LOST,
+    ))
+  ) {
+    wantedAfterResume =
+      'page A to show "No other device yet" while B is paused';
+  } else {
+    await pages.a.getByRole('button', { name: 'Tea (0)', exact: true }).click();
+    if (!(await until(() => buttonShown(pages.a, 'Tea (1)'), VOTE))) {
+      wantedAfterResume = 'Tea (1) on page A while B is paused';
+    }
+  }
+  // The outage itself: not a wait for a result.
+  const rest = PAUSED * 1000 - (Date.now() - pausedAt);
+  if (rest > 0) await new Promise((resolve) => setTimeout(resolve, rest));
+  process.kill(bare, 'SIGCONT');
+  if (wantedAfterResume) {
+    wanted = wantedAfterResume;
+    return false;
+  }
+  if (!(await until(() => buttonShown(pages.b, 'Tea (1)'), CAUGHT_UP))) {
+    return false;
+  }
+  passed();
+
   begin(
     'vote',
-    'Tea (1) on page A and Coffee (1) on page B after one click each',
+    'Coffee (1) on page B after one click, Tea (1) still on page A',
   );
-  await pages.a.getByRole('button', { name: 'Tea (0)', exact: true }).click();
   await pages.b
     .getByRole('button', { name: 'Coffee (0)', exact: true })
     .click();
