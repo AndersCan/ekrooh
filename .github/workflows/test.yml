@@ -216,7 +216,7 @@ jobs:
         # stays small on Maven Central, which limits monthly release size
         # (ADR 0007). Fail if it creeps back into bare-host.
         if: matrix.host == 'linux'
-        run: |
+        if: env.RUN == 'true' && matrix.host == 'linux'
           AAR=android/build/outputs/aar/bare-host-release.aar
           if unzip -l "$AAR" | grep -qE "libbare-kit\.so|libs/classes\.jar"; then
             echo "$AAR bundles the Bare Kit runtime; it belongs in :bare-kit-runtime (ADR 0007)"
