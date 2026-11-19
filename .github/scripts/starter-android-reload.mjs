@@ -279,6 +279,14 @@ if (result) {
   } catch (error) {
     appLog += ` ${String(error.message).split('\n')[0]}`;
   }
+  let fullLog = '';
+  if (stage === 'attach') {
+    try {
+      fullLog = `--- logcat unfiltered (last 200 lines) ---\n${adbQuick('logcat', '-d', '-t', '200')}\n`;
+    } catch (error) {
+      fullLog = `--- logcat unfiltered failed: ${String(error.message).split('\n')[0]}\n`;
+    }
+  }
   console.error(
     `starter android reload: FAIL at ${stage} after ${seconds()} s: ${wanted}\n` +
       `page: ${pageText}\npage url: ${pageUrl}\n` +
@@ -286,6 +294,7 @@ if (result) {
       `--- adb ---\n${adbState}\n` +
       `--- logcat (last ${LOG_LINES} lines) ---\n${logcat}\n` +
       `--- app log BARE_KOTLIN (last ${LOG_LINES} lines) ---\n${appLog}\n` +
+      fullLog +
       `--- node scripts/dev.mjs (last ${LOG_LINES} lines) ---\n${lines.slice(-LOG_LINES).join('\n')}`,
   );
 }

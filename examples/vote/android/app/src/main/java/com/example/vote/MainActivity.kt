@@ -75,11 +75,10 @@ class MainActivity : AppCompatActivity() {
             // Debug build: use the page from "npm run dev" when it answers.
             Thread {
                 val up = devServerAnswers(BuildConfig.DEV_SERVER_URL)
-                val fetched = if (up) fetchDevBundle(null) else null
                 mainHandler.post {
                     if (!isDestroyed) {
                         if (up) {
-                            startDev(fetched)
+                            startDev()
                         } else {
                             Log.w("BARE_KOTLIN", "Dev server did not answer; loading the bundled page")
                             startBundled()
@@ -120,7 +119,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Debug only: backend in dev mode (no login, like "npm run dev" on the
      * computer), page loaded from the dev server. */
-    private fun startDev(fetched: DevBundle?) {
+    private fun startDev() {
         val url = BuildConfig.DEV_SERVER_URL
         devArgv = arrayOf(
             "webassets=${webappDir.absolutePath}",
@@ -129,11 +128,11 @@ class MainActivity : AppCompatActivity() {
             "mode=dev",
             "origin=$url",
         )
-        startWorklet(devArgv, fetched?.bytes)
+        startWorklet(devArgv)
         webViewClient.allowedOrigin = url
         // ?backend= marks a debug app page: it does not reload itself on a save.
         webView.loadUrl("$url/?backend=$DEV_BACKEND_PORT")
-        watchDevBundle(fetched?.etag)
+        watchDevBundle(null)
     }
 
     private class DevBundle(val bytes: ByteArray, val etag: String)
