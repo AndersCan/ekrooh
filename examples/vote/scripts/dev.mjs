@@ -6,6 +6,7 @@
 import { context } from 'esbuild';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,12 +48,17 @@ fs.mkdirSync(path.join(root, '.dev-storage', second ? 'second' : 'first'), {
 let bareProcess = null;
 let restartTimer = null;
 let shuttingDown = false;
+let server = null;
 let restartChain = Promise.resolve();
 
 function stopBare() {
   return new Promise((resolve) => {
     if (!bareProcess) return resolve();
     const processToStop = bareProcess;
+    if (processToStop.exitCode !== null || processToStop.signalCode !== null) {
+      bareProcess = null;
+      return resolve();
+    }
     bareProcess = null;
     let finished = false;
     const finish = () => {
@@ -76,6 +82,35 @@ async function startBare() {
   bareProcess = spawn(bareExecutable, [outfile, ...appArgs], {
     stdio: 'inherit',
   });
+  const started = Date.now();
+  const child = bareProcess;
+  if (await backendAnswers(child)) {
+    console.log(
+      `[vote] worklet running on this computer (${((Date.now() - started) / 1000).toFixed(1)} s)`,
+    );
+    // Browser pages reload; pages in a debug app (?backend=) ignore this.
+    if (!shuttingDown)
+      server?.ws.send({ type: 'custom', event: 'vote:worklet' });
+  }
+}
+
+/** True once the backend accepts connections; false if it exits or 15 s pass. */
+async function backendAnswers(child) {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null) return false;
+    const answered = await new Promise((resolve) => {
+      const socket = net.connect({ host: '127.0.0.1', port: backendPort });
+      socket.once('connect', () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once('error', () => resolve(false));
+    });
+    if (answered) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
 }
 
 function scheduleRestart() {
@@ -112,7 +147,7 @@ await worklet.watch();
 
 // The page reads this to find its backend (src/transport.ts).
 process.env.VITE_BACKEND_PORT = String(backendPort);
-const server = await createServer({
+server = await createServer({
   root,
   // 127.0.0.1: the Android emulator reaches this computer's 127.0.0.1 as 10.0.2.2.
   // The port must match DEV_SERVER_URL in android/app/build.gradle.

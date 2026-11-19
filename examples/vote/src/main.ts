@@ -5,6 +5,7 @@ import {
   createPluginBus,
   createProtocolMessenger,
 } from '@ekrooh/bare/core';
+import { reloadsItself } from './backend-port';
 import { createJoinWait } from './join-wait';
 import { pageView, render } from './render';
 import { transport } from './transport';
@@ -65,3 +66,8 @@ show();
 void refresh();
 // Votes from other devices arrive in the backend; ask for them once a second.
 setInterval(() => void refresh(), 1000);
+
+// A worklet save restarts the backend on this computer; reload for a clean page.
+if (import.meta.hot && reloadsItself(location.search)) {
+  import.meta.hot.on('vote:worklet', () => location.reload());
+}

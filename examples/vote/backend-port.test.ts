@@ -1,5 +1,5 @@
 import { expect, test } from 'vite-plus/test';
-import { backendPort } from './src/backend-port';
+import { backendPort, reloadsItself } from './src/backend-port';
 
 test('uses the port from ?backend=', () => {
   expect(backendPort('?backend=8082', 8080)).toBe('8082');
@@ -23,4 +23,10 @@ test('rejects anything but 1 to 5 digits', () => {
       '8080',
     );
   }
+});
+
+test('a page reloads itself unless it has a valid ?backend=', () => {
+  expect(reloadsItself('')).toBe(true);
+  expect(reloadsItself('?backend=8082')).toBe(false);
+  expect(reloadsItself('?backend=abc')).toBe(true);
 });
