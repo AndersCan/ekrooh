@@ -394,7 +394,7 @@ describe('sync engine saved value', () => {
 
   it('starts empty without a warning when nothing was saved', () => {
     expect(start().sync.values()).toEqual([]);
-    expect(logs.some((l) => l.includes('unreadable'))).toBe(false);
+    expect(logs.some((l) => l.includes('[sync] could not read'))).toBe(false);
   });
 
   it('refuses the vote and changes nothing when the save fails', () => {
