@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
  * Android reload: runs the debug vote app on a booted emulator with
- * `npm run dev` running, votes Tea, edits src/render.ts and passes only when the
- * emulator shows Tea [1] (page from the dev server, reloaded on save, vote kept).
+ * `npm run dev` running, votes Tea, edits src/render.ts and waits for Tea [1]
+ * (page from the dev server, reloaded on save, vote kept), then edits
+ * worklet/vote-plugin.ts (+ 1 becomes + 2) and passes only when the emulator
+ * shows Tea [0] after the backend restart and Tea [2] after one click.
  * CI runs it in the Starter / android reload job; by hand: boot an emulator, put
  * adb on PATH, `npm ci` at the repo root, `npm ci && npm run sync` and
  * `cd android && ./gradlew assembleDebug` in a fresh starter copy, then
@@ -22,7 +24,8 @@ const ATTACH = 120;
 const DEVPAGE = 60;
 const VOTE = 15;
 const RELOAD = 20;
-const OVERALL = 430; // the budgets above add up to 425 s
+const WORKLET = 30;
+const OVERALL = 460; // the budgets above add up to 455 s
 const KILL_GRACE_MS = 5000;
 const ATTEMPT_MS = 15000; // one attach try; a hung adb call must not eat the budget
 const REPORT_ADB_MS = 20000;
@@ -194,6 +197,28 @@ async function run() {
   );
   // Fresh read of the page each poll: a full reload replaces the document.
   if (!(await until(() => buttonShown('Tea [1]'), RELOAD))) return false;
+  passed();
+
+  begin(
+    'worklet',
+    'Tea [0], then Tea [2] after one click, once worklet/ is saved',
+  );
+  const plugin = path.join(dir, 'worklet/vote-plugin.ts');
+  const step = '(mine.get(args.id) ?? 0) + 1';
+  const pluginSource = fs.readFileSync(plugin, 'utf8');
+  if (pluginSource.split(step).length !== 2) {
+    wanted = `${step} exactly once in worklet/vote-plugin.ts`;
+    return false;
+  }
+  fs.writeFileSync(
+    plugin,
+    pluginSource.replace(step, () => step.replace('+ 1', '+ 2')),
+  );
+  // The restarted backend has no votes: Tea [0] shows the new page and backend.
+  if (!(await until(() => buttonShown('Tea [0]'), WORKLET))) return false;
+  // The app loads the page only after the new backend answers: one click counts.
+  await page.getByRole('button', { name: 'Tea [0]', exact: true }).click();
+  if (!(await until(() => buttonShown('Tea [2]'), WORKLET))) return false;
   passed();
   return true;
 }

@@ -88,6 +88,22 @@ describe('Android WebView', () => {
     );
   });
 
+  it('fetches worklet code only from the dev server', () => {
+    const starter = code(
+      'examples/vote/android/app/src/main/java/com/example/vote/MainActivity.kt',
+    );
+    const uses = [...starter.matchAll(/__vote\/worklet/g)];
+    expect(uses.length).toBeGreaterThan(0);
+    for (const use of uses) {
+      const before = starter.slice(0, use.index);
+      expect(
+        before.endsWith('${BuildConfig.DEV_SERVER_URL}/'),
+        String(use.index),
+      ).toBe(true);
+    }
+    expect(starter).not.toMatch(/addJavascriptInterface/);
+  });
+
   it('injects the bootstrap only into the handoff origin, once, after a feature check', () => {
     expect(activity).toMatch(
       /WebViewFeature\.isFeatureSupported\(WebViewFeature\.DOCUMENT_START_SCRIPT\)/,
