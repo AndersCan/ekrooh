@@ -104,9 +104,11 @@ the status says "Still looking for the other device", wait a little, then
 restart both (votes start from zero after a restart).
 
 Measured on GitHub's 3-vCPU Mac runner with the Simulator opened before
-`npm run sync`, from degit to the vote showing on the iPhone and a browser page:
-490 and 536 s over two passing runs, of which the Simulator boot left 76 and
-25 s to wait for after sync. Allow up to ten minutes.
+`npm run sync`, over two passing runs: your own steps from degit to the vote
+showing on the iPhone and a browser page took 490 and 536 s (815 and 961 s
+in all; the rest is the test robot starting up). The Simulator finished
+booting during `npm run sync` (154 and 187 s), which slowed sync to 212 and
+228 s. Allow up to ten minutes.
 
 ### Two iPhone Simulators (Mac only)
 
