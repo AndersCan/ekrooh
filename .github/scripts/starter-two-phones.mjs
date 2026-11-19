@@ -5,8 +5,9 @@
  * `node .github/scripts/starter-two-phones.mjs <fresh starter copy> [--platform android|ios] [--topology H|P]`
  *   H (default): both phones join the browser page's room (Start here's paste step).
  *   P: phone B joins phone A's room, no browser (Android only).
- * --platform ios runs two iPhone Simulators on a Mac instead: steps 4-6 stand in for
- * Xcode's Run build, the device menu and Run; needs `xcrun`, `xcodebuild`, `maestro`.
+ * --platform ios runs one iPhone Simulator on a Mac plus the vote page in Chromium as the
+ * second device: steps 4-6 stand in for Xcode's Run build, the device menu and Run;
+ * needs `xcrun`, `xcodebuild`, `maestro`.
  * Steps 4-6 stand in for Android Studio (Gradle sync, Device Manager, Run); the
  * paste is typed through Maestro. Needs `maestro`, `adb`, `avdmanager` on PATH,
  * ANDROID_HOME, system image `system-images;android-35;default;x86_64`,
@@ -63,11 +64,14 @@ function pickIphone(list) {
   return { deviceType: deviceType.identifier, runtime: runtime.identifier };
 }
 
-// The first two available iPhone Simulators the image already ships on a runtime.
-function installedIphones(list, runtime) {
-  return (list.devices[runtime] ?? [])
-    .filter((d) => d.isAvailable && d.name.startsWith('iPhone'))
-    .slice(0, 2);
+// One available iPhone Simulator the image already ships on a runtime, a base model before Pro (which includes Pro Max) and Air:
+// two Simulators ran the 3-core, 7 GB Mac out of memory.
+function installedIphone(list, runtime) {
+  const large = (d) => /Pro|Air/.test(d.name);
+  const phones = (list.devices[runtime] ?? []).filter(
+    (d) => d.isAvailable && d.name.startsWith('iPhone'),
+  );
+  return [...phones.filter((d) => !large(d)), ...phones.filter(large)][0];
 }
 
 function usage(message) {
@@ -471,20 +475,20 @@ async function walk() {
 
     begin(
       5,
-      'create and boot two Simulators (Xcode device menu)',
+      'create and boot the Simulator (Xcode device menu)',
       'stand-in',
-      'both Simulators to finish booting',
+      'the Simulator to finish booting',
     );
     // Boot the iPhone Simulators the runner image ships instead of creating new ones.
     const listing = JSON.parse(simctl('list', '--json').stdout);
     const picked = pickIphone(listing);
-    const installed = installedIphones(listing, picked.runtime);
-    if (installed.length < 2) {
-      current.wanted = `two installed iPhone Simulators on ${picked.runtime}, found ${installed.length}`;
+    const installed = installedIphone(listing, picked.runtime);
+    if (!installed) {
+      current.wanted = `an installed iPhone Simulator on ${picked.runtime}`;
       return false;
     }
     simctl('shutdown', 'all');
-    udids.push(...installed.map((d) => d.udid));
+    udids.push(installed.udid);
     const booting = udids.map(startBoot);
     for (const [index, state] of booting.entries())
       if (!(await finish(state, BOOT_IOS, `bootstatus ${udids[index]}`)))
@@ -509,9 +513,9 @@ async function walk() {
 
     begin(
       6,
-      'install and open the app on both (Run)',
+      'install and open the app on the Simulator (Run)',
       'stand-in',
-      'the app to install and open on both Simulators',
+      'the app to install and open on the Simulator',
     );
     const app = path.join(
       scratch,
@@ -660,6 +664,7 @@ async function walk() {
 
   const [phoneA, phoneB] = ios ? udids : SERIALS;
   let invite = '';
+  let browserPage;
   begin(
     7,
     'read the invite code (copy)',
@@ -680,8 +685,13 @@ async function walk() {
       ).trim();
     await until(async () => /^[0-9a-f]{32}$/.test(await read()), CODE);
     invite = await read();
-    // Free the runner's CPU: the open page keeps reloading and a phone went offline.
-    await context.close();
+    if (ios) {
+      // The page is the second device: it stays open and must show the vote.
+      browserPage = page;
+    } else {
+      // Free the runner's CPU: the open page keeps reloading and a phone went offline.
+      await context.close();
+    }
   } else {
     // Phone A's own code, read from its page over the WebView debug socket.
     const read = async () => {
@@ -727,7 +737,11 @@ async function walk() {
     'doc',
     'the last phone to join and show the others connected',
   );
-  const joiners = topology === 'H' ? [phoneA, phoneB] : [phoneB];
+  const joiners = ios
+    ? [phoneA]
+    : topology === 'H'
+      ? [phoneA, phoneB]
+      : [phoneB];
   const lapStart = Date.now();
   const lap = (what) =>
     console.log(
@@ -736,7 +750,9 @@ async function walk() {
   // One phone after the other: the second looks the room up after the first has
   // announced it. Joined at the same moment, the phones can miss each other.
   const expect =
-    topology === 'H' ? '2 other devices connected' : '1 other device connected';
+    topology === 'H' && !ios
+      ? '2 other devices connected'
+      : '1 other device connected';
   for (const [index, serial] of joiners.entries()) {
     // A cold phone sometimes fails its first Maestro launch; the join gets one retry.
     if (!ios) {
@@ -759,21 +775,35 @@ async function walk() {
 
   begin(
     9,
-    'vote Tea on A, B shows Tea (1) (vote)',
+    ios
+      ? 'vote Tea on the iPhone, the browser page shows Tea (1) (vote)'
+      : 'vote Tea on A, B shows Tea (1) (vote)',
     'doc',
-    'phone B to show Tea (1)',
+    ios ? 'the browser page to show Tea (1)' : 'phone B to show Tea (1)',
   );
   // Android: B's Maestro starts now so its startup overlaps A's vote; A's run also checks A sees B.
-  // iOS: the Maestro driver binds a fixed port, so the runs go one after the other.
+  // iOS: the second device is the vote page in Chromium, which Playwright watches.
   const seen = ios ? null : maestro(phoneB, 'see');
   const voted = ios
     ? await maestroIos(phoneA, 'vote', { EXPECT: expect })
     : await maestro(phoneA, 'vote', { EXPECT: expect });
-  if (voted.ok) console.log('phone A shows Tea (1)');
-  const seenOk = (ios ? await maestroIos(phoneB, 'see') : await seen).ok;
-  if (seenOk) console.log('phone B shows Tea (1)');
+  if (voted.ok) console.log(`${ios ? 'the iPhone' : 'phone A'} shows Tea (1)`);
+  const seenOk = ios
+    ? await browserPage
+        .getByText('Tea (1)')
+        .first()
+        .waitFor({ timeout: VOTE_IOS * 1000 })
+        .then(
+          () => true,
+          () => false,
+        )
+    : (await seen).ok;
+  if (seenOk)
+    console.log(`${ios ? 'the browser page' : 'phone B'} shows Tea (1)`);
   if (!voted.ok || !seenOk) {
-    current.wanted = `A to show "${expect}" and Tea (1), B to show Tea (1)`;
+    current.wanted = ios
+      ? `the iPhone to show "${expect}" and Tea (1), the browser page to show Tea (1)`
+      : `A to show "${expect}" and Tea (1), B to show Tea (1)`;
     return false;
   }
   done();
