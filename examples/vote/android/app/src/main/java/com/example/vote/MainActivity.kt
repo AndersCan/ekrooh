@@ -22,6 +22,8 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
+private const val DEV_BACKEND_PORT = 8080
+
 class MainActivity : AppCompatActivity() {
     private lateinit var worklet: Worklet
     private lateinit var ipc: IPC
@@ -32,6 +34,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webappDir: File
     private lateinit var bareCacheDir: File
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var coordinator: HostIpcCoordinator? = null
+    private var devArgv: Array<String> = emptyArray()
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -117,32 +121,113 @@ class MainActivity : AppCompatActivity() {
      * computer), page loaded from the dev server. */
     private fun startDev() {
         val url = BuildConfig.DEV_SERVER_URL
-        startWorklet(
-            arrayOf(
-                "webassets=${webappDir.absolutePath}",
-                "storage=${storageDir.absolutePath}",
-                "cache=${bareCacheDir.absolutePath}",
-                "mode=dev",
-                "origin=$url",
-            ),
+        devArgv = arrayOf(
+            "webassets=${webappDir.absolutePath}",
+            "storage=${storageDir.absolutePath}",
+            "cache=${bareCacheDir.absolutePath}",
+            "mode=dev",
+            "origin=$url",
         )
+        startWorklet(devArgv)
         webViewClient.allowedOrigin = url
-        webView.loadUrl("$url/")
+        // ?backend= marks a debug app page: it does not reload itself on a save.
+        webView.loadUrl("$url/?backend=$DEV_BACKEND_PORT")
+        watchDevBundle(null)
     }
 
-    private fun startWorklet(argv: Array<String>) {
+    private class DevBundle(val bytes: ByteArray, val etag: String)
+
+    /** Debug only: the packed worklet from "npm run dev", or null when the
+     * server has none or the caller already holds [etag]. */
+    private fun fetchDevBundle(etag: String?): DevBundle? {
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = URL("${BuildConfig.DEV_SERVER_URL}/__vote/worklet/android.bundle")
+                .openConnection() as HttpURLConnection
+            conn.connectTimeout = 1000
+            conn.readTimeout = 5000
+            if (etag != null) conn.setRequestProperty("If-None-Match", etag)
+            val tag = conn.getHeaderField("ETag")
+            if (conn.responseCode == 200 && tag != null) {
+                DevBundle(conn.inputStream.use { it.readBytes() }, tag)
+            } else {
+                null
+            }
+        } catch (e: java.io.IOException) {
+            null
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    private fun portOpen(): Boolean =
+        try {
+            java.net.Socket().use {
+                it.connect(java.net.InetSocketAddress("127.0.0.1", DEV_BACKEND_PORT), 200)
+            }
+            true
+        } catch (e: java.io.IOException) {
+            false
+        }
+
+    /** Waits up to [seconds] for the backend port to open (or to close). */
+    private fun waitPort(open: Boolean, seconds: Int): Boolean {
+        val deadline = System.currentTimeMillis() + seconds * 1000L
+        while (System.currentTimeMillis() < deadline) {
+            if (portOpen() == open) return true
+            Thread.sleep(100)
+        }
+        return portOpen() == open
+    }
+
+    private fun onMain(block: () -> Unit) {
+        val done = java.util.concurrent.CountDownLatch(1)
+        mainHandler.post {
+            try {
+                if (!isDestroyed) block()
+            } finally {
+                done.countDown()
+            }
+        }
+        done.await(5, java.util.concurrent.TimeUnit.SECONDS)
+    }
+
+    /** Debug only: once a second, ask the dev server for a newer worklet and
+     * restart the backend in this process when there is one. */
+    private fun watchDevBundle(initial: String?) {
+        Thread {
+            var etag = initial
+            while (!isDestroyed) {
+                Thread.sleep(1000)
+                val next = fetchDevBundle(etag) ?: continue
+                etag = next.etag
+                onMain {
+                    coordinator?.stop()
+                    if (::ipc.isInitialized) ipc.close()
+                    worklet.terminate()
+                }
+                waitPort(false, 3)
+                onMain { startWorklet(devArgv, next.bytes) }
+                if (!waitPort(true, 10)) {
+                    Log.e("BARE_KOTLIN", "The new worklet did not answer on $DEV_BACKEND_PORT")
+                }
+                onMain { webView.loadUrl("${BuildConfig.DEV_SERVER_URL}/?backend=$DEV_BACKEND_PORT") }
+            }
+        }.start()
+    }
+
+    private fun startWorklet(argv: Array<String>, bundle: ByteArray? = null) {
         worklet = Worklet(
             Worklet.Options()
                 .memoryLimit(128 * 1024 * 1024)
                 .assets(File(storageDir, "asset-cache").absolutePath),
         )
         try {
-            assets.open("main.core.bundle").use { bundleStream ->
-                worklet.start("/main.core.bundle", bundleStream, argv)
-            }
+            val stream = bundle?.inputStream() ?: assets.open("main.core.bundle")
+            stream.use { worklet.start("/main.core.bundle", it, argv) }
             ipc = IPC(worklet)
             registerDefaultHostPlugins(hostPlugins, this)
-            HostIpcCoordinator(ipc, hostPlugins).start()
+            coordinator = HostIpcCoordinator(ipc, hostPlugins).also { it.start() }
         } catch (e: Exception) {
             Log.e("BARE_KOTLIN", "Failed to start worklet", e)
         }
@@ -227,6 +312,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         mainHandler.removeCallbacksAndMessages(null)
+        coordinator?.stop()
         if (::ipc.isInitialized) ipc.close()
         if (::worklet.isInitialized) worklet.terminate()
     }
