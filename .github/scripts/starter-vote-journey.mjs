@@ -363,6 +363,12 @@ async function run() {
       line.includes('[vote] worklet running on this computer'),
     ).length;
   const seen = { a: running(servers.a), b: running(servers.b) };
+  // A reloaded page has lost this mark.
+  for (const page of Object.values(pages)) {
+    await page.evaluate(() => {
+      window.beforeSave = true;
+    });
+  }
   fs.writeFileSync(
     file,
     source.replace(before, '(mine.get(args.id) ?? 0) + 2'),
@@ -372,6 +378,9 @@ async function run() {
       return false;
     }
     for (const page of Object.values(pages)) {
+      if (await page.evaluate(() => window.beforeSave).catch(() => true)) {
+        return false;
+      }
       for (const name of ['Tea (0)', 'Coffee (0)']) {
         if (!(await buttonShown(page, name))) return false;
       }
