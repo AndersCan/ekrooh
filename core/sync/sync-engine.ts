@@ -2,12 +2,14 @@ import { err, ok } from '../messages/errors';
 import type { CoreError, Either } from '../messages/types';
 import { parseInviteCode, topicForInvite } from './invite';
 import { loadSyncState, saveSyncState } from './sync-state-file';
+import { loadSelfValue, saveSelfValue } from './sync-values-file';
 import { MAX_LINE_BYTES, createLineReader, encodeSyncLine } from './wire';
 
 export type SyncOptions<T> = {
-  /** Existing directory for this device's sync identity and current room.
-   * Pass `runtime.config.storage`. Without it (or if it is missing/unwritable)
-   * identity and room live in memory and a restart starts a new room. */
+  /** Existing directory for this device's sync identity, current room and
+   * last published value. Pass `runtime.config.storage`. Without it (or if it
+   * is missing/unwritable) identity and room live in memory and a restart
+   * starts a new room. */
   storage?: string;
   /** Validates a peer's value. Return the typed value, or undefined to drop
    * it. Required. */
@@ -21,9 +23,12 @@ export interface Sync<T> {
   invite(): string;
   /** Leave the current room and join the one named by `code`. */
   join(code: string): Either<CoreError, true>;
-  /** Replace this device's value and send it to every connected device. */
+  /** Replace this device's value, save it when `storage` is set, and send it
+   * to every connected device. Returns `sync/save-failed` and changes nothing
+   * when the save fails. */
   publish(value: T): Either<CoreError, true>;
-  /** Latest value of every device seen in this room: self first, then by peer id. */
+  /** Latest value of every device seen in this room: self first, then by peer
+   * id. This device's own value is kept across restarts when `storage` is set. */
   values(): SyncValue<T>[];
   /** Devices connected right now (not counting this one). */
   connected(): number;
@@ -79,7 +84,16 @@ export function createSyncWith<T>(
   let room = state.room;
   let topic = topicForInvite(room);
   let selfLine: string | undefined;
-  let selfValue: T | undefined;
+  let selfValue: T | undefined = loadSelfValue(options.storage, options.parse);
+  if (selfValue !== undefined) {
+    const [encodeError, line] = encodeSyncLine(selfValue);
+    if (encodeError === null) {
+      selfLine = line;
+      console.log("[sync] restored this device's saved value");
+    } else {
+      selfValue = undefined;
+    }
+  }
   let closed = false;
 
   const fire = () => {
@@ -231,6 +245,8 @@ export function createSyncWith<T>(
       if (closed) return err('sync/closed', 'This sync was closed.');
       const [error, line] = encodeSyncLine(value);
       if (error !== null) return [error, null];
+      const [saveError] = saveSelfValue(options.storage, value);
+      if (saveError !== null) return [saveError, null];
       selfLine = line;
       selfValue = value;
       for (const peer of peers.values()) {

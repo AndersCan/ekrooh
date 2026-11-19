@@ -64,8 +64,14 @@ there.
 
 With `storage` (pass `runtime.config.storage`), the device keeps its identity
 and room in `ekrooh-sync.json`, so a restart rejoins the same room. Without
-it, identity and room live in memory. Values are not persisted: a restarted
-device republishes its own value.
+it, identity and room live in memory.
+
+The device also keeps its own last published value in
+`ekrooh-sync-values.json`, so after a restart `values()` returns it before any
+device connects and it is sent to each device as it connects. `publish` writes
+the file first and returns `sync/save-failed` (changing nothing) when it cannot.
+Other devices' values are not saved: they arrive again when those devices
+connect. A file that cannot be read is ignored with one warning.
 
 Values of devices that disconnect are kept until `join()` or `close()`, so a
 phone whose screen goes off keeps its votes.

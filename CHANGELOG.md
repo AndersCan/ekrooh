@@ -13,7 +13,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sync saves this device's last published value in `ekrooh-sync-values.json` (when `storage` is set) and restores it on start, so a restarted device no longer shows or publishes empty counts. Other devices' values are not saved.
 - `createWebSocketTransport` returns an optional `ready()` that resolves once the socket is open, or the transport gave up, closed or was replaced. Await it before the first call so the invoke deadline measures the round trip, not the connect.
+
+### Changed
+
+- Can break: `Sync.publish` returns `sync/save-failed` and changes nothing when `storage` is set but the value cannot be written (before, it never wrote). `values()` can now hold this device's value before the first `publish`.
 
 ## [0.7.0] - 2026-11-08
 

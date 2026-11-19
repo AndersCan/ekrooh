@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   afterEach,
   beforeEach,
@@ -307,5 +310,117 @@ describe('sync engine', () => {
         l.includes(`peer ${peerId(2).slice(0, 8)} connected (1 connected)`),
       ),
     ).toBe(true);
+  });
+});
+
+describe('sync engine saved value', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-values-'));
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const valuesFile = () => path.join(dir, 'ekrooh-sync-values.json');
+  const start = (storage: string = dir) => {
+    const s = new FakeSwarm();
+    const [error, made] = createSyncWith<Counts>(
+      { parse, storage },
+      { createSwarm: () => s },
+    );
+    expect(error).toBeNull();
+    return { swarm: s, sync: made! };
+  };
+
+  it('restores the last published value on the first values()', async () => {
+    const a = start();
+    a.sync.publish({ tea: 2 });
+    await a.sync.close();
+    const b = start();
+    expect(b.sync.values()).toEqual([
+      {
+        peer: Buffer.alloc(32, 1).toString('hex'),
+        self: true,
+        value: { tea: 2 },
+      },
+    ]);
+    expect(b.sync.connected()).toBe(0);
+  });
+
+  it('keeps the newest of several published values', async () => {
+    const a = start();
+    a.sync.publish({ tea: 1 });
+    a.sync.publish({ tea: 2 });
+    await a.sync.close();
+    expect(start().sync.values()[0]?.value).toEqual({ tea: 2 });
+  });
+
+  it('sends a restored value to a peer that connects', async () => {
+    const a = start();
+    a.sync.publish({ tea: 2 });
+    await a.sync.close();
+    const b = start();
+    expect(b.swarm.connect(2).written).toEqual([line({ tea: 2 })]);
+  });
+
+  it('does not save other devices', async () => {
+    const a = start();
+    a.swarm.connect(2).receive(line({ coffee: 1 }));
+    await a.sync.close();
+    expect(fs.existsSync(valuesFile())).toBe(false);
+    expect(start().sync.values()).toEqual([]);
+  });
+
+  it('starts empty and warns on a corrupt file', () => {
+    fs.writeFileSync(valuesFile(), '{nope');
+    const a = start();
+    expect(a.sync.values()).toEqual([]);
+    expect(logs.some((l) => l.includes('is unreadable'))).toBe(true);
+    expect(a.sync.publish({ tea: 1 })[0]).toBeNull();
+    expect(JSON.parse(fs.readFileSync(valuesFile(), 'utf8'))).toEqual({
+      version: 1,
+      self: { tea: 1 },
+    });
+  });
+
+  it.each([
+    ['a newer version', { version: 2, self: { tea: 1 } }],
+    ['a value parse rejects', { version: 1, self: 'x' }],
+    ['no value', { version: 1 }],
+    ['a non-object', 5],
+  ])('starts empty for %s', (_name, content) => {
+    fs.writeFileSync(valuesFile(), JSON.stringify(content));
+    expect(start().sync.values()).toEqual([]);
+    expect(logs.some((l) => l.includes('is unreadable'))).toBe(true);
+  });
+
+  it('starts empty without a warning when nothing was saved', () => {
+    expect(start().sync.values()).toEqual([]);
+    expect(logs.some((l) => l.includes('unreadable'))).toBe(false);
+  });
+
+  it('refuses the vote and changes nothing when the save fails', () => {
+    const a = start();
+    a.sync.publish({ tea: 1 });
+    const conn = a.swarm.connect(2);
+    const before = conn.written.length;
+    fs.rmSync(valuesFile());
+    fs.mkdirSync(`${valuesFile()}.tmp`);
+    const [error] = a.sync.publish({ tea: 2 });
+    expect(error?.code).toBe('sync/save-failed');
+    expect(a.sync.values()[0]?.value).toEqual({ tea: 1 });
+    expect(conn.written).toHaveLength(before);
+    expect(a.swarm.connect(3).written).toEqual([line({ tea: 1 })]);
+  });
+
+  it('does not touch the disk without storage', () => {
+    const a = start('');
+    expect(a.sync.publish({ tea: 1 })[0]).toBeNull();
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+
+  it('does not save a value that cannot be encoded', () => {
+    const a = start();
+    const [error] = a.sync.publish({ tea: 1n as never });
+    expect(error).not.toBeNull();
+    expect(fs.existsSync(valuesFile())).toBe(false);
   });
 });
