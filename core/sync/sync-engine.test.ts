@@ -49,8 +49,14 @@ class FakeSwarm implements SwarmPort {
   on(event: string, cb: (...a: never[]) => void) {
     if (event === 'connection') this.connectionCb = cb as never;
   }
+  refreshed = 0;
   join(topic: Buffer) {
     this.joined.push(topic);
+    return {
+      refresh: () => {
+        this.refreshed++;
+      },
+    };
   }
   leave(topic: Buffer) {
     this.left.push(topic);
@@ -93,6 +99,50 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 const peerId = (id: number) => Buffer.alloc(32, id).toString('hex');
+
+describe('looking the room up again', () => {
+  const start = () => {
+    vi.useFakeTimers();
+    const own = new FakeSwarm();
+    const [, made] = createSyncWith<Counts>(
+      { parse },
+      { createSwarm: () => own },
+    );
+    return { own, made: made! };
+  };
+  afterEach(() => vi.useRealTimers());
+
+  it('refreshes every 5 s while no device is connected', () => {
+    const { own } = start();
+    vi.advanceTimersByTime(4999);
+    expect(own.refreshed).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(own.refreshed).toBe(1);
+    vi.advanceTimersByTime(10000);
+    expect(own.refreshed).toBe(3);
+  });
+
+  it('does not refresh while a device is connected, and resumes after it leaves', () => {
+    const { own } = start();
+    const conn = own.connect(2);
+    vi.advanceTimersByTime(20000);
+    expect(own.refreshed).toBe(0);
+    conn.emit('close');
+    vi.advanceTimersByTime(5000);
+    expect(own.refreshed).toBe(1);
+  });
+
+  it('refreshes the new room after join and stops after close', async () => {
+    const { own, made } = start();
+    made.join('ab'.repeat(16));
+    vi.advanceTimersByTime(5000);
+    expect(own.refreshed).toBeGreaterThanOrEqual(1);
+    const before = own.refreshed;
+    await made.close();
+    vi.advanceTimersByTime(30000);
+    expect(own.refreshed).toBe(before);
+  });
+});
 
 describe('sync engine', () => {
   it('joins the room topic on start', () => {
