@@ -2,7 +2,9 @@
 /**
  * Two devices vote: starts two copies of the vote starter, joins the second to
  * the first by invite code, votes once on each (with the second's backend paused while the first votes) and passes only when both show
- * Tea (1), Coffee (1), Water (0). CI runs it in the Starter / web job; by hand:
+ * Tea (1), Coffee (1), Water (0). It then saves worklet/vote-plugin.ts (a vote
+ * counts 2) and passes only when both pages reload, reconnect and show Tea (2)
+ * after one click. CI runs it in the Starter / web job; by hand:
  * `node .github/scripts/starter-vote-journey.mjs <fresh starter copy>` after
  * `npm ci` at the repo root and in the copy. It reads the starter's visible
  * text (button names, status line, Join box label): renaming those means
@@ -33,7 +35,8 @@ const SYNCED = 30;
 const PAUSED = 25;
 const PEER_LOST = 60;
 const CAUGHT_UP = 30;
-const OVERALL = 475; // the budgets above add up to 460 s
+const WORKLET = 30;
+const OVERALL = 535; // the budgets above add up to 520 s
 const KILL_GRACE_MS = 5000;
 const LOG_LINES = 60;
 
@@ -342,6 +345,60 @@ async function run() {
     return true;
   }, SYNCED);
   if (!synced) return false;
+  passed();
+
+  begin(
+    'worklet',
+    'both pages to reload at Tea (0) and Coffee (0), reconnect, and show Tea (2) after one click',
+  );
+  const file = path.join(dir, 'worklet', 'vote-plugin.ts');
+  const before = '(mine.get(args.id) ?? 0) + 1';
+  const source = fs.readFileSync(file, 'utf8');
+  if (source.split(before).length !== 2) {
+    wanted = `"${before}" exactly once in worklet/vote-plugin.ts`;
+    return false;
+  }
+  const running = (server) =>
+    server.lines.filter((line) =>
+      line.includes('[vote] worklet running on this computer'),
+    ).length;
+  const seen = { a: running(servers.a), b: running(servers.b) };
+  // A reloaded page has lost this mark.
+  for (const page of Object.values(pages)) {
+    await page.evaluate(() => {
+      window.beforeSave = true;
+    });
+  }
+  fs.writeFileSync(
+    file,
+    source.replace(before, '(mine.get(args.id) ?? 0) + 2'),
+  );
+  const reloaded = await until(async () => {
+    if (running(servers.a) <= seen.a || running(servers.b) <= seen.b) {
+      return false;
+    }
+    for (const page of Object.values(pages)) {
+      if (await page.evaluate(() => window.beforeSave).catch(() => true)) {
+        return false;
+      }
+      for (const name of ['Tea (0)', 'Coffee (0)']) {
+        if (!(await buttonShown(page, name))) return false;
+      }
+      if (!(await status(page)).includes('1 other device connected')) {
+        return false;
+      }
+    }
+    return true;
+  }, WORKLET);
+  if (!reloaded) return false;
+  await pages.a.getByRole('button', { name: 'Tea (0)', exact: true }).click();
+  const counted = await until(
+    async () =>
+      (await buttonShown(pages.a, 'Tea (2)')) &&
+      (await buttonShown(pages.b, 'Tea (2)')),
+    WORKLET,
+  );
+  if (!counted) return false;
   passed();
   return true;
 }
