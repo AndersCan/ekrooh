@@ -73,7 +73,12 @@ class MainActivity : AppCompatActivity() {
                 val up = devServerAnswers(BuildConfig.DEV_SERVER_URL)
                 mainHandler.post {
                     if (!isDestroyed) {
-                        if (up) startDev() else startBundled()
+                        if (up) {
+                            startDev()
+                        } else {
+                            Log.w("BARE_KOTLIN", "Dev server did not answer; loading the bundled page")
+                            startBundled()
+                        }
                     }
                 }
             }.start()

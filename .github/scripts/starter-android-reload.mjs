@@ -211,7 +211,9 @@ if (result) {
   console.log('starter android reload: PASS');
 } else {
   let pageText = '(no page yet)';
+  let pageUrl = '(no page yet)';
   if (page) {
+    pageUrl = page.url();
     pageText = await page
       .locator('#app')
       .innerText({ timeout: 2000 })
@@ -219,6 +221,7 @@ if (result) {
       .catch(() => '(page not readable)');
   }
   let logcat = '(adb logcat failed)';
+  let appLog = '(adb logcat failed)';
   let adbState = '(adb not answering)';
   try {
     const sockets = adbQuick('shell', 'cat', '/proc/net/unix')
@@ -243,12 +246,21 @@ if (result) {
   } catch (error) {
     logcat += ` ${String(error.message).split('\n')[0]}`;
   }
+  try {
+    appLog = adbQuick('logcat', '-d', '-s', 'BARE_KOTLIN:*')
+      .split('\n')
+      .slice(-LOG_LINES)
+      .join('\n');
+  } catch (error) {
+    appLog += ` ${String(error.message).split('\n')[0]}`;
+  }
   console.error(
     `starter android reload: FAIL at ${stage} after ${seconds()} s: ${wanted}\n` +
-      `page: ${pageText}\n` +
+      `page: ${pageText}\npage url: ${pageUrl}\n` +
       (stage === 'attach' ? `last attach error: ${attachError}\n` : '') +
       `--- adb ---\n${adbState}\n` +
       `--- logcat (last ${LOG_LINES} lines) ---\n${logcat}\n` +
+      `--- app log BARE_KOTLIN (last ${LOG_LINES} lines) ---\n${appLog}\n` +
       `--- node scripts/dev.mjs (last ${LOG_LINES} lines) ---\n${lines.slice(-LOG_LINES).join('\n')}`,
   );
 }
