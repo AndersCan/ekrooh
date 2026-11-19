@@ -413,11 +413,27 @@ async function walk() {
     return false;
   done();
 
+  // Start Here tells a developer to open the Simulator before syncing: boot now, step 5 waits for what is left.
+  const booting = [];
+  if (ios) {
+    // Boot the iPhone Simulators the runner image ships instead of creating new ones.
+    const listing = JSON.parse(simctl('list', '--json').stdout);
+    const picked = pickIphone(listing);
+    const installed = installedIphone(listing, picked.runtime);
+    if (!installed) {
+      current.wanted = `an installed iPhone Simulator on ${picked.runtime}`;
+      return false;
+    }
+    simctl('shutdown', 'all');
+    udids.push(installed.udid);
+    booting.push(...udids.map(startBoot));
+  }
+
   begin(2, 'npm run sync', 'doc', 'npm run sync to finish');
   if (
     !(await finish(
       run('npm', ['run', 'sync'], { cwd: dir }),
-      SYNC,
+      ios ? BOOT_IOS : SYNC,
       'npm run sync',
     ))
   )
@@ -475,21 +491,10 @@ async function walk() {
 
     begin(
       5,
-      'create and boot the Simulator (Xcode device menu)',
+      'Simulator boot, started before sync (Xcode device menu)',
       'stand-in',
       'the Simulator to finish booting',
     );
-    // Boot the iPhone Simulators the runner image ships instead of creating new ones.
-    const listing = JSON.parse(simctl('list', '--json').stdout);
-    const picked = pickIphone(listing);
-    const installed = installedIphone(listing, picked.runtime);
-    if (!installed) {
-      current.wanted = `an installed iPhone Simulator on ${picked.runtime}`;
-      return false;
-    }
-    simctl('shutdown', 'all');
-    udids.push(installed.udid);
-    const booting = udids.map(startBoot);
     for (const [index, state] of booting.entries())
       if (!(await finish(state, BOOT_IOS, `bootstatus ${udids[index]}`)))
         return false;

@@ -103,6 +103,13 @@ The first connection goes over the public network and can take a minute. If
 the status says "Still looking for the other device", wait a little, then
 restart both (votes start from zero after a restart).
 
+Measured on GitHub's 3-vCPU Mac runner with the Simulator opened before
+`npm run sync`, over two passing runs: your own steps from degit to the vote
+showing on the iPhone and a browser page took 490 and 536 s (815 and 961 s
+in all; the rest is the test robot starting up). The Simulator finished
+booting during `npm run sync` (154 and 187 s), which slowed sync to 212 and
+228 s. Allow up to ten minutes.
+
 ### Two iPhone Simulators (Mac only)
 
 Follow the iOS Simulator steps above, with these changes:
@@ -111,6 +118,8 @@ Follow the iOS Simulator steps above, with these changes:
   File > Open Simulator and pick a different iPhone. Both start at the same
   time.
 
+1. Open `ios/Vote.xcodeproj` in Xcode. The first open downloads packages,
+   which takes a few minutes.
 2. Pick one iPhone Simulator and press Run. Then pick a different iPhone and
    press Run again. Xcode closes Vote on the first Simulator: open it again from
    that Simulator's home screen. Both show Tea (0) Coffee (0) Water (0).
@@ -119,10 +128,8 @@ Follow the iOS Simulator steps above, with these changes:
    devices connected".
 4. Vote Tea on one Simulator: Tea goes up on both.
 
-Measured on GitHub's 3-vCPU Mac runner, from degit to the vote showing on both
-Simulators: 364 and 1734 s over two passing runs, of which 192 and 1075 s was
-the developer's own path (the rest is the test robot starting up). The first
-Simulator start took 80 to 587 s. Allow up to half an hour.
+The automated check runs one iPhone and the vote page in a browser, not two
+Simulators, so no time is measured for this path.
 
 ## Next
 
