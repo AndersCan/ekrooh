@@ -17,13 +17,12 @@ import { attachTry, within } from './starter-android-attach.mjs';
 
 // Budgets in seconds. Every wait is on what the page shows, never a sleep.
 const DEV = 90;
-const VITE = 30;
 const INSTALL = 120;
 const ATTACH = 120;
 const DEVPAGE = 60;
 const VOTE = 15;
 const RELOAD = 20;
-const OVERALL = 460; // the budgets above add up to 455 s
+const OVERALL = 430; // the budgets above add up to 425 s
 const KILL_GRACE_MS = 5000;
 const ATTEMPT_MS = 15000; // one attach try; a hung adb call must not eat the budget
 const REPORT_ADB_MS = 20000;
@@ -146,23 +145,6 @@ async function run() {
   if (!up) return false;
   passed();
 
-  // The debug app asks the dev server for /@vite/client once, with a 2 s read
-  // timeout, and loads the bundled page (not the dev page) when that fails.
-  // "vote ready" prints before Vite has served it, so serve it once here first.
-  begin('vite', 'http://127.0.0.1:5173/@vite/client to answer 200');
-  const served = await until(
-    () =>
-      fetch('http://127.0.0.1:5173/@vite/client', {
-        signal: AbortSignal.timeout(5000),
-      }).then(
-        (response) => response.status === 200,
-        () => false,
-      ),
-    VITE,
-  );
-  if (!served) return false;
-  passed();
-
   begin('install', 'the debug APK to install and start');
   adb('install', '-r', apk);
   adb('shell', 'am', 'start', '-n', `${PKG}/.MainActivity`);
@@ -239,6 +221,7 @@ if (result) {
       .catch(() => '(page not readable)');
   }
   let logcat = '(adb logcat failed)';
+  let appLog = '(adb logcat failed)';
   let adbState = '(adb not answering)';
   try {
     const sockets = adbQuick('shell', 'cat', '/proc/net/unix')
@@ -263,12 +246,21 @@ if (result) {
   } catch (error) {
     logcat += ` ${String(error.message).split('\n')[0]}`;
   }
+  try {
+    appLog = adbQuick('logcat', '-d', '-s', 'BARE_KOTLIN:*')
+      .split('\n')
+      .slice(-LOG_LINES)
+      .join('\n');
+  } catch (error) {
+    appLog += ` ${String(error.message).split('\n')[0]}`;
+  }
   console.error(
     `starter android reload: FAIL at ${stage} after ${seconds()} s: ${wanted}\n` +
       `page: ${pageText}\npage url: ${pageUrl}\n` +
       (stage === 'attach' ? `last attach error: ${attachError}\n` : '') +
       `--- adb ---\n${adbState}\n` +
       `--- logcat (last ${LOG_LINES} lines) ---\n${logcat}\n` +
+      `--- app log BARE_KOTLIN (last ${LOG_LINES} lines) ---\n${appLog}\n` +
       `--- node scripts/dev.mjs (last ${LOG_LINES} lines) ---\n${lines.slice(-LOG_LINES).join('\n')}`,
   );
 }
