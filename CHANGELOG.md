@@ -9,9 +9,14 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.8.0] - 2026-11-19
 
+This release changes how `Sync.publish` behaves when `storage` is set (see the
+"Can break" entry under Changed), and in 0.x a breaking change bumps the minor
+version (as 0.7.0 did).
+
 ### Fixed
 
 - The page transport starts over on the next request after a `/login` that only timed out (the server answered late and left a session cookie), instead of staying on "Connecting…" until the app is foregrounded. A rejected `/login` still stays given up.
+- An invoke timeout always rejects: the messenger bounds its read of the log-tail response body, so a stalled body no longer leaves the call hanging.
 
 ### Added
 
