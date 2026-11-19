@@ -11,8 +11,8 @@ declare const Bare: { argv?: string[]; exit(code: number): void };
 /**
  * Two-peer smoke for `@ekrooh/bare/sync` under `bare`, on a local DHT
  * bootstrapper (no network). Checks: (S1) two devices exchange values,
- * (S2) a device recreated from the same storage keeps its room and peer id
- * and the other side ends with exactly two values, (S3) a bad invite is an
+ * (S2) a device recreated from the same storage keeps its room, peer id and
+ * last published value, and the other side ends with exactly two values, (S3) a bad invite is an
  * error value. Prints `[sync-smoke] ok` and exits 0, or exits 1.
  * Config: `<dir>` (a directory with `a/` and `b/` subdirectories).
  */
@@ -110,7 +110,14 @@ async function run() {
     await b.close();
     b = make('b');
     if (b.invite() !== room) throw new Error('S2 room not kept');
-    if (b.values().length !== 0) throw new Error('S2 unexpected values');
+    const restored = b.values();
+    if (
+      restored.length !== 1 ||
+      restored[0]?.self !== true ||
+      restored[0]?.value.n !== 2
+    ) {
+      throw new Error(`S2 value not restored: ${JSON.stringify(restored)}`);
+    }
     b.publish({ n: 5 });
     if (b.values()[0]?.peer !== bPeer) throw new Error('S2 peer id changed');
     await until('S2 reconnect', CONNECT_BUDGET * 2, () => totalOf(a) === 6);
