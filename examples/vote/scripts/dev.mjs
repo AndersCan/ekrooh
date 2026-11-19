@@ -11,6 +11,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
+import { createBundleRoute } from './worklet-bundle.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // `npm run dev:second` starts a second copy beside the first, on other ports,
@@ -127,6 +128,44 @@ async function backendAnswers(child) {
   return false;
 }
 
+// The Android debug app fetches the packed worklet from the dev server.
+const bundleRoute = createBundleRoute();
+const packedAndroid = path.join(
+  root,
+  '.dev-storage',
+  'worklet',
+  'android.bundle',
+);
+let packChain = Promise.resolve();
+
+/** Packs the built worklet for Android and publishes it; keeps the old one on failure. */
+function packAndroid() {
+  packChain = packChain.then(
+    () =>
+      new Promise((resolve) => {
+        fs.mkdirSync(path.dirname(packedAndroid), { recursive: true });
+        const child = spawn(
+          process.execPath,
+          [
+            path.join(root, 'node_modules', 'bare-pack', 'bin.js'),
+            '--preset',
+            'android',
+            '--out',
+            packedAndroid,
+            outfile,
+          ],
+          { stdio: 'ignore' },
+        );
+        child.once('error', () => resolve());
+        child.once('exit', (code) => {
+          if (code === 0) bundleRoute.set(fs.readFileSync(packedAndroid));
+          else console.log('[vote] Packing the worklet for Android failed.');
+          resolve();
+        });
+      }),
+  );
+}
+
 function scheduleRestart() {
   if (restartTimer) clearTimeout(restartTimer);
   restartTimer = setTimeout(() => {
@@ -147,8 +186,10 @@ const worklet = await context({
       name: 'restart-bare-on-build',
       setup(build) {
         build.onEnd((result) => {
-          if (result.errors.length === 0) scheduleRestart();
-          else
+          if (result.errors.length === 0) {
+            scheduleRestart();
+            if (!second) packAndroid();
+          } else
             console.log(
               '[vote] Worklet build failed; keeping the old backend.',
             );
@@ -166,6 +207,16 @@ server = await createServer({
   // 127.0.0.1: the Android emulator reaches this computer's 127.0.0.1 as 10.0.2.2.
   // The port must match DEV_SERVER_URL in android/app/build.gradle.
   server: { host: '127.0.0.1', port: pagePort, strictPort: true },
+  plugins: second
+    ? []
+    : [
+        {
+          name: 'worklet-bundle',
+          // Before Vite's own middlewares, so the page fallback never answers it.
+          configureServer: (viteServer) =>
+            void viteServer.middlewares.use(bundleRoute.handle),
+        },
+      ],
 });
 try {
   await server.listen();
