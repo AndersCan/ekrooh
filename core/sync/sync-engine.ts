@@ -89,7 +89,6 @@ export function createSyncWith<T>(
     const [encodeError, line] = encodeSyncLine(selfValue);
     if (encodeError === null) {
       selfLine = line;
-      console.log("[sync] restored this device's saved value");
     } else {
       selfValue = undefined;
     }

@@ -415,6 +415,22 @@ describe('sync engine saved value', () => {
     const a = start('');
     expect(a.sync.publish({ tea: 1 })[0]).toBeNull();
     expect(fs.readdirSync(dir)).toEqual([]);
+    expect(fs.existsSync('ekrooh-sync-values.json')).toBe(false);
+  });
+
+  it('drops a restored value it cannot send', () => {
+    fs.writeFileSync(
+      valuesFile(),
+      JSON.stringify({ version: 1, self: { tea: 1 } }),
+    );
+    const s = new FakeSwarm();
+    const [error, made] = createSyncWith<Counts>(
+      { parse: () => ({ tea: 1n }) as never, storage: dir },
+      { createSwarm: () => s },
+    );
+    expect(error).toBeNull();
+    expect(made!.values()).toEqual([]);
+    expect(s.connect(2).written).toEqual([]);
   });
 
   it('does not save a value that cannot be encoded', () => {

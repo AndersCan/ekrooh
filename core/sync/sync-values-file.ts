@@ -25,11 +25,7 @@ export function loadSelfValue<T>(
   let value: T | undefined;
   try {
     const record: unknown = JSON.parse(text);
-    if (
-      typeof record === 'object' &&
-      record !== null &&
-      (record as { version?: unknown }).version === 1
-    ) {
+    if ((record as { version?: unknown }).version === 1) {
       value = parse((record as { self?: unknown }).self);
     }
   } catch {
