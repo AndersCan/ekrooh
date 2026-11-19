@@ -48,10 +48,7 @@ export interface SwarmPort {
   keyPair: { publicKey: Uint8Array };
   on(event: 'connection', cb: (conn: ConnPort) => void): unknown;
   on(event: 'error', cb: (error: unknown) => void): unknown;
-  join(
-    topic: Buffer,
-    opts: { server: boolean; client: boolean },
-  ): { refresh?(): unknown } | void;
+  join(topic: Buffer, opts: { server: boolean; client: boolean }): unknown;
   leave(topic: Buffer): unknown;
   destroy(): unknown;
 }
@@ -62,9 +59,6 @@ type Peer<T> = {
   value: T | undefined;
   warned: Set<string>;
 };
-
-/** How often a device with no connections looks its room up again. */
-const REDISCOVER_MS = 5000;
 
 /** Most devices a room remembers; matches the swarm's maxPeers. */
 const MAX_PEERS = 16;
@@ -131,21 +125,9 @@ export function createSyncWith<T>(
     console.warn(message);
   };
 
-  // The swarm retries a lost device at about 1, 5 and 15 s, then waits for the
-  // next lookup, 10+ minutes away: a device that was away longer than that
-  // stayed unseen. While nothing is connected, look the room up again.
-  let discovery: { refresh?(): unknown } | void;
-  let rediscover: ReturnType<typeof setInterval> | undefined;
-
   const joinTopic = () => {
-    discovery = swarm.join(topic, { server: true, client: true });
+    swarm.join(topic, { server: true, client: true });
     console.log(`[sync] in room ${room.slice(0, 4)}…`);
-    clearInterval(rediscover);
-    rediscover = setInterval(() => {
-      if (closed || connected() > 0) return;
-      Promise.resolve(discovery?.refresh?.()).catch(() => {});
-    }, REDISCOVER_MS);
-    rediscover.unref?.();
   };
 
   swarm.on('error', () => {});
@@ -278,7 +260,6 @@ export function createSyncWith<T>(
     async close() {
       if (closed) return;
       closed = true;
-      clearInterval(rediscover);
       listeners.clear();
       await Promise.resolve(swarm.destroy()).catch(() => {});
     },

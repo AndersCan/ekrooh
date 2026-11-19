@@ -29,7 +29,7 @@ const CONNECTED = 120;
 const VOTE = 15;
 const SYNCED = 30;
 // Phone B's backend stays paused this long: past the swarm's retries of a lost
-// device (about 1, 5 and 15 s), so only a new room lookup finds it again.
+// device (about 1, 5 and 15 s).
 const PAUSED = 25;
 const PEER_LOST = 60;
 const CAUGHT_UP = 30;

@@ -9,7 +9,6 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- A device whose other device was away for more than about 20 s finds it again within 5 s of it coming back, instead of at the swarm's next room lookup 10+ minutes later: with no device connected, `createSync` looks the room up again every 5 s.
 - The page transport starts over on the next request after a `/login` that only timed out (the server answered late and left a session cookie), instead of staying on "Connecting…" until the app is foregrounded. A rejected `/login` still stays given up.
 
 ### Added
