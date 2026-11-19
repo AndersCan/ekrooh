@@ -7,6 +7,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-19
+
 ### Fixed
 
 - The page transport starts over on the next request after a `/login` that only timed out (the server answered late and left a session cookie), instead of staying on "Connecting…" until the app is foregrounded. A rejected `/login` still stays given up.
