@@ -433,7 +433,7 @@ async function walk() {
   if (
     !(await finish(
       run('npm', ['run', 'sync'], { cwd: dir }),
-      SYNC,
+      ios ? BOOT_IOS : SYNC,
       'npm run sync',
     ))
   )
