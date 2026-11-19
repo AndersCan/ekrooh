@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Two devices vote: starts two copies of the vote starter, joins the second to
- * the first by invite code, votes once on each and passes only when both show
+ * the first by invite code, votes once on each (with the second offline while the first votes) and passes only when both show
  * Tea (1), Coffee (1), Water (0). CI runs it in the Starter / web job; by hand:
  * `node .github/scripts/starter-vote-journey.mjs <fresh starter copy>` after
  * `npm ci` at the repo root and in the copy. It reads the starter's visible
@@ -28,7 +28,8 @@ const JOIN = 15;
 const CONNECTED = 120;
 const VOTE = 15;
 const SYNCED = 30;
-const OVERALL = 345; // the budgets above add up to 330 s
+const CAUGHT_UP = 30;
+const OVERALL = 375; // the budgets above add up to 360 s
 const KILL_GRACE_MS = 5000;
 const LOG_LINES = 60;
 
@@ -153,6 +154,7 @@ async function roomFound(room) {
 
 const servers = { a: startServer([]), b: startServer(['--second']) };
 let pages = null;
+let contexts = null;
 const pageErrors = [];
 
 async function pageText(page) {
@@ -210,10 +212,8 @@ async function run() {
   passed();
 
   begin('ready', 'both pages to show Tea (0) and an invite code');
-  pages = {
-    a: await (await browser.newContext()).newPage(),
-    b: await (await browser.newContext()).newPage(),
-  };
+  contexts = { a: await browser.newContext(), b: await browser.newContext() };
+  pages = { a: await contexts.a.newPage(), b: await contexts.b.newPage() };
   for (const page of Object.values(pages)) {
     page.on('pageerror', (error) => pageErrors.push(error.message));
   }
@@ -271,11 +271,21 @@ async function run() {
   if (!connected) return false;
   passed();
 
+  // Phone B loses its network, phone A votes, B comes back and must show the vote.
+  begin('offline vote', 'page B to show Tea (1) after coming back online');
+  await contexts.b.setOffline(true);
+  await pages.a.getByRole('button', { name: 'Tea (0)', exact: true }).click();
+  if (!(await until(() => buttonShown(pages.a, 'Tea (1)'), VOTE))) return false;
+  await contexts.b.setOffline(false);
+  if (!(await until(() => buttonShown(pages.b, 'Tea (1)'), CAUGHT_UP))) {
+    return false;
+  }
+  passed();
+
   begin(
     'vote',
-    'Tea (1) on page A and Coffee (1) on page B after one click each',
+    'Coffee (1) on page B after one click, Tea (1) still on page A',
   );
-  await pages.a.getByRole('button', { name: 'Tea (0)', exact: true }).click();
   await pages.b
     .getByRole('button', { name: 'Coffee (0)', exact: true })
     .click();

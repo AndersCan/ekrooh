@@ -136,7 +136,7 @@ jobs:
           npm run build
 
       - name: Two devices vote
-        timeout-minutes: 6
+        timeout-minutes: 7
         run: node .github/scripts/starter-vote-journey.mjs "$STARTER_DIR"
 
   android:
