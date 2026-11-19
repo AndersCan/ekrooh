@@ -3,3 +3,8 @@ export function backendPort(search: string, fallback: number | string): string {
   const backend = new URLSearchParams(search).get('backend');
   return backend && /^\d{1,5}$/.test(backend) ? backend : String(fallback);
 }
+
+/** A page without a valid `?backend=` is not inside a debug app, so it reloads itself. */
+export function reloadsItself(search: string): boolean {
+  return backendPort(search, '') === '';
+}
