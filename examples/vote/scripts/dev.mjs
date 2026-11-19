@@ -154,12 +154,11 @@ function packAndroid() {
             packedAndroid,
             outfile,
           ],
-          { stdio: 'ignore' },
+          { cwd: root, stdio: 'inherit' },
         );
         child.once('error', () => resolve());
         child.once('exit', (code) => {
           if (code === 0) bundleRoute.set(fs.readFileSync(packedAndroid));
-          else console.log('[vote] Packing the worklet for Android failed.');
           resolve();
         });
       }),
