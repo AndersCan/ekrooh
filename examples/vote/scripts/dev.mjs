@@ -6,8 +6,8 @@
 import { context } from 'esbuild';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import net from 'node:net';
 import { createRequire } from 'node:module';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
@@ -79,11 +79,16 @@ function stopBare() {
 async function startBare() {
   await stopBare();
   if (shuttingDown) return;
+  const portTaken = await portAnswers();
   bareProcess = spawn(bareExecutable, [outfile, ...appArgs], {
     stdio: 'inherit',
   });
-  const started = Date.now();
-  const child = bareProcess;
+  if (portTaken) return;
+  void announceWhenReady(bareProcess, Date.now());
+}
+
+/** Reloads browser pages once this backend answers, unless a newer one replaced it. */
+async function announceWhenReady(child, started) {
   if (await backendAnswers(child)) {
     console.log(
       `[vote] worklet running on this computer (${((Date.now() - started) / 1000).toFixed(1)} s)`,
@@ -94,20 +99,29 @@ async function startBare() {
   }
 }
 
+/** True when something already listens on the backend port. */
+function portAnswers() {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port: backendPort });
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => resolve(false));
+  });
+}
+
 /** True once the backend accepts connections; false if it exits or 15 s pass. */
 async function backendAnswers(child) {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null || child.signalCode !== null) return false;
-    const answered = await new Promise((resolve) => {
-      const socket = net.connect({ host: '127.0.0.1', port: backendPort });
-      socket.once('connect', () => {
-        socket.destroy();
-        resolve(true);
-      });
-      socket.once('error', () => resolve(false));
-    });
-    if (answered) return true;
+    if (
+      child !== bareProcess ||
+      child.exitCode !== null ||
+      child.signalCode !== null
+    )
+      return false;
+    if (await portAnswers()) return true;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;
@@ -172,6 +186,9 @@ try {
 server.printUrls();
 console.log(
   `vote ready: http://localhost:${pagePort} (browser)${second ? '' : ` and http://10.0.2.2:${pagePort} (Android emulator debug app)`}`,
+);
+console.log(
+  'Saving worklet/ restarts the app backend on this computer and reloads browser pages (votes start from zero). A new native package needs npm run sync.',
 );
 
 async function shutdown() {
