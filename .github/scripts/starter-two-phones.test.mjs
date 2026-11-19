@@ -1,6 +1,7 @@
 // Run: node --test .github/scripts/starter-two-phones.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -301,4 +302,34 @@ test('a timed-out device list shows the error instead of an empty section', () =
       'Error: spawnSync ETIMEDOUT',
     ],
   );
+});
+
+test('an adb call to a device that never comes is stopped, so the failure report prints', () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'adb-hang-'));
+  // `adb logcat` with no device prints "- waiting for device -" and waits.
+  fs.writeFileSync(
+    path.join(bin, 'adb'),
+    '#!/bin/sh\necho "- waiting for device -" >&2\nexec sleep 30\n',
+    { mode: 0o755 },
+  );
+  const adbSource = pick(/const adb = [\s\S]*?\n  }\);\n/).replace(
+    'ADB_LIMIT_MS',
+    '300',
+  );
+  // spawnSync blocks the event loop, so the call runs in its own process.
+  const report = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `import { spawnSync } from 'node:child_process';\n${adbSource}console.log(JSON.stringify(adb('emulator-5554', 'logcat', '-d').stdout));`,
+    ],
+    {
+      encoding: 'utf8',
+      timeout: 5000,
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    },
+  );
+  assert.equal(report.error, undefined);
+  assert.equal(report.stdout.trim(), '""');
 });

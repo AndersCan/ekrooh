@@ -296,8 +296,14 @@ function launchDump(udid, launchLines, listed, udids, load) {
 const simctl = (...rest) =>
   spawnSync('xcrun', ['simctl', ...rest], { encoding: 'utf8' });
 
+// A walk that failed before the emulators booted still reports through adb;
+// without a limit one call to a missing device holds the job until its timeout.
+const ADB_LIMIT_MS = 30_000;
 const adb = (serial, ...rest) =>
-  spawnSync('adb', ['-s', serial, ...rest], { encoding: 'utf8' });
+  spawnSync('adb', ['-s', serial, ...rest], {
+    encoding: 'utf8',
+    timeout: ADB_LIMIT_MS,
+  });
 
 const emulators = [];
 // Simulator UDIDs, filled by step 5 on iOS.
