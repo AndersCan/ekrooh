@@ -42,8 +42,8 @@ and nothing you need to think about once it works.
   says so clearly instead of failing silently.
 - **Ready-made native hosts.** An Android library on Maven Central and an iOS
   Swift package start your app's backend and connect it to the UI.
-- **Private by default.** The app talks to its own backend on the device, and
-  nothing else can.
+- **Private by default.** The backend on the device only answers your app:
+  every request needs a per-session token.
 - **Peer-to-peer ready.** Bare comes from the Holepunch p2p ecosystem, so your
   app can sync directly between devices.
 - **A working reference app** for web, Android, iOS, and desktop to copy from.
@@ -53,9 +53,9 @@ your existing Vite app.
 
 ## Platforms
 
-| Android     | iOS         | Web         | Desktop           |
-| ----------- | ----------- | ----------- | ----------------- |
-| first-class | first-class | first-class | reference (macOS) |
+| Android     | iOS         | Web         | Desktop                  |
+| ----------- | ----------- | ----------- | ------------------------ |
+| first-class | first-class | first-class | reference (macOS, Linux) |
 
 Details are in the [support matrix](https://anderscan.github.io/ekrooh/getting-started/architecture/#support-matrix).
 
@@ -83,8 +83,8 @@ details:
   [media](https://anderscan.github.io/ekrooh/guides/media/)
 - **Native hosts:** [Android](https://anderscan.github.io/ekrooh/hosts/android/),
   [iOS](https://anderscan.github.io/ekrooh/hosts/ios/),
-  [desktop](https://anderscan.github.io/ekrooh/consumers/desktop/),
   [using the Android AAR](https://anderscan.github.io/ekrooh/consumers/android-aar/)
+- **Desktop:** the [desktop reference app](https://github.com/AndersCan/ekrooh/tree/main/examples/desktop-app)
 - **Testing:** [how Ekrooh is tested](https://anderscan.github.io/ekrooh/hosts/testing/)
 
 About the project:

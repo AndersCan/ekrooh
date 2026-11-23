@@ -42,13 +42,13 @@ are opt-in plugins; the host handles them through a typed plugin registry.
 
 ## Support matrix
 
-| Runtime        | Status                         | Transport | Notes                                                                                           |
-| -------------- | ------------------------------ | --------- | ----------------------------------------------------------------------------------------------- |
-| Browser (dev)  | first-class                    | WebSocket | Vite + local backend (`VITE_BARE_WS_URL`)                                                       |
-| Browser (test) | first-class                    | Mock      | Deterministic Playwright runs                                                                   |
-| Android        | first-class                    | WebSocket | Same-origin loopback socket, cookie auth                                                        |
-| iOS            | first-class (reference parity) | WebSocket | Same-origin loopback socket, cookie auth; host ships as source (`ios/`, SPM) on the release tag |
-| Desktop        | reference (macOS)              | WebSocket | Zig host + system webview + sidecar `bare`; see [Desktop](../../consumers/desktop/)             |
+| Runtime        | Status                         | Transport | Notes                                                                                                                                      |
+| -------------- | ------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Browser (dev)  | first-class                    | WebSocket | Vite + local backend (`VITE_BARE_WS_URL`)                                                                                                  |
+| Browser (test) | first-class                    | Mock      | Deterministic Playwright runs                                                                                                              |
+| Android        | first-class                    | WebSocket | Same-origin loopback socket, cookie auth                                                                                                   |
+| iOS            | first-class (reference parity) | WebSocket | Same-origin loopback socket, cookie auth; host ships as source (`ios/`, SPM) on the release tag                                            |
+| Desktop        | reference (macOS, Linux)       | WebSocket | Zig host + system webview + sidecar `bare`; see [examples/desktop-app](https://github.com/AndersCan/ekrooh/tree/main/examples/desktop-app) |
 
 ## Parity policy
 
