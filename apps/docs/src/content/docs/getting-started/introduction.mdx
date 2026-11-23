@@ -48,7 +48,14 @@ not the runtime that implements it.
 - web/transports/ — `MessageTransport` plus WebSocket and mock transports
 - android/ — Android host **library** (`:bare-host`)
 - ios/ — iOS host **Swift package** (`BareHost`)
-- examples/ — reference app: web/, android-app/, ios-app/
+- examples/ — reference apps: web/, android-app/, ios-app/, desktop-app/, and
+  consumer-basic/ (a minimal consumer of the published package)
+- e2e/ — Playwright specs against the mock transport
+- scripts/ — dev runner, Playwright browser wrapper, prebuild fetcher
+- apps/docs/ — this documentation site (Astro Starlight, GitHub Pages)
+- templates/ — shared deploy templates
+- research/ — design notes
+- prebuilds/ — Bare Kit prebuilds (gitignored build output)
 
 </FileTree>
 

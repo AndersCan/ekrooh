@@ -1,156 +1,137 @@
-# @ekrooh/bare
+<p align="center">
+  <img src="apps/docs/src/assets/logo.svg" width="112" height="112" alt="Ekrooh logo: four rounded windows that each hold a quarter of one amber circle">
+</p>
 
-**One soul, many platforms.** One codebase and identity across Android, iOS,
-web, and desktop.
+<h1 align="center">Ekrooh</h1>
 
-**Docs: <https://anderscan.github.io/ekrooh>**
+<h3 align="center">The boring bootstrap for cross-platform apps</h3>
 
-[![CI](https://github.com/AndersCan/ekrooh/actions/workflows/test.yml/badge.svg)](https://github.com/AndersCan/ekrooh/actions/workflows/test.yml)
-[![Release](https://img.shields.io/github/v/release/AndersCan/ekrooh)](https://github.com/AndersCan/ekrooh/releases/latest)
+<p align="center">
+  <strong>One soul, many platforms.</strong> Write your app once as a web app and run it on Android, iOS, the web, and desktop.
+</p>
 
-The boring bootstrap for cross-platform apps on the Bare runtime (holepunch): a
-binary wire protocol, plugin kernel, RPC messenger, transports, and native host
-bridges, plus a reference app.
+<p align="center">
+  <a href="https://github.com/AndersCan/ekrooh/actions/workflows/test.yml"><img src="https://github.com/AndersCan/ekrooh/actions/workflows/test.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/AndersCan/ekrooh/releases/latest"><img src="https://img.shields.io/github/v/release/AndersCan/ekrooh" alt="Release"></a>
+</p>
 
-- [`vision.md`](vision.md): what this project is and is not.
-- [`AGENTS.md`](AGENTS.md): how to develop it and the canonical commands.
+<p align="center">
+  <a href="https://anderscan.github.io/ekrooh"><strong>Documentation</strong></a> ·
+  <a href="https://anderscan.github.io/ekrooh/getting-started/start-here/">Start here</a> ·
+  <a href="vision.md">Vision</a>
+</p>
+
+---
+
+_Ek rooh_ means "one soul". The logo shows it: four windows (Android, iOS, web,
+desktop), each holding a piece of the same app.
+
+Every cross-platform app needs the same plumbing before it can do anything
+useful: start a backend on the device, connect the UI to it, and reach native
+features like the camera or the file picker. Ekrooh (`@ekrooh/bare`) is that
+plumbing, built on the [Bare runtime](https://github.com/holepunchto/bare). It
+is deliberately boring: stable contracts, the same behaviour on every platform,
+and nothing you need to think about once it works.
+
+## What you get
+
+- **One UI everywhere.** You write a normal web app. The same bundle runs in a
+  browser and inside the native app on each platform.
+- **Native features as plugins.** Camera, files, and permissions are plugins
+  you call the same way on every platform. A platform that can't do something
+  says so clearly instead of failing silently.
+- **Ready-made native hosts.** An Android library on Maven Central and an iOS
+  Swift package start your app's backend and connect it to the UI.
+- **Private by default.** The app talks to its own backend on the device, and
+  nothing else can.
+- **Peer-to-peer ready.** Bare comes from the Holepunch p2p ecosystem, so your
+  app can sync directly between devices.
+- **A working reference app** for web, Android, iOS, and desktop to copy from.
+
+Ekrooh is not a UI framework or a build tool. Bring your own UI library and
+your existing Vite app.
+
+## Platforms
+
+| Android     | iOS         | Web         | Desktop           |
+| ----------- | ----------- | ----------- | ----------------- |
+| first-class | first-class | first-class | reference (macOS) |
+
+Details are in the [support matrix](https://anderscan.github.io/ekrooh/getting-started/architecture/#support-matrix).
+
+## Get started
+
+```bash
+npm install @ekrooh/bare
+```
+
+Then follow [Start here](https://anderscan.github.io/ekrooh/getting-started/start-here/),
+or go straight to the [web quickstart](https://anderscan.github.io/ekrooh/getting-started/web-quickstart/)
+or the [end-to-end quickstart](https://anderscan.github.io/ekrooh/consumers/end-to-end/)
+for Android and iOS.
+
+## Learn more
+
+The [documentation site](https://anderscan.github.io/ekrooh) has the technical
+details:
+
+- **How it works:** [introduction](https://anderscan.github.io/ekrooh/getting-started/introduction/)
+  and [architecture](https://anderscan.github.io/ekrooh/getting-started/architecture/)
+- **Core concepts:** [wire protocol](https://anderscan.github.io/ekrooh/core-concepts/wire-protocol/),
+  [plugins](https://anderscan.github.io/ekrooh/core-concepts/plugin-kernel/),
+  [loopback server and auth](https://anderscan.github.io/ekrooh/core-concepts/loopback-server-auth/),
+  [media](https://anderscan.github.io/ekrooh/guides/media/)
+- **Native hosts:** [Android](https://anderscan.github.io/ekrooh/hosts/android/),
+  [iOS](https://anderscan.github.io/ekrooh/hosts/ios/),
+  [desktop](https://anderscan.github.io/ekrooh/consumers/desktop/),
+  [using the Android AAR](https://anderscan.github.io/ekrooh/consumers/android-aar/)
+- **Testing:** [how Ekrooh is tested](https://anderscan.github.io/ekrooh/hosts/testing/)
+
+About the project:
+
+- [`vision.md`](vision.md): what Ekrooh is and is not.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): how to contribute.
-- [`RELEASING.md`](RELEASING.md): how to cut a release.
-- `docs/`: internal ADRs (`docs/adr/`) and agent operations; not the public site.
+- [`SECURITY.md`](SECURITY.md): how to report a vulnerability.
+- [`CHANGELOG.md`](CHANGELOG.md) and [`RELEASING.md`](RELEASING.md): releases.
+- [`docs/`](docs/): internal decision records (ADRs) and agent notes.
 
-## Model
+<details>
+<summary><strong>Developing Ekrooh</strong></summary>
 
-The frontend (browser or WebView) is written as if only a backend is reachable
-over a WebSocket carrying binary framed messages.
+[`AGENTS.md`](AGENTS.md) is the operating manual and has the
+[full command list](AGENTS.md#canonical-commands).
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the change workflow and the gate CI
+runs.
 
-- On device, the worklet runs one loopback HTTP+WS server that serves the web
-  app, media files, and the protocol socket. The page connects to
-  `ws://location.host`.
-- `VITE_TRANSPORT_MODE=mock` selects the mock transport (tests).
-- Browser dev points the WebSocket at the dev backend via `VITE_BARE_WS_URL`.
+### Setup
 
-The UI never branches on worklets, Bare, or host IPC. `@ekrooh/bare/core`
-describes the wire protocol, not the runtime that implements it.
+```bash
+vp install
+npm run playwright:install   # once, for e2e
+npm run prebuilds            # once, for Android and iOS (Node + unzip, no token)
+```
 
-| Term         | Meaning                                                                                          |
-| ------------ | ------------------------------------------------------------------------------------------------ |
-| **Frontend** | Web UI: Vite bundle in the browser, or the same bundle in a WebView.                             |
-| **Backend**  | Runs the core bundle and speaks the framed protocol with the frontend.                           |
-| **Host**     | Native shell (Android/iOS): starts the backend, owns system APIs, injects the session bootstrap. |
+### Common commands
 
-## Repository layout
+| Command                  | Purpose                                            |
+| ------------------------ | -------------------------------------------------- |
+| `npm run build:pkg`      | Compile the package to `dist/` (run first)         |
+| `vp check`               | Format, lint, type-check                           |
+| `vp test`                | Unit tests                                         |
+| `npm run test`           | Unit + Playwright e2e                              |
+| `npm run dev`            | Vite dev server + Bare backend (watch restart)     |
+| `npm run dev:mock`       | Vite with mock transport                           |
+| `npm run build:core`     | Bundle `core/main.core.ts` (esbuild)               |
+| `npm run build:web`      | Build `examples/web` into the Android app's assets |
+| `npm run build:ios`      | iOS inputs (addons, bundle, web assets, xcodegen)  |
+| `npm run docs:dev`       | Run the docs site locally                          |
+| `npm run docs:check`     | Docs gates (after `build:pkg`)                     |
+| `npm run smoke:loopback` | Smoke-test the loopback server under `bare`        |
 
-- `core/`: wire codec, plugin router, RPC messenger, host IPC (`core/messages`),
-  loopback server (`core/server`), worklet entry (`core/main.core.ts`).
-- `plugins/`: canonical plugins (`core.health`, `core.discovery`,
-  `core.permissions`, `vendor.media`) and typed event builders.
-- `web/transports/`: `MessageTransport`, WebSocket and mock transports.
-- `android/`: host library `:bare-host` (IPC coordinator, plugin registry, WebView client).
-- `ios/`: host Swift package `BareHost` (root `Package.swift`).
-- `examples/`: `web/`, `android-app/`, `ios-app/`, `consumer-basic/`.
-- `e2e/`: Playwright specs on the mock transport. `scripts/`: dev runner, Playwright wrapper, prebuild fetcher.
-- `apps/docs/`: public docs site (Astro Starlight, GitHub Pages).
-- `templates/`, `research/`: shared deploy templates; design notes.
-- `prebuilds/`: Bare Kit prebuilds (gitignored build output).
+### Android build
 
-The public surface is the `exports` map in `package.json` (`@ekrooh/bare/core`,
-`/runtime`, `/plugins`, `/plugins/*/events`, `/transports`). It points at
-compiled ESM and type declarations in `dist/` (built with `vp pack`). Consumers
-never see TypeScript source.
-
-## Support matrix
-
-| Runtime        | Status                         | Transport | Notes                                                                                           |
-| -------------- | ------------------------------ | --------- | ----------------------------------------------------------------------------------------------- |
-| Browser (dev)  | first-class                    | WebSocket | Vite + local backend (`VITE_BARE_WS_URL`)                                                       |
-| Browser (test) | first-class                    | Mock      | Deterministic Playwright runs                                                                   |
-| Android        | first-class                    | WebSocket | Same-origin loopback socket, cookie auth                                                        |
-| iOS            | first-class (reference parity) | WebSocket | Same-origin loopback socket, cookie auth; host ships as source (`ios/`, SPM) on the release tag |
-| Desktop        | reference (macOS)              | WebSocket | Zig host + system webview + sidecar `bare`; see `examples/desktop-app`                          |
-
-Parity policy: core protocol and plugin contracts are runtime-agnostic.
-Capabilities are opt-in plugins and may be runtime-specific. Plugins report
-unsupported behavior with deterministic errors. Feature code calls plugin
-events, never raw platform APIs.
-
-## Message protocol
-
-Binary frame: `version` (1 byte), `type` (1 byte), `headerLen` (2 bytes, BE),
-`payloadLen` (3 bytes, BE), `header` (UTF-8 JSON), `payload` (optional).
-Implemented by `MessageProtocol` in `core/messages` (`wire-codec.ts`).
-
-Header types: `DISPATCH`, `INVOKE_REQUEST`, `INVOKE_RESPONSE` (responses echo
-`requestId`). `dispatch` is fire-and-forget; `invoke` is request/response and
-timeout-bound.
-
-## Plugins
-
-Core ships no product features. Plugin IDs are namespaced (`app.photos`;
-`core.*` and `vendor.*` are reserved for the framework); events are
-plugin-local (`health.ping`). Runtime adapters: `web`, `android`, `ios`, `bare`.
-Canonical plugins are listed under Repository layout.
-
-Media never crosses the wire (frame cap 16 MiB). `vendor.media` is the reference
-for out-of-band bytes: the host picks or captures a file natively, the worklet
-mounts it on the loopback server and returns a URL, and the web layer loads that
-URL with cookie auth.
-
-## Loopback server and auth
-
-One server (`core/server/static-file-server.ts`) serves the web app at `/`, plugin
-media mounts, and the WebSocket upgrade. On device it binds `127.0.0.1` on an
-ephemeral port. Every request is gated by a per-session token:
-
-1. The shell injects `window.__ekrooh = { bootstrap }`, a single-use nonce (never the raw token).
-2. The page calls `POST /login` with the nonce and receives a
-   `bare_session_<port>` cookie (`HttpOnly; SameSite=Strict; Path=/`). The port
-   in the name keeps two loopback servers in one cookie store apart. The raw
-   token is never a login credential.
-3. The cookie authorizes `<img>`, `<video>`, `fetch`, and the WS upgrade.
-   Non-browser clients send `X-Bare-Token`. There is no `?token=` fallback
-   (see `docs/adr/0003-loopback-auth-surface.md`).
-
-Only the bootstrap mount at `/` is public pre-auth. The worklet writes
-`{ origin, port, bootstrap }` to `handoff.json` in the host's sandbox dir (never
-the session token); the host loads `http://127.0.0.1:<port>/index.html` and
-deletes the file.
-
-Every request must also target the bound loopback server (`Host`), and a page
-`Origin` must be that server or an explicitly allowed one, in every mode.
-
-The dev backend (`mode=dev`) runs the same bundle with auth off on
-`ws://localhost:8080`, allowing the Vite dev origin (`origin=` tokens).
-
-## Testing
-
-- Unit: vitest (`vp test`) for the codec, router, RPC messenger, transports;
-  JUnit for the Kotlin host; XCTest for the Swift host.
-- Type check: `tsc --noEmit`, part of `vp check`.
-- Integration: Playwright e2e on the mock transport (`npm run test:e2e:web`).
-  Browsers resolve through `scripts/playwright-local-browsers.mjs` into `.playwright-browsers/`.
-- Native: `npm run test:ios` runs the Swift XCTest suite and a UI test on the simulator.
-
-## Commands
-
-Canonical list: [`AGENTS.md`](AGENTS.md#canonical-commands). Common ones:
-
-| Command                      | Purpose                                            |
-| ---------------------------- | -------------------------------------------------- |
-| `vp check`                   | Format, lint, type-check                           |
-| `vp test`                    | Unit tests                                         |
-| `npm run test`               | Unit + Playwright e2e                              |
-| `npm run dev`                | Vite dev server + Bare backend (watch restart)     |
-| `npm run dev:mock`           | Vite with mock transport                           |
-| `npm run build:core`         | Bundle `core/main.core.ts` (esbuild)               |
-| `npm run build:web`          | Build `examples/web` into the Android app's assets |
-| `npm run build:ios`          | iOS inputs (addons, bundle, web assets, xcodegen)  |
-| `npm run prebuilds`          | Fetch Bare Kit prebuilds (hash-checked, no token)  |
-| `npm run playwright:install` | Download Chromium into `.playwright-browsers/`     |
-| `npm run smoke:loopback`     | Smoke-test the loopback server under `bare`        |
-
-## Android build
-
-Needs the Android SDK (`local.properties` with `sdk.dir=...`) and Bare Kit prebuilds.
+Needs the Android SDK (`local.properties` with `sdk.dir=...`) and Bare Kit
+prebuilds.
 
 ```bash
 vp install
@@ -161,20 +142,7 @@ npm run build       # core bundle + web assets
 
 `./gradlew build` also runs the host library's JUnit tests.
 
-### Consuming the published AAR
-
-`io.github.anderscan.ekrooh:bare-host` is on Maven Central (no credentials).
-Pin it to the same version as `@ekrooh/bare`:
-
-```gradle
-dependencies {
-  implementation "io.github.anderscan.ekrooh:bare-host:<version>"
-}
-```
-
-GitHub Packages is a fallback that requires a `read:packages` token. Prefer Maven Central.
-
-## iOS build
+### iOS build
 
 Needs Xcode, Bare Kit prebuilds, and `xcodegen`.
 
@@ -185,7 +153,11 @@ npm run build:ios
 npm run test:ios
 ```
 
-## Notes
+### Notes
 
 - Treat `examples/android-app/src/main/assets/` as build output. Vite clears
   hashed `assets/main-*.{js,css}` before rebuilding.
+- The repository layout is described in the
+  [introduction](https://anderscan.github.io/ekrooh/getting-started/introduction/#repository-layout).
+
+</details>
