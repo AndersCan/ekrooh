@@ -5,8 +5,9 @@ description: The macOS and Linux reference app runs the Bare backend and web UI 
 
 The desktop reference app,
 [`examples/desktop-app`](https://github.com/AndersCan/ekrooh/tree/main/examples/desktop-app),
-runs on macOS and Linux. A small Zig launcher starts the same Bare backend the
-Android and iOS hosts start and shows the same web UI in a system webview. The
+runs on macOS and Linux. A small Zig launcher starts a Bare backend built on
+the same `createWorkletRuntime` the Android and iOS hosts use, and shows the
+same web UI in a system webview. The
 built app needs **no Node, Bun or other runtime installed**.
 
 ## What ships
@@ -35,21 +36,24 @@ GTK 3 and WebKitGTK 4.1.
    only and navigates there. The page redeems the nonce with `POST /login`,
    the same [loopback auth](../../core-concepts/loopback-server-auth/) the
    mobile hosts use.
-5. When the window closes, the host closes stdin and the backend shuts down,
-   so a crashed host leaves no orphan.
+5. The backend exits when its stdin closes. The host closes it when the
+   window closes, and the OS closes it if the host crashes, so no backend is
+   left running.
 
-The window stays on the backend origin. Links to other sites open in the
-system browser.
+The window stays on the backend origin. A link the user clicks to another
+site opens in the system browser; any other off-origin navigation is
+cancelled.
 
 ## Build and run
 
-Needs `zig` >= 0.17 at build time and, on macOS, the Xcode command line tools
-or, on Linux, `libgtk-3-dev` and `libwebkit2gtk-4.1-dev`.
+Building needs `zig` >= 0.17, plus the Xcode command line tools on macOS or
+`libgtk-3-dev` and `libwebkit2gtk-4.1-dev` on Linux.
 
 ```sh
-npm run build:desktop     # add `-- --skip-web` to reuse the last web build
-open examples/desktop-app/dist/Ekrooh.app
-npm run smoke:desktop     # two-instance launch, handoff, crash and orphan checks
+npm run build:desktop                                     # add `-- --skip-web` to reuse the last web build
+open examples/desktop-app/dist/Ekrooh.app                 # macOS
+examples/desktop-app/dist/ekrooh-linux-<arch>/bin/ekrooh  # Linux
+npm run smoke:desktop                                     # two-instance launch, handoff, crash and orphan checks
 ```
 
 CI runs the smoke test on macOS (job `desktop`) and Linux (job
@@ -59,6 +63,7 @@ the [desktop app README](https://github.com/AndersCan/ekrooh/tree/main/examples/
 ## Not done yet
 
 - A Windows host.
+- Linux is verified in CI only.
 - Linux packages beyond the tarball (AppImage, .deb, Flatpak).
 - Developer ID signing and notarization (builds are ad-hoc signed).
 - Intel macOS is untested.

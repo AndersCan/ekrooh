@@ -35,11 +35,12 @@ stable, and behaves the same on every platform.
   browser and inside the native app on each platform.
 - **Native features as plugins.** Camera, files, and permissions are plugins
   you call the same way on every platform. On a platform whose host lacks a
-  feature, the call returns an `UNSUPPORTED_EVENT` error.
+  feature, the call returns an `UNSUPPORTED_CAPABILITY` error.
 - **Ready-made native hosts.** An Android library on Maven Central and an iOS
   Swift package start your app's backend and connect it to the UI.
-- **Private by default.** The backend on the device requires a per-session
-  token on every request, so other apps and websites can't call it.
+- **Private by default.** Every plugin call and every non-public file needs a
+  per-session token, so other apps and websites on the device can't call the
+  backend.
 - **Peer-to-peer ready.** Bare comes from the Holepunch p2p ecosystem, so your
   app can sync directly between devices.
 - **A working reference app** for web, Android, iOS, and desktop to copy from.
