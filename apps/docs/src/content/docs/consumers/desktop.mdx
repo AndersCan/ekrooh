@@ -1,31 +1,64 @@
 ---
 title: Desktop
-description: Desktop is contract-only — no adapter ships yet.
+description: The macOS and Linux reference app runs the Bare backend and web UI in a native window.
 ---
 
-The support matrix lists Desktop as **contract** — meaning the plugin
-contracts and wire protocol are runtime-agnostic, but **no desktop host
-adapter ships** with the framework.
+The desktop reference app,
+[`examples/desktop-app`](https://github.com/AndersCan/ekrooh/tree/main/examples/desktop-app),
+runs on macOS and Linux. A small Zig launcher starts the same Bare backend the
+Android and iOS hosts start and shows the same web UI in a system webview. The
+built app needs **no Node, Bun or other runtime installed**.
 
-## What exists
+## What ships
 
-- A consumer can run the **worklet backend** on desktop: the Bare runtime is
-  cross-platform (`bare` npm package + prebuilds), and `createWorkletRuntime`
-  runs identically under the CLI. Dev mode (`npm run dev`) already demonstrates
-  a desktop-capable loopback server + web UI in the browser.
-- The **frontend** is just a Vite page — it runs in any desktop webview or
-  browser.
+- A **Zig host** (`examples/desktop-app/src`) that opens a system webview
+  ([webview/webview](https://github.com/webview/webview): WebKit on macOS,
+  WebKitGTK on Linux).
+- A **sidecar `bare`** runtime that runs the packed backend,
+  `core/desktop.core.ts`, a `createWorkletRuntime` consumer with auth forced on.
+- The native addons the backend needs and the reference web build.
 
-## What's missing
+macOS builds an `Ekrooh.app` bundle. Linux builds a tarball
+(`dist/ekrooh-linux-<arch>.tar.gz` plus `.sha256`) that needs the system's
+GTK 3 and WebKitGTK 4.1.
 
-- A desktop **host**: an app shell that starts the worklet, injects the token,
-  and loads the loopback page — the desktop analog of the Android/iOS hosts.
-- Native capability adapters (pickers, permissions) as desktop plugins.
+## How it starts
 
-## Intent
+1. The host takes an exclusive lock on the storage directory, so a second
+   launch is a no-op.
+2. It spawns `bare desktop.bundle … port=0 handoff=<fd>` and keeps the
+   child's stdin open.
+3. The backend binds an ephemeral loopback port and writes
+   `{ origin, bootstrap }` as one JSON line to the handoff pipe. Nothing is
+   written to disk.
+4. The host injects `window.__ekrooh = { bootstrap }` on the backend's origin
+   only and navigates there. The page redeems the nonce with `POST /login`,
+   the same [loopback auth](../../core-concepts/loopback-server-auth/) the
+   mobile hosts use.
+5. When the window closes, the host closes stdin and the backend shuts down,
+   so a crashed host leaves no orphan.
 
-Per `vision.md`, desktop is out of scope for the framework; desktop hosts are
-expected to be **consumer/third-party work** following the same plugin
-contracts. If you need desktop for Justus, the pragmatic path is a thin host
-that reuses the loopback server + cookie auth from `core/runtime.ts` — the
-exact surface a `createWorkletRuntime` consumer already has.
+The window stays on the backend origin. Links to other sites open in the
+system browser.
+
+## Build and run
+
+Needs `zig` >= 0.17 at build time and, on macOS, the Xcode command line tools
+or, on Linux, `libgtk-3-dev` and `libwebkit2gtk-4.1-dev`.
+
+```sh
+npm run build:desktop     # add `-- --skip-web` to reuse the last web build
+open examples/desktop-app/dist/Ekrooh.app
+npm run smoke:desktop     # two-instance launch, handoff, crash and orphan checks
+```
+
+CI runs the smoke test on macOS (job `desktop`) and Linux (job
+`desktop-linux`). Host flags, storage paths and the hardening details are in
+the [desktop app README](https://github.com/AndersCan/ekrooh/tree/main/examples/desktop-app#readme).
+
+## Not done yet
+
+- A Windows host.
+- Linux packages beyond the tarball (AppImage, .deb, Flatpak).
+- Developer ID signing and notarization (builds are ad-hoc signed).
+- Intel macOS is untested.
