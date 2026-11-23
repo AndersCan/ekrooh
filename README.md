@@ -23,27 +23,23 @@
 
 ---
 
-_Ek rooh_ means "one soul". The logo shows it: four windows (Android, iOS, web,
-desktop), each holding a piece of the same app.
-
-Every cross-platform app needs the same plumbing before it can do anything
-useful: start a backend on the device, connect the UI to it, and reach native
-features like the camera or the file picker. Ekrooh (`@ekrooh/bare`) is that
-plumbing, built on the [Bare runtime](https://github.com/holepunchto/bare). It
-is deliberately boring: stable contracts, the same behaviour on every platform,
-and nothing you need to think about once it works.
+Ekrooh (`@ekrooh/bare`, from _ek rooh_, "one soul") starts a backend on the
+device, connects your web UI to it, and gives the UI native features like the
+camera and the file picker. It runs on the
+[Bare runtime](https://github.com/holepunchto/bare), keeps its contracts
+stable, and behaves the same on every platform.
 
 ## What you get
 
 - **One UI everywhere.** You write a normal web app. The same bundle runs in a
   browser and inside the native app on each platform.
 - **Native features as plugins.** Camera, files, and permissions are plugins
-  you call the same way on every platform. A platform that can't do something
-  says so clearly instead of failing silently.
+  you call the same way on every platform. On a platform whose host lacks a
+  feature, the call returns an `UNSUPPORTED_EVENT` error.
 - **Ready-made native hosts.** An Android library on Maven Central and an iOS
   Swift package start your app's backend and connect it to the UI.
-- **Private by default.** The backend on the device only answers your app:
-  every request needs a per-session token.
+- **Private by default.** The backend on the device requires a per-session
+  token on every request, so other apps and websites can't call it.
 - **Peer-to-peer ready.** Bare comes from the Holepunch p2p ecosystem, so your
   app can sync directly between devices.
 - **A working reference app** for web, Android, iOS, and desktop to copy from.
