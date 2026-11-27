@@ -4,7 +4,8 @@
  *
  * Gate A — Internal links. Every `slug:` in astro.config.mjs and every
  *          relative markdown link in a docs page resolves to a real content
- *          file.
+ *          file. A link with a scheme (`https:`) is not a local file and is
+ *          skipped.
  * Gate B — API truth. Every `@ekrooh/bare/*` import in a docs page resolves
  *          to a real subpath export AND a real named export of the built
  *          package (dist/ — run `npm run build:pkg` first, as `vp check`
@@ -100,6 +101,7 @@ for (const page of pages) {
   const source = read(page);
   for (const m of source.matchAll(/\]\(([^)]+\.mdx|[^)]+\.md)\)/g)) {
     const target = m[1];
+    if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
     const resolved = join(dirname(page), target);
     const exists = statSafe(resolved);
     if (!exists) fail(`${relative(ROOT, page)} — broken link: ${target}`);
