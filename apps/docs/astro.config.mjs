@@ -17,6 +17,10 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Ekrooh',
+      logo: {
+        src: './src/assets/logo.svg',
+        alt: '',
+      },
       description:
         'One soul, many platforms — the boring bootstrap for cross-platform apps on the Bare runtime.',
       social: [

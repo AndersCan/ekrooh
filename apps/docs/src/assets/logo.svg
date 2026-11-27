@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <style>.ink{fill:#1D2433}@media (prefers-color-scheme:dark){.ink{fill:#E8EAF0}}</style>
+  <defs><clipPath id="c"><rect x="8" y="8" width="22" height="22" rx="6"/><rect x="34" y="8" width="22" height="22" rx="6"/><rect x="8" y="34" width="22" height="22" rx="6"/><rect x="34" y="34" width="22" height="22" rx="6"/></clipPath></defs>
+  <g class="ink"><rect x="8" y="8" width="22" height="22" rx="6"/><rect x="34" y="8" width="22" height="22" rx="6"/><rect x="8" y="34" width="22" height="22" rx="6"/><rect x="34" y="34" width="22" height="22" rx="6"/></g>
+  <circle cx="32" cy="32" r="14" fill="#E8A33D" clip-path="url(#c)"/>
+</svg>
