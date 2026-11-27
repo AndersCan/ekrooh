@@ -40,6 +40,7 @@ import {
 } from 'node:fs';
 import { join, relative, dirname } from 'node:path';
 import { createRequire } from 'node:module';
+import { localLinkTargets } from './docs-links/docs-links.mjs';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
@@ -99,9 +100,7 @@ for (const slug of extractSlugs(read(ASTRO_CONFIG))) {
 }
 for (const page of pages) {
   const source = read(page);
-  for (const m of source.matchAll(/\]\(([^)]+\.mdx|[^)]+\.md)\)/g)) {
-    const target = m[1];
-    if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
+  for (const target of localLinkTargets(source)) {
     const resolved = join(dirname(page), target);
     const exists = statSafe(resolved);
     if (!exists) fail(`${relative(ROOT, page)} — broken link: ${target}`);
